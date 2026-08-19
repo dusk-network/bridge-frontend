@@ -18,8 +18,20 @@ test("each route delegates signing to its source wallet", () => {
   }
 });
 
+test("every route has an explicit executable mode and precision", () => {
+  const modes = new Set([
+    "migration",
+    "service-transfer",
+    "duskevm-deposit",
+    "duskevm-withdrawal",
+  ]);
+  for (const route of bridgeRoutes) {
+    assert.ok(modes.has(route.mode));
+    assert.ok(route.amountDecimals === 9 || route.amountDecimals === 18);
+  }
+});
+
 test("routes can be selected by their stable identifier", () => {
   assert.equal(getBridgeRoute("dusk-to-bsc")?.to.id, "bsc");
   assert.equal(getBridgeRoute("unsupported"), undefined);
 });
-

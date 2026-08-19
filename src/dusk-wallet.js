@@ -1,21 +1,88 @@
-import { createDuskWallet } from "@dusk/connect";
+import { createDuskApp, createDuskWallet } from "@dusk/connect";
 
-export const createDuskConnection = async () => {
-  const wallet = createDuskWallet();
+import { config } from "./config.js";
 
+let wallet;
+let app;
+
+export async function createDuskConnection() {
+  wallet = wallet ?? createDuskWallet();
+  app =
+    app ??
+    createDuskApp({
+      wallet,
+      nodeUrl: config.duskEvm.l1NodeUrl,
+      chain: { chainId: config.duskEvm.l1ChainId },
+    });
   await wallet.ready();
 
   return {
-    connect: () =>
-      wallet.connect({
-        reason: "payment_request",
-        shieldedReceiveAddress: true,
-      }),
+    app,
+    connect: () => wallet.connect({ reason: "bridge_recipient" }),
     disconnect: () => wallet.disconnect(),
     get state() {
       return wallet.state;
     },
     subscribe: (listener) => wallet.subscribe(listener),
+    wallet,
   };
-};
+}
 
+export function getDuskWallet() {
+  if (!wallet) throw new Error("The Dusk wallet is not initialized.");
+  return wallet;
+}
+
+export function getDuskApp() {
+  if (!app) throw new Error("The Dusk app is not initialized.");
+  return app;
+}
+
+export async function ensureDuskConnected(
+  chainId = config.dusk.mainnet.chainId,
+) {
+  const current = getDuskWallet();
+  if (!current.state.selectedProfile)
+    await current.connect({ reason: "bridge_recipient" });
+  if (current.state.chainId !== chainId) await current.switchChain({ chainId });
+  const profile = current.state.selectedProfile;
+  if (!profile?.account) throw new Error("Select a Dusk wallet profile first.");
+  return profile;
+}
+
+export async function sendDuskTransfer({ amountLux, chainId, memo, to }) {
+  await ensureDuskConnected(chainId);
+  return getDuskWallet().sendTransfer({
+    amount: BigInt(amountLux).toString(),
+    memo: String(memo ?? ""),
+    privacy: "public",
+    to,
+  });
+}
+
+export function buildContractCallRequest({
+  chainId: _chainId,
+  contractId,
+  depositLux,
+  fnArgs,
+  fnName,
+  gas,
+}) {
+  return {
+    ...(depositLux === undefined
+      ? {}
+      : { deposit: BigInt(depositLux).toString() }),
+    contractId,
+    display: { contractName: "Dusk bridge", methodSig: fnName },
+    fnArgs,
+    fnName,
+    gas,
+    privacy: "public",
+  };
+}
+
+export async function sendDuskContractCall(request) {
+  const { chainId } = request;
+  await ensureDuskConnected(chainId);
+  return getDuskWallet().sendContractCall(buildContractCallRequest(request));
+}
