@@ -1,0 +1,142 @@
+:root {
+  color: #f2f0eb;
+  background: #08090a;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 20rem;
+  min-height: 100vh;
+  margin: 0;
+  background:
+    radial-gradient(circle at 75% 15%, rgba(113, 177, 255, 0.16), transparent 28rem),
+    #08090a;
+}
+
+button,
+select {
+  color: inherit;
+  font: inherit;
+}
+
+button {
+  padding: 0.75rem 1rem;
+  border: 1px solid #71b1ff;
+  border-radius: 0.5rem;
+  background: #71b1ff;
+  color: #08090a;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+main {
+  width: min(68rem, calc(100% - 2rem));
+  margin: 0 auto;
+}
+
+.masthead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.5rem 0;
+}
+
+.wordmark,
+.eyebrow {
+  color: #71b1ff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.hero {
+  max-width: 48rem;
+  padding: 8rem 0 4rem;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 1.5rem;
+  font-size: clamp(2.75rem, 8vw, 5.5rem);
+  letter-spacing: -0.055em;
+  line-height: 0.95;
+}
+
+.lede {
+  max-width: 40rem;
+  color: #a8adb4;
+  font-size: 1.15rem;
+  line-height: 1.6;
+}
+
+.bridge-card {
+  display: grid;
+  gap: 1.5rem;
+  max-width: 42rem;
+  margin-bottom: 5rem;
+  padding: 1.5rem;
+  border: 1px solid #282c32;
+  border-radius: 1rem;
+  background: rgba(17, 19, 22, 0.9);
+}
+
+.bridge-card label {
+  display: grid;
+  gap: 0.6rem;
+  color: #a8adb4;
+  font-size: 0.85rem;
+}
+
+select {
+  width: 100%;
+  padding: 0.9rem;
+  border: 1px solid #353a43;
+  border-radius: 0.5rem;
+  background: #0d0f12;
+}
+
+.wallet-status {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  background: #0d0f12;
+}
+
+.notice {
+  margin-bottom: 0;
+  color: #858b94;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+@media (max-width: 36rem) {
+  .masthead,
+  .wallet-status {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .hero {
+    padding-top: 5rem;
+  }
+}
+
