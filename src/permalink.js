@@ -25,9 +25,18 @@ export function receiptUrl(hash, location = globalThis.location) {
  * - `{ page: "transfers" }`
  * - `{ page: "lookup" }`
  */
+/** A path part as text; a malformed escape such as "%" stays as typed. */
+function decodePart(part) {
+  try {
+    return decodeURIComponent(part);
+  } catch {
+    return part;
+  }
+}
+
 export function parseLocation(hash) {
   const path = String(hash ?? "").replace(/^#\/?/u, "").replace(/\/+$/u, "");
-  const [head, ...rest] = path.split("/").map((part) => decodeURIComponent(part));
+  const [head, ...rest] = path.split("/").map(decodePart);
   if (head === "move" && /^[a-z-]+$/u.test(rest[0] ?? "")) return { page: "move", task: rest[0] };
   if (head === "transfer") {
     const value = canonicalHash(rest[0]);

@@ -4,6 +4,7 @@ import { config } from "./config.js";
 import { createContractReader, contractFacade } from "./contract-reader.js";
 import { createDriverLoader, driverJson } from "./data-driver.js";
 import { createDiscovery } from "./discovery.js";
+import { createDuskNames } from "./dusk-names.js";
 import { createDuskNode } from "./dusk-node.js";
 import { getDuskWallet, sendDuskContractCall } from "./dusk-wallet.js";
 import { createEvmReads } from "./evm-reads.js";
@@ -32,8 +33,10 @@ export function createRpc(urls, fetch = globalThis.fetch) {
 }
 
 /**
- * JSON-RPC batches: several calls in one request, each answered in order,
- * null where a call failed. At most 20 calls go in one request.
+ * JSON-RPC batches: several calls in one request, each answered in order.
+ * A call the node answered with an error, or not at all, is undefined, so
+ * "not found" (null) and "couldn't ask" stay apart. At most 20 calls go in
+ * one request.
  */
 export function createRpcBatch(urls, fetch = globalThis.fetch) {
   return async function rpcBatch(network, calls) {
@@ -52,7 +55,7 @@ export function createRpcBatch(urls, fetch = globalThis.fetch) {
       const byId = new Map((Array.isArray(body) ? body : [body]).map((item) => [item?.id, item]));
       for (let index = 0; index < chunk.length; index += 1) {
         const item = byId.get(index);
-        results.push(item && !item.error ? item.result : null);
+        results.push(item && !item.error ? item.result : undefined);
       }
     }
     return results;
@@ -146,6 +149,8 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
   return Object.freeze({
     discovery,
     evmReads,
+    // The connected account's verified .dusk name, where Dusk Wallet sends none.
+    names: createDuskNames({ chainId: cfg.dusk.chainId, nodeUrl: cfg.dusk.nodeUrl }),
     node,
     portalRequest,
     reader,

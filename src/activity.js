@@ -70,9 +70,17 @@ function save(items, storage) {
   return kept;
 }
 
-/** Replaces the kept list, newest first as given. */
+/** When a transfer happened, as far as this browser knows. */
+const whenOf = (item) => item.sourceAt ?? item.destinationAt ?? (Date.parse(item.createdAt ?? "") || 0);
+
+/**
+ * Replaces the kept list with `items`, newest first. When there are more
+ * than fit, the oldest go: a transfer found now is kept even if the list
+ * is full, unless it's older than everything kept.
+ */
 export function saveActivity(items, storage = defaultStorage()) {
-  return storage ? save(items.filter(validItem), storage) : items.slice(0, MAX_ITEMS);
+  const newestFirst = items.filter(validItem).sort((a, b) => whenOf(b) - whenOf(a));
+  return storage ? save(newestFirst, storage) : newestFirst.slice(0, MAX_ITEMS);
 }
 
 export function readActivity(storage = defaultStorage()) {

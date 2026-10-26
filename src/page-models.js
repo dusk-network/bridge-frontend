@@ -48,7 +48,7 @@ export function landingTasks(cfg, tasks, { duskInstalled = false, phone = false 
       meta = `Usually arrives within a minute · network fee up to ${formatFee(fees("duskevm-deposit").send.maxLux, 9, { round: "up" })} DUSK`;
       phoneTag = { ok: false, text: "Needs a computer" };
     } else if (route.mode === "duskevm-withdrawal") {
-      meta = `Three steps over about ${roughDuration(WITHDRAWAL_REPORT_SECONDS + WITHDRAWAL_WAITING_PERIOD_SECONDS)} · up to ${formatFee(fees("duskevm-withdrawal").prove.maxLux, 9, { round: "up" })} DUSK per step on Dusk`;
+      meta = `Three steps over about ${roughDuration(WITHDRAWAL_REPORT_SECONDS + WITHDRAWAL_WAITING_PERIOD_SECONDS)} · up to ${formatFee(fees("duskevm-withdrawal").claim.maxLux, 9, { round: "up" })} DUSK per step on Dusk`;
       phoneTag = { ok: true, text: "Step 1 works here. Prove and claim need a computer." };
     } else {
       meta = `Usually within ${roughDuration(cfg.service?.delaySeconds ?? 3_600)} · ${formatDusk(cfg.service.feeLux)} bridge fee, taken from the amount`;
@@ -170,13 +170,82 @@ const copyIcon =
 const extIcon =
   '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 6h10v10"/><path d="M18 6 6 18"/></svg>';
 
+/**
+ * A Dusk review's fee rows and checks at the price its request was built
+ * with: the node's price can have risen since the form read it, for a
+ * higher fee or a balance that no longer covers it.
+ */
+export function pricedReview(route, { amount, cfg, destination, duskAccount, evm, gasPrice, reads }) {
+  const quote = buildQuote(route, amount, { balance: reads.duskBalance, cfg, gasPrice });
+  return {
+    checks: reviewChecks(route, { cfg, destination, duskAccount, evm, quote, reads }),
+    feeRows: quote.rows.filter((row) => !["send", "receive"].includes(row.key)),
+  };
+}
+
+/**
+ * What the form offers to send, in the one number format of the form: up to
+ * 4 decimals, trimmed, as the balance above it. Max leaves the network fee
+ * where it comes from the same balance.
+ */
+export function availableLine(route, maxLux) {
+  if (maxLux === null || maxLux === undefined) return { available: "", availableLabel: "", canMax: false };
+  const migration = route.mode === "migration";
+  return {
+    available: migration ? `${formatLux(maxLux, 4)} old DUSK` : formatDusk(maxLux, 4),
+    availableLabel: migration ? "Available" : "Available after fees",
+    canMax: maxLux > 0n,
+  };
+}
+
+/**
+ * What a proof or a claim adds to what's public: the Dusk account that sends
+ * it, by its .dusk name where Dusk Wallet sent one, is linked to the
+ * withdrawal for good.
+ */
+export function actionPrivacy(kind, base, { account = "", name = "" } = {}) {
+  const who = name || (account ? short(account) : "");
+  return `${base} Your Dusk account${who ? ` ${who}` : ""} will be visible too, as the account that ${kind === "prove" ? "proved" : "claimed"} it.`;
+}
+
+/**
+ * The top of a proof's or a claim's review: what the step costs at most
+ * (`maxLux`) and what moves. A proof moves no DUSK; a claim pays the
+ * withdrawal's account. When that isn't Dusk Wallet's `account`, it says so,
+ * by its .dusk `name` where there is one.
+ */
+export function actionLead(kind, entry, { account = "", amountLux = null, maxLux, name = "" }) {
+  const moving = amountLux === null ? "The DUSK" : `The ${formatLux(amountLux)} DUSK`;
+  const cost = formatFee(BigInt(maxLux), 9, { round: "up" });
+  const pays = entry.destination ?? "";
+  const payee = !pays ? "the withdrawal's Dusk account" : /^[0-9a-f]{64}$/u.test(pays) ? `the Dusk contract ${short(pays)}` : short(pays);
+  const notYours = account && pays && pays !== account ? `This withdrawal pays ${payee}, not ${name ? `your ${name}` : "your account"}.` : "";
+  return kind === "prove"
+    ? {
+        amount: cost,
+        label: "Proving costs up to",
+        line: `No DUSK moves now. ${moving} stays in the DuskEVM bridge until it's claimed, about 7 days after the proof.`,
+        notYours,
+      }
+    : {
+        amount: amountLux === null ? "" : formatLux(amountLux),
+        chain: "dusk",
+        label: "You claim",
+        line: `To ${payee} on Dusk · costs up to ${cost} DUSK`,
+        notYours,
+      };
+}
+
 /** The receipt of one transfer. No balances: the link may be shared. */
-export function receiptModel(entry, { cfg, now = Date.now(), route, timeZone, url }) {
-  const view = transferView(entry, { cfg, now, route, timeZone, year: true });
+export function receiptModel(entry, { cfg, now = Date.now(), own = null, route, submitter = null, timeZone, url }) {
+  const view = transferView(entry, { cfg, now, route, submitter, timeZone, year: true });
   const from = networkName(cfg, route.from.id);
   const to = networkName(cfg, route.to.id);
-  const fromAccount = entry.sender ? `<code class="mono">${html(short(entry.sender))}</code> on ${html(from)}` : `${html(from)}`;
-  const toAccount = entry.destination ? `<code class="mono">${html(short(entry.destination))}</code> on ${html(to)}` : html(to);
+  // Your own Dusk account by its .dusk name, others by their short code.
+  const named = (account) =>
+    own?.name && account === own.account ? html(own.name) : `<code class="mono">${html(short(account))}</code>`;
+  const fromAccount = entry.sender ? `${named(entry.sender)} on ${html(from)}` : `${html(from)}`;
+  const toAccount = entry.destination ? `${named(entry.destination)} on ${html(to)}` : html(to);
   const time = (ms) => (ms ? formatDateTime(ms, { timeZone, year: true }) : "");
   let caption = "";
   if (view.status === "completed") {
@@ -214,7 +283,10 @@ export function receiptModel(entry, { cfg, now = Date.now(), route, timeZone, ur
     });
     const claim = entry.claimHash ?? pendingClaim;
     details.push({
-      html: claim ? txHtml(cfg, "dusk", claim, "claim transaction") : `<span class="t2">${view.status === "failed" ? "None" : "Not claimed yet"}</span>`,
+      // Claimed outside this browser: finalized, without its transaction here.
+      html: claim
+        ? txHtml(cfg, "dusk", claim, "claim transaction")
+        : `<span class="t2">${view.status === "failed" ? "None" : entry.stage === "finalized" ? "Claimed" : "Not claimed yet"}</span>`,
       label: "Claim on Dusk",
     });
   } else
@@ -231,7 +303,10 @@ export function receiptModel(entry, { cfg, now = Date.now(), route, timeZone, ur
   if (view.status === "pending" && early) notes.push({ html: view.late ? `<b>${html(view.lateText)}</b> ${lateLine(route, cfg)}` : lateLine(route, cfg) });
   if (view.trackingError) notes.push({ html: html(view.trackingError) });
 
-  const fees = route.mode === "duskevm-withdrawal" ? routeDuskFees(route, { gasPrice: 1n }) : null;
+  const fees =
+    route.mode === "duskevm-withdrawal"
+      ? routeDuskFees(route, { gasPrice: 1n, withdrawalGas: entry.withdrawalGas ? BigInt(entry.withdrawalGas) : undefined })
+      : null;
   return {
     actionFee: view.action ? `Network fee up to ${formatFee((view.action.kind === "prove" ? fees.prove : fees.claim).maxLux, 9, { round: "up" })} DUSK, from your public balance` : "",
     caption,
@@ -253,12 +328,12 @@ function txHtml(cfg, network, hash, label) {
 // My transfers
 // ---------------------------------------------------------------------------
 
-export function transfersModel(entries, { accounts, cfg, now = Date.now(), routeOf, timeZone }) {
+export function transfersModel(entries, { accounts, cfg, now = Date.now(), routeOf, submitter = null, timeZone }) {
   const shown = entries.filter((entry) => routeOf(entry.routeId) && shownFor(entry, accounts));
   const groups = groupTransfers(shown, routeOf);
   const row = (entry) => {
     const route = routeOf(entry.routeId);
-    const view = transferView(entry, { cfg, now, route, timeZone });
+    const view = transferView(entry, { cfg, now, route, submitter, timeZone });
     return {
       action: view.action,
       amountText: view.amountText,

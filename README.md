@@ -151,8 +151,11 @@ VITE_DUSKEVM_DISPUTE_GAME_FACTORY_CONTRACT_ID=<from the address book>
 Some page content appears only when configured, since none of it is guessed:
 the support contact (`VITE_SUPPORT_URL`, `VITE_SUPPORT_LABEL`), the other
 network's bridge site (`VITE_MAINNET_BRIDGE_URL`, `VITE_TESTNET_BRIDGE_URL`),
-Terms, Privacy and Status links, and the operator named per route
-(`VITE_MIGRATION_OPERATOR`, `VITE_SERVICE_OPERATOR`, `VITE_DUSKEVM_OPERATOR`).
+Terms, Privacy and Status links, a guide per route (`VITE_DOCS_MIGRATION_URL`,
+`VITE_DOCS_SERVICE_URL`, `VITE_DOCS_DUSKEVM_URL`; the docs' bridge guides
+describe the web wallet's bridge), and the operator named per route in the
+Contracts sheet and the footer (`VITE_MIGRATION_OPERATOR`,
+`VITE_SERVICE_OPERATOR`, `VITE_DUSKEVM_OPERATOR`).
 
 The page uses the system's fonts: the Söhne files the mockups used aren't
 licensed for this repository.

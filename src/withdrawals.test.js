@@ -386,3 +386,25 @@ test("only the bridge's own DUSK withdrawals are followed, proved or claimed", a
     assert.equal(sent.length, 0, name);
   }
 });
+
+test("a proof this account already has isn't prepared again", async () => {
+  // Proven by this account (the setup's submitter): ready to claim, still
+  // waiting, rejected with no newer output to prove against, or claimed.
+  const rejected = async () => {
+    throw new Error("OptimismPortal2: invalid dispute game");
+  };
+  const cases = [
+    [{}, "This account already proved this withdrawal. You can claim it now."],
+    [{ proofMaturity: 604_800 }, "This account already proved this withdrawal. Claim it once the waiting period ends."],
+    [{ gameStatus: 1, preflight: rejected }, "The existing proof was rejected, but no replacement output proposal is available yet."],
+    [{ finalized: true }, "This withdrawal is already claimed."],
+  ];
+  for (const [options, message] of cases) {
+    const { sent, withdrawals } = setup(options);
+    await assert.rejects(withdrawals.prepareProve(TX), { message });
+    await assert.rejects(withdrawals.proveWithdrawal(TX), { message });
+    assert.deepEqual(sent, []);
+  }
+  // Not proven yet: it goes on to look for the output to prove against.
+  await assert.rejects(setup({ provenAt: 0n }).withdrawals.prepareProve(TX), /No dispute games have been proposed yet/u);
+});

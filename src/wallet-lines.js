@@ -5,7 +5,7 @@
 
 import { sha256Hex, toHex } from "./data-driver.js";
 import { aboutFee, formatDusk, formatFee, formatLux, formatUnitsGrouped } from "./format.js";
-import { networkName } from "./names.js";
+import { OldTokenName, networkName } from "./names.js";
 
 const WEI_PER_LUX = 1_000_000_000n;
 
@@ -47,7 +47,7 @@ export function approveLines({ amountLux, cfg, fee, network }) {
   const chain = cfg.evmNetworks[network];
   return [
     chainLine(cfg, network),
-    { address: chain.tokenContract, label: "Token", network, value: "Old DUSK" },
+    { address: chain.tokenContract, label: "Token", network, value: OldTokenName(cfg, network) },
     { address: chain.migrationContract, label: "Spender", network, value: "Dusk migration contract" },
     {
       label: "Spending cap",

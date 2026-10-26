@@ -259,8 +259,7 @@ a.row:hover { background: rgb(242 240 235 / 3%); }
 .avail { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; margin-top: 8px; color: var(--text-2); font-size: 13.5px; }
 .mini { height: 28px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--surface-2); color: var(--text); font-size: 13px; font-weight: 500; }
 [data-region="quote"] { margin-top: 12px; }
-.col > .btn.full { margin-top: 16px; }
-.col > [data-region="review-hint"]:empty { display: none; }
+.cta-bar > [data-region="review-hint"]:empty { display: none; }
 .col > [data-region="review-hint"] { margin-top: 8px; }
 
 /* ------------------------------------------------------------------ */
@@ -288,6 +287,10 @@ a.row:hover { background: rgb(242 240 235 / 3%); }
 .flow .v { font-size: 24px; line-height: 1.2; }
 .flow .v .u { margin-left: 6px; color: var(--text-2); font-size: 15px; }
 .flow .w { display: flex; align-items: center; gap: 7px; margin-top: 4px; color: var(--text-2); font-size: 13px; }
+.flow.lead { grid-template-columns: 1fr; }
+/* The form's Review button stays in view on a short screen. */
+.cta-bar { position: sticky; bottom: 0; z-index: 2; padding: 14px 0 12px; background: linear-gradient(to bottom, rgb(16 16 16 / 0%), var(--bg) 14px); }
+.cta-bar .small { margin-top: 6px; }
 .flow .dn { color: var(--text-3); }
 .flow .dn svg { transform: rotate(180deg); }
 .ck { display: flex; flex-direction: column; gap: 8px; margin: 14px 4px; }

@@ -11,6 +11,8 @@ import {
   transferSubline,
   transferView,
 } from "./transfer-view.js";
+import { receiptModel } from "./page-models.js";
+import { receiptPage, transferRow } from "./views.js";
 import { PROVEN_BY_OTHER_ACCOUNT } from "./withdrawal-lifecycle.js";
 
 const cfg = {
@@ -102,7 +104,7 @@ test("a withdrawal shows its three steps, their times and the next action", () =
   assert.equal(ready.steps[0].atText, "Fri 23 Oct, 16:20 CEST");
   assert.equal(ready.steps[1].detail, "Ready now · network fee up to 0.05 DUSK");
   assert.equal(ready.steps[2].detail, "About 7 days after the proof");
-  assert.deepEqual(ready.action, { failure: "", kind: "prove", label: "Prove on Dusk" });
+  assert.deepEqual(ready.action, { blocked: "", failure: "", kind: "prove", label: "Prove on Dusk" });
   assert.equal(ready.title, "Prove your withdrawal of 200 DUSK");
   assert.deepEqual(ready.tracker.map(({ label }) => label), ["Sent", "Prove now", "Claim"]);
 
@@ -111,6 +113,23 @@ test("a withdrawal shows its three steps, their times and the next action", () =
   assert.equal(other.steps[1].detail, PROVEN_BY_OTHER_ACCOUNT);
   assert.equal(other.action.kind, "prove");
   assert.equal(other.tracker[1].label, "Proven by another");
+
+  // Ready to claim with the proof this browser sent: only that account can.
+  const proved = { hash: L2_HASH, id: "w", proofAccount: ACCOUNT, proofSubmitter: `0x${"2c".repeat(20)}`, proveHash: "ab".repeat(32), sourceAt: sentAt, stage: "ready_to_finalize", status: "pending" };
+  const claimWith = (submitter) => transferView(proved, { cfg, route: withdrawal, submitter }).action;
+  assert.equal(claimWith(`0x${"2C".repeat(20)}`).blocked, "");
+  assert.equal(claimWith(null).blocked, "");
+  // A prover counts only once a proof was sent from here, not as a guess.
+  assert.equal(transferView({ ...proved, proveHash: undefined }, { cfg, route: withdrawal, submitter: `0x${"3d".repeat(20)}` }).action.blocked, "");
+  const elsewhere = claimWith(`0x${"3d".repeat(20)}`);
+  assert.equal(elsewhere.blocked, "Switch Dusk Wallet to 21n5nc…fMMLNz, the account that proved it. Only that account can claim.");
+  assert.equal(transferView({ ...proved, proofAccount: undefined }, { cfg, route: withdrawal, submitter: `0x${"3d".repeat(20)}` }).action.blocked, "Switch Dusk Wallet to the account that proved it. Only that account can claim.");
+  // The receipt and the list say so in place of the Claim button.
+  const receipt = receiptPage({ ...receiptModel(proved, { cfg, route: withdrawal, submitter: `0x${"3d".repeat(20)}`, url: "https://bridge.example/#/transfer/x" }), canAct: true });
+  assert.match(receipt, /<p class="note">.*Switch Dusk Wallet to 21n5nc…fMMLNz, the account that proved it/u);
+  assert.doesNotMatch(receipt, /data-action="withdrawal-finalize"/u);
+  assert.match(transferRow({ action: elsewhere, amountText: "200 DUSK", href: "#", id: "w", pair: ["dusk-evm", "dusk"], status: "pending", statusWord: "Pending", subline: "", title: "DuskEVM to Dusk" }), /Switch account to claim/u);
+  assert.match(receiptPage({ ...receiptModel(proved, { cfg, route: withdrawal, submitter: `0x${"2c".repeat(20)}`, url: "https://bridge.example/#/transfer/x" }), canAct: true }), /data-action="withdrawal-finalize"/u);
 });
 
 test("a waiting withdrawal counts down to its claim time, across a clock change", () => {
@@ -176,4 +195,16 @@ test("wallet errors say what happened, naming the wallet", () => {
   assert.match(friendlyWalletError({ code: 4100, message: "Wallet locked" }), /^The Dusk wallet is locked/u);
   assert.match(friendlyWalletError({ code: 4100 }, "evm"), /^The EVM wallet is locked/u);
   assert.match(friendlyWalletError({ code: 4900 }, "evm"), /^The EVM wallet disconnected/u);
+});
+
+test("a rejected proof isn't shown as proven, and promises no claim", () => {
+  const at = Date.UTC(2026, 9, 20, 12);
+  // The Portal rejected the proof and a new output is out: prove again.
+  const again = transferView({ hash: L2_HASH, proveAt: at, provenAt: at, sourceAt: at - 3_600_000, stage: "ready_to_prove", status: "pending" }, { cfg, route: withdrawal });
+  assert.deepEqual([again.steps[1].title, again.steps[1].state], ["Prove on Dusk", "turn"]);
+  assert.equal(again.action.kind, "prove");
+  // Rejected, with no new output yet: no claim date, here or in the list.
+  const rejected = { hash: L2_HASH, proofRejected: true, provenAt: at, sourceAt: at - 3_600_000, stage: "proven_waiting", status: "pending" };
+  const view = transferView(rejected, { cfg, now: at + 86_400_000, route: withdrawal });
+  assert.equal(transferSubline(view, rejected, withdrawal, cfg, { now: at + 86_400_000 }), "The proof was rejected. Prove again once DuskEVM reports a new output.");
 });

@@ -5,9 +5,9 @@ import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 import { contractGroups, explorerAddressUrl } from "./contracts.js";
 import { bridgeTasks } from "./names.js";
-import { landingTasks, receiptModel, reviewChecks, transfersModel } from "./page-models.js";
+import { actionLead, actionPrivacy, availableLine, landingTasks, pricedReview, receiptModel, reviewChecks, transfersModel } from "./page-models.js";
 import { buildQuote } from "./quote.js";
-import { contractsSheet, formPage, landing, networkSheet, receiptPage, reviewSheet, transfersPage } from "./views.js";
+import { contractsSheet, footer, formPage, formRegions, landing, networkSheet, receiptPage, reviewSheet, transfersPage } from "./views.js";
 import { approveLines, argsSummary, duskCallLines, duskTransferLines, migrateLines } from "./wallet-lines.js";
 
 const DUSKEVM = {
@@ -40,7 +40,8 @@ test("the start page gives each task its time and cost, and on phones whether it
     [
       ["Move old DUSK to Dusk", "About an hour · two wallet steps · a network fee in ETH", "Works on this phone"],
       ["Move DUSK to DuskEVM", "Usually arrives within a minute · network fee up to 0.005 DUSK", "Needs a computer"],
-      ["Move DUSK from DuskEVM to Dusk", "Three steps over about 7 days · up to 0.05 DUSK per step on Dusk", "Step 1 works here. Prove and claim need a computer."],
+      // A claim's limit is 50M plus the withdrawal's own gas, so the most a step costs is above 0.05.
+      ["Move DUSK from DuskEVM to Dusk", "Three steps over about 7 days · up to 0.051 DUSK per step on Dusk", "Step 1 works here. Prove and claim need a computer."],
       ["Send DUSK to Ethereum (Sepolia)", "Usually within an hour · 1 DUSK bridge fee, taken from the amount", "Needs a computer"],
     ],
   );
@@ -84,13 +85,13 @@ test("the review checks the facts first, then lists the wallet's lines with full
     canConfirm: true,
     cfgLinks: explorer,
     checks,
-    confirmLabel: "Approve 1,000 DUSK in MetaMask",
+    confirmLabel: "Approve 1,000 old DUSK in MetaMask",
     feeRows: quote.rows.filter((row) => !["send", "receive"].includes(row.key)),
     privacy: "x",
     receive: { amount: "1,000", chain: "dusk", unit: "DUSK", where: "Dusk" },
     send: { amount: "1,000", chain: "ethereum", unit: "old DUSK", where: "Ethereum (Sepolia)" },
     steps: [
-      { current: true, lines: approve, title: "Approve exactly 1,000 DUSK", walletName: "MetaMask", what: "", when: "Now" },
+      { current: true, lines: approve, title: "Approve exactly 1,000 old DUSK", walletName: "MetaMask", what: "", when: "Now" },
       { current: false, lines: migrate, title: "Migrate", walletName: "MetaMask", what: "", when: "After step 1" },
     ],
     sub: "",
@@ -102,7 +103,7 @@ test("the review checks the facts first, then lists the wallet's lines with full
     assert.ok(sheet.includes(`data-copy="${address}"`), address);
   }
   assert.ok(sheet.includes(`https://sepolia.etherscan.io/address/${testnet.evmNetworks.ethereum.migrationContract}`));
-  assert.match(sheet, />Cancel<\/button><button type="button" class="btn pri" data-action="confirm" >Approve 1,000 DUSK in MetaMask</u);
+  assert.match(sheet, />Cancel<\/button><button type="button" class="btn pri" data-action="confirm" >Approve 1,000 old DUSK in MetaMask</u);
   assert.ok(!sheet.includes(TIMES));
 });
 
@@ -171,6 +172,18 @@ test("a receipt is a record without balances, with both hashes and its own link"
   const supported = profile("testnet", { ...DUSKEVM, VITE_SUPPORT_LABEL: "Dusk support", VITE_SUPPORT_URL: "https://support.example.org" });
   const withSupport = receiptModel({ ...entry, status: "pending" }, { cfg: supported, route: routesOf(supported)["duskevm-deposit"], url });
   assert.match(withSupport.notes.at(-1).html, /Contact <a href="https:\/\/support\.example\.org" target="_blank" rel="noreferrer">Dusk support<\/a> with the receipt link\./u);
+});
+
+test("a claim's fee maximum on the receipt uses the withdrawal's own gas once it's known", () => {
+  const ready = { amountLux: "1000000000", hash: `0x${"0c".repeat(32)}`, id: "w", routeId: "dusk-evm-to-dusk", stage: "ready_to_finalize", status: "pending" };
+  const url = "https://bridge.example.org/#/transfer/w";
+  // Unknown yet: the bound (1M on top of 50M).
+  assert.equal(receiptModel(ready, { cfg: testnet, route: T["duskevm-withdrawal"], url }).actionFee, "Network fee up to 0.051 DUSK, from your public balance");
+  // Known: 50M plus what the withdrawal asks for.
+  assert.equal(
+    receiptModel({ ...ready, withdrawalGas: "9000000" }, { cfg: testnet, route: T["duskevm-withdrawal"], url }).actionFee,
+    "Network fee up to 0.059 DUSK, from your public balance",
+  );
 });
 
 test("My transfers groups the connected accounts' transfers and offers the next action", () => {
@@ -252,4 +265,101 @@ test("the form labels its amount and says what is public", () => {
   assert.match(html, /Leaves your Dusk account: <span class="num">up to 25\.005 DUSK<\/span>/u);
   assert.match(html, /<b>Public\.<\/b>/u);
   assert.ok(!html.includes(TIMES));
+});
+
+test("everything in the form that follows balances is a region the page refreshes while you type", () => {
+  const quote = buildQuote(T["duskevm-deposit"], "25", { balance: 1_483_920_000_000n, cfg: testnet, gasPrice: 1n });
+  const vm = {
+    amount: "25",
+    amountError: "",
+    available: "1,483.915 DUSK",
+    canMax: true,
+    canReview: true,
+    from: { balance: '<b class="num">1,483.92 DUSK</b>public balance', chain: "dusk", label: "From Dusk", value: "x" },
+    privacy: "p",
+    quote,
+    reviewLabel: "Review",
+    routeId: "dusk-to-dusk-evm",
+    sources: [{ id: "dusk-to-dusk-evm", name: "Dusk" }],
+    title: "Move DUSK to DuskEVM",
+    to: { chain: "dusk-evm", label: "To DuskEVM", value: EVM },
+    unit: "DUSK",
+  };
+  const regions = formRegions(vm);
+  assert.match(regions.from, /1,483\.92 DUSK/u);
+  assert.match(regions.avail, /Available <span class="num">1,483\.915 DUSK<\/span><\/span><button type="button" class="mini" data-action="max">Max<\/button>/u);
+  const page = formPage(vm);
+  // Each region is rendered as the refresh will replace it.
+  assert.ok(page.includes(`<div data-region="from">${regions.from}</div>`));
+  assert.ok(page.includes(`data-region="avail">${regions.avail}</div>`));
+  for (const name of Object.keys(regions)) assert.ok(page.includes(`data-region="${name}"`), name);
+});
+
+test("a proof's review says it moves no DUSK and what it costs; a claim, where the DUSK goes", () => {
+  const amountLux = 1_008n * 10n ** 9n;
+  const other = { destination: testnet.service.account };
+  // Paying another account than Dusk Wallet's says so, by the wallet's .dusk name.
+  const prove = actionLead("prove", other, { account: ACCOUNT, amountLux, maxLux: 50_000_000n, name: "alice.dusk" });
+  assert.deepEqual(prove, {
+    amount: "0.05",
+    label: "Proving costs up to",
+    line: "No DUSK moves now. The 1,008 DUSK stays in the DuskEVM bridge until it's claimed, about 7 days after the proof.",
+    notYours: "This withdrawal pays 25z9o6…5Etftt, not your alice.dusk.",
+  });
+  const claim = actionLead("finalize", { destination: ACCOUNT }, { account: ACCOUNT, amountLux, maxLux: 50_519_542n });
+  assert.deepEqual(claim, { amount: "1,008", chain: "dusk", label: "You claim", line: "To 21n5nc…fMMLNz on Dusk · costs up to 0.051 DUSK", notYours: "" });
+  assert.equal(actionLead("finalize", other, { account: ACCOUNT, amountLux, maxLux: 1n }).notYours, "This withdrawal pays 25z9o6…5Etftt, not your account.");
+
+  const sheet = reviewSheet({
+    canConfirm: true, cfgLinks: explorer, checks: [], confirmLabel: "Prove on Dusk", feeRows: [], lead: prove,
+    privacy: "x", steps: [], sub: "", walletCheckName: "Dusk Wallet",
+  });
+  assert.match(sheet, /<div class="k">Proving costs up to<\/div><div class="v num">0\.05<span class="u">DUSK<\/span>/u);
+  assert.match(sheet, /This withdrawal pays 25z9o6…5Etftt, not your alice\.dusk\./u);
+  assert.doesNotMatch(sheet, /You send|You receive/u);
+});
+
+test("the form shows one number format: the balance and what's available, to 4 decimals", () => {
+  // 1,483.112423314 DUSK less the 0.005 maximum fee.
+  assert.deepEqual(availableLine(T["duskevm-deposit"], 1_483_107_423_314n), { available: "1,483.1074 DUSK", availableLabel: "Available after fees", canMax: true });
+  assert.deepEqual(availableLine(T.migration, 2_500_000_000_000n), { available: "2,500 old DUSK", availableLabel: "Available", canMax: true });
+  assert.equal(availableLine(T["duskevm-deposit"], null).available, "");
+});
+
+test("a Dusk review's fees and balance check follow the price its request was built with", () => {
+  const reads = { duskBalance: 106_000_000n, gasPrice: 1n };
+  const context = { amount: "0.1", cfg: testnet, destination: EVM, duskAccount: ACCOUNT, evm: { account: EVM }, reads };
+  // 0.1 DUSK and a fee of up to 0.005 fit in 0.106; at a doubled price, they don't.
+  const asRead = pricedReview(T["duskevm-deposit"], { ...context, gasPrice: 1n });
+  assert.equal(asRead.checks[0].ok, true);
+  const risen = pricedReview(T["duskevm-deposit"], { ...context, gasPrice: 2n });
+  assert.equal(risen.checks[0].ok, false);
+  assert.equal(risen.feeRows.find((row) => row.key === "fee").value, "up to 0.01 DUSK");
+});
+
+test("the footer names who runs each route only where that's configured", () => {
+  const bare = footer({ links: {}, officialSite: "" });
+  assert.doesNotMatch(bare, /Run by|How the bridge works/u);
+  const named = footer({
+    links: { privacy: "https://example.org/privacy", terms: "https://example.org/terms" },
+    officialSite: "",
+    operators: [{ name: "Example B.V.", route: "Dusk to BNB Smart Chain" }, { name: "Dusk Network", route: "DuskEVM" }],
+  });
+  assert.match(named, /<p class="small t2 run-by">Run by Example B\.V\. for Dusk to BNB Smart Chain · Dusk Network for DuskEVM\.<\/p>/u);
+  assert.match(named, />Terms<\/a><a href="https:\/\/example\.org\/privacy" target="_blank" rel="noreferrer">Privacy<\/a>/u);
+});
+
+test("a proof's review says the account that proves becomes public too", () => {
+  assert.equal(
+    actionPrivacy("prove", "The amount is public.", { account: ACCOUNT, name: "alice.dusk" }),
+    "The amount is public. Your Dusk account alice.dusk will be visible too, as the account that proved it.",
+  );
+  assert.match(actionPrivacy("finalize", "x", { account: ACCOUNT }), /Your Dusk account 21n5nc…fMMLNz will be visible too, as the account that claimed it\.$/u);
+  assert.match(actionPrivacy("prove", "x"), /Your Dusk account will be visible too/u);
+});
+
+test("a withdrawal claimed outside this browser reads as claimed", () => {
+  const entry = { amountLux: "1000000000", destination: ACCOUNT, hash: `0x${"34".repeat(32)}`, id: "w", routeId: "dusk-evm-to-dusk", sender: EVM, stage: "finalized", status: "completed" };
+  const model = receiptModel(entry, { cfg: testnet, route: T["duskevm-withdrawal"], url: "https://bridge.example/#/transfer/x" });
+  assert.match(model.details.find((row) => row.label === "Claim on Dusk").html, />Claimed</u);
 });

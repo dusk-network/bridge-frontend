@@ -30,3 +30,9 @@ test("every page reads back from its link", () => {
   assert.deepEqual(parseLocation("#/transfer/0x1234"), { page: "lookup", query: "0x1234" });
   assert.deepEqual(parseLocation("#/somewhere/else"), { page: "home" });
 });
+
+test("a malformed link opens a page instead of failing", () => {
+  assert.deepEqual(parseLocation("#/lookup/%"), { page: "lookup", query: "%" });
+  assert.deepEqual(parseLocation("#/transfer/%E0%A4%A"), { page: "lookup", query: "%E0%A4%A" });
+  assert.deepEqual(parseLocation("#/%"), { page: "home" });
+});

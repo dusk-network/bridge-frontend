@@ -640,6 +640,8 @@ export function createTracking(deps) {
         : entry.amountLux,
       destination: current.details?.recipient ?? entry.destination,
       sender: current.details?.from ?? entry.sender,
+      // Claiming adds this to its gas limit: the quote's maximum uses it.
+      withdrawalGas: current.withdrawal?.gasLimit === undefined ? entry.withdrawalGas : String(current.withdrawal.gasLimit),
       proofRejected: current.proofRejected ?? false,
       provenByOther: current.provenByOther ?? false,
       provenAt:

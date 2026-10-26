@@ -62,6 +62,19 @@ export function friendlyWalletError(error, wallet = "dusk") {
   return error?.shortMessage ?? (error instanceof Error ? error.message : String(error));
 }
 
+/**
+ * Whether Dusk Wallet's account isn't the one whose proof the withdrawal
+ * waits on: the Portal lets only the account that proved claim with it.
+ */
+export const proverMismatch = (entry, submitter) =>
+  Boolean(entry?.proveHash && entry.proofSubmitter && submitter && String(entry.proofSubmitter).toLowerCase() !== String(submitter).toLowerCase());
+
+/** What to do when another account proved it. */
+export const switchToProver = (entry) =>
+  entry?.proofAccount
+    ? `Switch Dusk Wallet to ${short(entry.proofAccount)}, the account that proved it. Only that account can claim.`
+    : "Switch Dusk Wallet to the account that proved it. Only that account can claim.";
+
 const amountOf = (entry) =>
   entry.amountLux !== undefined && entry.amountLux !== null ? BigInt(entry.amountLux) : null;
 
@@ -113,11 +126,14 @@ function claimTiming(entry, now) {
   return { at: null, exact: false, from: now };
 }
 
+const REJECTED_PROOF = "The proof was rejected. Prove again once DuskEVM reports a new output.";
+
 function withdrawalSteps(entry, cfg, { now, timeZone, year }) {
   const stage = entry.stage ?? "submitted";
   const time = (ms) => (ms ? formatDateTime(ms, { timeZone, year }) : "");
-  const proved =
-    entry.provenAt || entry.proveAt || ["proven_waiting", "ready_to_finalize", "finalize_submitted", "finalized"].includes(stage);
+  // The current stage decides: a proof the Portal rejected leaves the
+  // withdrawal ready to prove again, whatever proof times are kept.
+  const proved = ["proven_waiting", "ready_to_finalize", "finalize_submitted", "finalized"].includes(stage);
   const claimed = stage === "finalized";
   const fees = routeDuskFees({ mode: "duskevm-withdrawal" }, { gasPrice: 1n });
   const sent = step("sent", `Sent on ${networkName(cfg, "dusk-evm")}`, entry.sourceAt ? "done" : "now", {
@@ -173,9 +189,7 @@ function withdrawalSteps(entry, cfg, { now, timeZone, year }) {
   else if (stage === "finalize_submitted")
     claim = step("claim", "Claim on Dusk", "now", { detail: "Claim sent, waiting for Dusk", hash: entry.pendingHash ?? null, network: "dusk" });
   else if (stage === "proven_waiting" && entry.proofRejected)
-    claim = step("claim", "Claim on Dusk", "todo", {
-      detail: "The proof was rejected. Prove again once DuskEVM reports a new output.",
-    });
+    claim = step("claim", "Claim on Dusk", "todo", { detail: REJECTED_PROOF });
   else if (stage === "proven_waiting") {
     const timing = claimTiming(entry, now);
     claim = step("claim", "Claim on Dusk", "now", {
@@ -271,8 +285,9 @@ function titleFor(entry, route, cfg, amount) {
  * @param {number} [options.now]
  * @param {string} [options.timeZone] for tests; the viewer's own otherwise
  * @param {boolean} [options.year] dates as records: with the year
+ * @param {string|null} [options.submitter] Dusk Wallet's account, as the Portal knows provers
  */
-export function transferView(entry, { cfg, now = Date.now(), route, timeZone, year = false }) {
+export function transferView(entry, { cfg, now = Date.now(), route, submitter = null, timeZone, year = false }) {
   const status = entry.status === "completed" || entry.status === "failed" ? entry.status : "pending";
   const amount = amountOf(entry);
   const withdrawal = route.mode === "duskevm-withdrawal";
@@ -311,6 +326,8 @@ export function transferView(entry, { cfg, now = Date.now(), route, timeZone, ye
   return {
     action: actionKind
       ? {
+          // A claim waits for the account that proved it.
+          blocked: actionKind === "finalize" && proverMismatch(entry, submitter) ? switchToProver(entry) : "",
           failure: entry.actionError ? withdrawalActionFailure(entry.stage, entry.actionError) : "",
           kind: actionKind,
           label: actionKind === "prove" ? "Prove on Dusk" : "Claim on Dusk",
@@ -375,6 +392,8 @@ export function transferSubline(view, entry, route, cfg, { now = Date.now(), tim
       return entry.provenByOther ? PROVEN_BY_OTHER_ACCOUNT : "Ready to prove on Dusk";
     if (stage === "ready_to_finalize")
       return entry.readyAt ? `Ready to claim since ${time(Number(entry.readyAt) * 1_000)}` : "Ready to claim on Dusk";
+    // A rejected proof never matures: it's proved again, once there's a new output.
+    if (stage === "proven_waiting" && entry.proofRejected) return REJECTED_PROOF;
     if (stage === "proven_waiting")
       return view.countdown
         ? `Claim ${view.countdown.exact ? "from" : "from about"} ${view.countdown.atText} · ${view.countdown.left} left`

@@ -3,7 +3,7 @@
 // explorer has a page. An operator is named only when the deployment names
 // one; nothing here is inferred.
 
-import { networkNames } from "./names.js";
+import { OldTokenName, networkNames } from "./names.js";
 
 export const L2_TO_L1_MESSAGE_PASSER = "0x4200000000000000000000000000000000000016";
 
@@ -50,7 +50,7 @@ export function contractGroups(cfg) {
       operator: cfg.operators?.migration || "",
       rows: [
         row(cfg, id, "Migration contract", network.migrationContract, "Keeps the old DUSK locked. It has no function to send them out."),
-        row(cfg, id, "Old DUSK token", network.tokenContract),
+        row(cfg, id, OldTokenName(cfg, id), network.tokenContract),
       ],
       title: `Old DUSK from ${names[id]}`,
     });
@@ -60,7 +60,7 @@ export function contractGroups(cfg) {
     const network = cfg.evmNetworks[cfg.service.network];
     const rows = [
       row(cfg, "dusk", "Bridge account on Dusk", cfg.service.account, "Receives the DUSK you send. The memo names where it pays out."),
-      row(cfg, cfg.service.network, `DUSK token on ${names[cfg.service.network]}`, network.tokenContract),
+      row(cfg, cfg.service.network, OldTokenName(cfg, cfg.service.network), network.tokenContract, "What the bridge pays out: the same token the migration takes."),
     ];
     if (cfg.service.payoutAddress)
       rows.push(row(cfg, cfg.service.network, "Pays out from", cfg.service.payoutAddress));

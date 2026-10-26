@@ -10,6 +10,7 @@ import {
   TRANSFER_GAS_LIMIT,
   TRANSFER_GAS_TYPICAL,
   WITHDRAWAL_GAS_LIMIT,
+  WITHDRAWAL_RELAY_GAS_BOUND,
   WITHDRAWAL_STEP_GAS_TYPICAL,
 } from "./gas.js";
 import { gasCoin, networkName } from "./names.js";
@@ -22,9 +23,26 @@ import {
 const WEI_PER_LUX = 1_000_000_000n;
 const DECIMALS = 9;
 
+/**
+ * The typed amount without its commas, or why its commas can't be read.
+ * Commas group thousands ("1,234.5"); a lone comma with other than three
+ * digits after it is a decimal comma ("0,5"). One that could be either
+ * ("1,234") is asked about, so what is sent never differs from what was meant.
+ */
+function withoutCommas(value) {
+  if (!value.includes(",")) return { value };
+  const lone = /^(\d{1,3}),(\d{3})$/u.exec(value);
+  if (lone) return { error: `Is that ${lone[1]}${lone[2]} or ${lone[1]}.${lone[2]}? Write it without the comma.` };
+  if (/^\d{1,3}(,\d{3})+(\.\d*)?$/u.test(value)) return { value: value.replace(/,/gu, "") };
+  if (/^\d+,\d+$/u.test(value)) return { value: value.replace(",", ".") };
+  return { error: "Use a point for decimals, like 0.5." };
+}
+
 /** The typed amount in Lux, or why it can't be one. Empty is no error. */
 export function parseAmount(input) {
-  const value = String(input ?? "").trim().replace(/,/gu, "");
+  const read = withoutCommas(String(input ?? "").trim());
+  if (read.error) return { error: read.error, lux: null };
+  const { value } = read;
   if (!value) return { error: "", lux: null };
   const match = /^(\d+)(?:\.(\d*))?$/u.exec(value);
   if (!match) return { error: "Enter an amount like 25 or 0.5.", lux: null };
@@ -46,8 +64,12 @@ const feeText = ({ maxLux, typicalLux }) => ({
   value: `up to ${formatFee(maxLux, 9, { round: "up" })} DUSK`,
 });
 
-/** What each Dusk-side step of a route costs at most, and usually. */
-export function routeDuskFees(route, { gasPrice = 1n, withdrawalGas = 0n } = {}) {
+/**
+ * What each Dusk-side step of a route costs at most, and usually. A claim
+ * adds the withdrawal's own gas to its limit: the real figure when it's
+ * known, a bound above anything the bridge's withdrawals ask for otherwise.
+ */
+export function routeDuskFees(route, { gasPrice = 1n, withdrawalGas = WITHDRAWAL_RELAY_GAS_BOUND } = {}) {
   if (route.mode === "duskevm-deposit")
     return { send: duskFee(DEPOSIT_GAS_LIMIT, DEPOSIT_GAS_TYPICAL, gasPrice) };
   if (route.mode === "service-transfer")
@@ -166,11 +188,18 @@ export function buildQuote(route, amount, ctx) {
   // DuskEVM to Dusk: one step on DuskEVM, then prove and claim on Dusk.
   const l2Fee = gas.priceWei && gas.withdraw ? BigInt(gas.withdraw) * BigInt(gas.priceWei) : null;
   if (ctx.balance !== null && ctx.balance !== undefined) {
-    // Keep twice the estimated gas aside, so the wallet's own estimate fits.
-    const room = BigInt(ctx.balance) - 2n * (l2Fee ?? 0n);
-    quote.maxLux = room > 0n ? room / WEI_PER_LUX : 0n;
-    if (!quote.error && lux !== null && lux > quote.maxLux)
-      quote.error = `That's more than you have on ${from} after its network fee. You can send up to ${formatDusk(quote.maxLux)}.`;
+    if (l2Fee === null) {
+      // No gas price yet: the fee comes from the same balance, so there's no
+      // Max until it's known, and the whole balance is already too much.
+      if (!quote.error && lux !== null && lux * WEI_PER_LUX >= BigInt(ctx.balance))
+        quote.error = `That's more than you have on ${from}, with its network fee.`;
+    } else {
+      // Keep twice the estimated gas aside, so the wallet's own estimate fits.
+      const room = BigInt(ctx.balance) - 2n * l2Fee;
+      quote.maxLux = room > 0n ? room / WEI_PER_LUX : 0n;
+      if (!quote.error && lux !== null && lux > quote.maxLux)
+        quote.error = `That's more than you have on ${from} after its network fee. You can send up to ${formatDusk(quote.maxLux)}.`;
+    }
   }
   const fees = routeDuskFees(route, ctx);
   rows.push(

@@ -4,9 +4,9 @@
 // for an EVM hash, in the order the hash's form suggests.
 
 import { canonicalHash } from "./permalink.js";
-import { L2_TO_L1_MESSAGE_PASSER } from "./contracts.js";
 import { DEPOSIT_FN_NAME } from "./dusk-deposit.js";
 import { networkName } from "./names.js";
+import { parseWithdrawalReceipt } from "./withdrawals.js";
 
 const lower = (value) => String(value ?? "").toLowerCase();
 const EVM_TX_HASH = /^0x[0-9a-f]{64}$/iu;
@@ -67,9 +67,14 @@ export async function resolveTransfer(input, { cfg, node, rpc }) {
       try {
         const receipt = await rpc("dusk-evm", "eth_getTransactionReceipt", [hash]);
         if (receipt) {
-          if ((receipt.logs ?? []).some((log) => lower(log.address) === L2_TO_L1_MESSAGE_PASSER))
+          // Every message to Dusk passes the same contract: only the bridge's
+          // own DUSK withdrawals are opened as one.
+          try {
+            parseWithdrawalReceipt(receipt);
             return { hash, routeId: "dusk-evm-to-dusk" };
-          return { message: `That ${networkName(cfg, "dusk-evm")} transaction isn't a withdrawal.` };
+          } catch {
+            return { message: `That ${networkName(cfg, "dusk-evm")} transaction isn't a withdrawal of DUSK.` };
+          }
         }
       } catch {
         // Not reachable: the other chains may still know it.

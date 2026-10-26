@@ -130,7 +130,7 @@ function depositRecipient(events, bridgeId) {
  * What a history entry is to the bridge, as `account` sees it, or null:
  * - `{ kind: "deposit", hash, amountLux, destination }`, into DuskEVM
  * - `{ kind: "service", hash, amountLux, destination }`, to the bridge account
- * - `{ kind: "payout", hash, amountLux, sourceHash }`, a migration paying out
+ * - `{ kind: "payout", hash, amountLux, payer, sourceHash }`, a migration paying out
  */
 export function bridgeEntry(account, raw, cfg) {
   const hash = lower(raw?.origin);
@@ -161,7 +161,13 @@ export function bridgeEntry(account, raw, cfg) {
       };
     const memo = memoText(data.memo);
     if (data.receiver === account && data.sender !== account && EVM_TX_HASH.test(memo))
-      return { ...base, amountLux: String(data.value ?? "0"), kind: "payout", sourceHash: memo.toLowerCase() };
+      return {
+        ...base,
+        amountLux: String(data.value ?? "0"),
+        kind: "payout",
+        payer: data.sender ?? null,
+        sourceHash: memo.toLowerCase(),
+      };
   }
   return null;
 }
@@ -171,7 +177,7 @@ export function bridgeEntry(account, raw, cfg) {
 // ---------------------------------------------------------------------------
 
 /** An empty sync state. */
-export const emptyHistory = () => ({ covered: [], entries: {}, target: null, window: FIRST_WINDOW });
+export const emptyHistory = () => ({ covered: [], crowded: null, entries: {}, target: null, window: FIRST_WINDOW });
 
 /**
  * One run over `account`'s history: what is new above the kept range, then
@@ -189,6 +195,9 @@ export async function syncDuskHistory({ account, cfg, maxRequests = RUN_REQUESTS
   const kept = state ?? emptyHistory();
   let covered = (kept.covered ?? []).map((range) => [...range]);
   let window = Number(kept.window) || FIRST_WINDOW;
+  // A block with more than a page of the account's entries, and the page to
+  // read there next: kept, so the next run carries on from it.
+  let crowded = kept.crowded ?? null;
   const entries = { ...(kept.entries ?? {}) };
   const found = [];
   let requests = 0;
@@ -221,6 +230,29 @@ export async function syncDuskHistory({ account, cfg, maxRequests = RUN_REQUESTS
     return { completeTo, count: Math.max(out.length, inn.length), full, head: head ? readHead(data) : null };
   }
 
+  /** One block, a page at a time from `fromPage`, while requests last. */
+  async function readBlock(height, fromPage) {
+    let page = fromPage;
+    while (requests < maxRequests) {
+      requests += 1;
+      const data = await query(rangeSelection(account, { from: height, page, to: height }));
+      const out = listOf(data?.out);
+      const inn = listOf(data?.in);
+      take([out, inn]);
+      page += 1;
+      if (out.length < PAGE && inn.length < PAGE) return { complete: true, page };
+    }
+    return { complete: false, page };
+  }
+
+  /** A crowded block read to its end is covered; otherwise it's kept to carry on. */
+  function settleBlock(height, block) {
+    if (block.complete) {
+      covered = addCoverage(covered, height, height);
+      crowded = null;
+    } else crowded = { height, page: block.page };
+  }
+
   // The head, with everything above the kept range in the same request.
   const keptTop = covered[0]?.[1];
   let target;
@@ -239,6 +271,11 @@ export async function syncDuskHistory({ account, cfg, maxRequests = RUN_REQUESTS
     const gap = topGap(covered, target);
     if (!gap) break;
     const [a, b] = gap;
+    // A crowded block at the top of what is missing: its pages carry on.
+    if (crowded?.height === b) {
+      settleBlock(b, await readBlock(b, crowded.page));
+      continue;
+    }
     const lo = Math.max(a, b - window + 1);
     const range = await readRange(lo, b);
     if (!range.full) {
@@ -247,17 +284,22 @@ export async function syncDuskHistory({ account, cfg, maxRequests = RUN_REQUESTS
     } else if (range.completeTo >= lo) {
       covered = addCoverage(covered, lo, range.completeTo);
       window = Math.max(1, Math.floor((range.completeTo - lo + 2) / 2));
+    } else if (lo < b) {
+      // A page filled within the range's lowest block: the heights above it
+      // first, then that block's further pages.
+      window = b - lo;
+      crowded = { height: lo, page: 2 };
     } else {
-      // A page within one block: rare for one account; take that block alone next.
+      // A page within one block: the rest of it, page by page.
       window = 1;
-      if (lo === b) covered = addCoverage(covered, lo, lo);
+      settleBlock(lo, await readBlock(lo, 2));
     }
   }
 
   return {
     found,
     requests,
-    state: { covered, entries, target, updatedAt: Date.now(), window },
+    state: { covered, crowded, entries, target, updatedAt: Date.now(), window },
   };
 }
 

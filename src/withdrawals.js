@@ -306,6 +306,20 @@ function onDuskClock(time, latestTimestamp) {
   return distance < DUSK_CLOCK_WINDOW_SECONDS;
 }
 
+/** Why this account's proof isn't sent again. */
+function provenAlreadyMessage(status) {
+  switch (status.stage) {
+    case "finalized":
+      return "This withdrawal is already claimed.";
+    case "ready_to_finalize":
+      return "This account already proved this withdrawal. You can claim it now.";
+    default:
+      return status.proofRejected
+        ? status.statusMessage
+        : "This account already proved this withdrawal. Claim it once the waiting period ends.";
+  }
+}
+
 function finalizationNotReadyMessage(status) {
   if (status.statusMessage) return status.statusMessage;
   switch (status.stage) {
@@ -816,6 +830,16 @@ export function createWithdrawals(deps) {
     const event = parseWithdrawalReceipt(await fetchL2Receipt(txHash));
     const submitter = deps.proofSubmitter();
     const snapshot = await readSnapshot(event.withdrawalHash, submitter);
+    // A proof this account already has, or one a claimed withdrawal no longer
+    // needs, isn't sent again: it would cost its fee for nothing. Only a
+    // proof the Portal rejected is replaced.
+    const proven = snapshot.provenWithdrawal;
+    const status = snapshot.finalized
+      ? { stage: "finalized" }
+      : proven.timestamp !== 0n && proven.disputeGameProxy !== ZERO_ADDRESS
+        ? await proofStatus(event, snapshot, submitter)
+        : null;
+    if (status && status.stage !== "ready_to_prove") throw new Error(provenAlreadyMessage(status));
     const proof = await findWithdrawalProof({
       snapshot,
       withdrawalBlockNumber: event.blockNumber,

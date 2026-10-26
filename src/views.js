@@ -48,7 +48,9 @@ function duskPill(dusk) {
     return `<a class="wpill cta" href="${html(dusk.getUrl)}" target="_blank" rel="noreferrer">Get Dusk Wallet ${icon("ext")}<span class="sr-only"> (opens in a new tab)</span></a>`;
   if (dusk.state !== "connected")
     return `<button type="button" class="wpill cta" data-action="connect-dusk">${dusk.state === "locked" ? "Unlock Dusk Wallet" : "Connect Dusk Wallet"}</button>`;
-  return `<button type="button" class="wpill" data-action="connect-dusk" aria-label="Dusk Wallet, account ${html(dusk.account)}"><span class="av">${chainMark("dusk", "xs")}</span><code class="mono">${html(short(dusk.account))}</code></button>`;
+  // The account by its .dusk name where Dusk Wallet sent one.
+  const who = dusk.name ? `<span class="nm">${html(dusk.name)}</span>` : `<code class="mono">${html(short(dusk.account))}</code>`;
+  return `<button type="button" class="wpill" data-action="connect-dusk" aria-label="Dusk Wallet, account ${html(dusk.name ? `${dusk.name}, ${dusk.account}` : dusk.account)}"><span class="av">${chainMark("dusk", "xs")}</span>${who}</button>`;
 }
 
 function evmPill(evm) {
@@ -85,7 +87,10 @@ export function footer(vm) {
     vm.links.privacy ? `<a href="${html(vm.links.privacy)}" target="_blank" rel="noreferrer">Privacy</a>` : "",
   ].filter(Boolean);
   const site = vm.officialSite ? `<span>Official site: ${html(vm.officialSite.replace(/^https?:\/\//u, "").replace(/\/$/u, ""))}</span>` : "";
-  return `<footer class="foot"><nav aria-label="About the bridge">${links.join("")}</nav>${site}</footer>`;
+  // Who runs each route, where that's configured.
+  const operators = (vm.operators ?? []).map(({ name, route }) => `${html(name)} for ${html(route)}`);
+  const runBy = operators.length ? `<p class="small t2 run-by">Run by ${operators.join(" · ")}.</p>` : "";
+  return `<footer class="foot"><nav aria-label="About the bridge">${links.join("")}</nav>${site}${runBy}</footer>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +148,28 @@ function accountRow({ balance, chain, label, value, valueNote, wallet }) {
   return `<div class="group acc">${chainMark(chain)}<div class="acc-main"><div class="l1">${html(label)}</div><div class="l2">${value}${valueNote ? ` <span class="t2 small">${html(valueNote)}</span>` : ""}</div>${wallet ? `<div class="small t2">${wallet}</div>` : ""}</div>${balance ? `<div class="r">${balance}</div>` : ""}</div>`;
 }
 
+const availability = (vm) =>
+  vm.available
+    ? `<span>${html(vm.availableLabel ?? "Available")} <span class="num">${html(vm.available)}</span></span>${vm.canMax ? '<button type="button" class="mini" data-action="max">Max</button>' : ""}`
+    : `<span>${html(vm.availableNote ?? "")}</span>`;
+
+/**
+ * The parts of the form that follow balances, prices, the amount and the
+ * recipient. The page renders each in a `data-region` and replaces them all
+ * when anything changes, so none goes stale while someone types.
+ */
+export function formRegions(vm) {
+  return {
+    avail: availability(vm),
+    from: accountRow(vm.from),
+    privacy: html(vm.privacy),
+    quote: quoteBlock(vm),
+    "review-hint": html(vm.reviewHint ?? ""),
+  };
+}
+
 export function formPage(vm) {
+  const regions = formRegions(vm);
   const head = `<div class="topbar"><a class="bk" href="#/">${icon("back")}All tasks</a><h1 class="ti">${html(vm.title)}</h1><span></span></div>`;
   const pick = vm.sources.length > 1
     ? `<div class="seg" role="radiogroup" aria-label="Old DUSK on">${vm.sources
@@ -151,22 +177,26 @@ export function formPage(vm) {
         .join("")}</div>`
     : "";
   const notice = vm.notice ? `<div class="group pad notice-box" role="note"><div class="note">${icon(vm.notice.icon ?? "info")}<span>${vm.notice.html}</span></div>${vm.notice.actions ?? ""}</div>` : "";
-  const from = accountRow(vm.from);
-  const amount = `<div class="amount-field"><label for="amount" class="amount-label">Amount</label><div class="bigamt${vm.amountError ? " invalid" : ""}"><input id="amount" name="amount" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="0" value="${html(vm.amount)}" aria-describedby="amount-help amount-error"${vm.amountError ? ' aria-invalid="true"' : ""}><span class="u">${html(vm.unit)}</span></div><div class="avail" id="amount-help">${vm.available ? `<span>Available <span class="num">${html(vm.available)}</span></span>${vm.canMax ? '<button type="button" class="mini" data-action="max">Max</button>' : ""}` : `<span>${html(vm.availableNote ?? "")}</span>`}</div>${vm.balanceNote ? `<p class="small t2 center">${html(vm.balanceNote)}</p>` : ""}<p class="field-error" id="amount-error" role="alert">${html(vm.amountError ?? "")}</p></div>`;
+  const from = `<div data-region="from">${regions.from}</div>`;
+  const amount = `<div class="amount-field"><label for="amount" class="amount-label">Amount</label><div class="bigamt${vm.amountError ? " invalid" : ""}"><input id="amount" name="amount" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="0" value="${html(vm.amount)}" aria-describedby="amount-help amount-error"${vm.amountError ? ' aria-invalid="true"' : ""}><span class="u">${html(vm.unit)}</span></div><div class="avail" id="amount-help" data-region="avail">${regions.avail}</div>${vm.balanceNote ? `<p class="small t2 center">${html(vm.balanceNote)}</p>` : ""}<p class="field-error" id="amount-error" role="alert">${html(vm.amountError ?? "")}</p></div>`;
   const to = vm.to.editing
     ? `<div class="group acc edit">${chainMark(vm.to.chain)}<div class="acc-main"><label class="l1" for="recipient">${html(vm.to.label)}</label><input id="recipient" name="recipient" class="mono-input" autocomplete="off" spellcheck="false" placeholder="${html(vm.to.placeholder)}" value="${html(vm.to.input)}" aria-describedby="recipient-error"${vm.to.error ? ' aria-invalid="true"' : ""}><p class="field-error" id="recipient-error" role="alert">${html(vm.to.error ?? "")}</p></div>${vm.to.canReset ? '<button type="button" class="linkish" data-action="recipient-reset">Use my account</button>' : ""}</div>`
     : accountRow({
         chain: vm.to.chain,
         label: vm.to.label,
-        value: vm.to.value ? `<code class="mono">${html(short(vm.to.value))}</code>` : `<span class="t2">${html(vm.to.empty)}</span>`,
+        value: vm.to.name
+          ? `<span>${html(vm.to.name)}</span>`
+          : vm.to.value
+            ? `<code class="mono">${html(short(vm.to.value))}</code>`
+            : `<span class="t2">${html(vm.to.empty)}</span>`,
         valueNote: vm.to.valueNote,
         balance: `<button type="button" class="linkish" data-action="recipient-edit">Change</button>`,
       });
   const button = `<button type="button" class="btn pri full" data-action="review" ${vm.canReview ? "" : "disabled"}>${html(vm.reviewLabel)}</button>`;
-  return `<main class="col" id="main" tabindex="-1">${head}${pick}${notice}${from}${amount}${to}<div data-region="quote">${quoteBlock(vm)}</div>
-    <p class="note">${icon("eye")}<span><b>Public.</b> <span data-region="privacy">${html(vm.privacy)}</span> The bridge works with public balances only. Seeing them doesn't let anyone move your DUSK.</span></p>
+  return `<main class="col" id="main" tabindex="-1">${head}${pick}${notice}${from}${amount}${to}<div data-region="quote">${regions.quote}</div>
+    <p class="note">${icon("eye")}<span><b>Public.</b> <span data-region="privacy">${regions.privacy}</span> The bridge works with public balances only. Seeing them doesn't let anyone move your DUSK.</span></p>
     ${vm.error ? `<p class="message error" role="alert">${html(vm.error)}</p>` : ""}
-    ${button}<p class="small t2 center" data-region="review-hint">${html(vm.reviewHint ?? "")}</p>
+    <div class="cta-bar">${button}<p class="small t2 center" data-region="review-hint">${regions["review-hint"]}</p></div>
   </main>`;
 }
 
@@ -183,6 +213,11 @@ export function walletLines(lines, cfgLinks) {
       return `<div class="wl"><dt>${html(line.label)}</dt><dd>${value}${line.note ? `<span class="wl-note">${html(line.note)}</span>` : ""}</dd></div>`;
     })
     .join("")}</dl>`;
+}
+
+// A proof's or a claim's review leads with what the step costs and what moves.
+function actionLead(lead) {
+  return `<div class="flow group lead"><div><div class="k">${html(lead.label)}</div><div class="v num">${html(lead.amount)}<span class="u">DUSK</span></div><div class="w">${lead.chain ? chainMark(lead.chain, "xs") : ""}<span>${html(lead.line)}</span></div></div></div>${lead.notYours ? `<p class="note">${icon("info")}<span>${html(lead.notYours)}</span></p>` : ""}`;
 }
 
 export function reviewSheet(vm) {
@@ -204,11 +239,11 @@ export function reviewSheet(vm) {
     .join("");
   return `<div class="sheet-head"><div><h2 id="sheet-title">Review</h2><p class="sub">${html(vm.sub)}</p></div><button type="button" class="icon-btn round" data-action="close-sheet" aria-label="Close the review">${icon("close")}</button></div>
   <div class="sheet-body">
-    <div class="flow group">
+    ${vm.lead ? actionLead(vm.lead) : `<div class="flow group">
       <div><div class="k">You send</div><div class="v num">${html(vm.send.amount)}<span class="u">${html(vm.send.unit)}</span></div><div class="w">${chainMark(vm.send.chain, "xs")}${html(vm.send.where)}</div></div>
       <div class="dn" aria-hidden="true">${icon("back", "down")}</div>
       <div><div class="k">You receive</div><div class="v num">${html(vm.receive.amount)}<span class="u">${html(vm.receive.unit)}</span></div><div class="w">${chainMark(vm.receive.chain, "xs")}${html(vm.receive.where)}</div></div>
-    </div>
+    </div>`}
     ${checks}
     <dl class="group kvs">${quoteRows({ rows: vm.feeRows })}</dl>
     ${steps}
@@ -252,7 +287,9 @@ export function receiptPage(vm) {
   const action = view.action
     ? vm.canAct === false
       ? `<div class="action-box">${actionNeedsWallet(view.action.kind)}<span class="small t2">Dusk Wallet is a browser extension for computers.</span></div>`
-      : `<div class="action-box">${view.action.failure ? `<p class="message error">${html(view.action.failure)}</p>` : ""}<button type="button" class="btn pri" data-action="withdrawal-${view.action.kind}" data-id="${html(vm.id)}">${html(view.action.label)}</button><span class="small t2">${html(vm.actionFee ?? "")}</span></div>`
+      : view.action.blocked
+        ? `<div class="action-box"><p class="note">${icon("info")}<span>${html(view.action.blocked)}</span></p></div>`
+        : `<div class="action-box">${view.action.failure ? `<p class="message error">${html(view.action.failure)}</p>` : ""}<button type="button" class="btn pri" data-action="withdrawal-${view.action.kind}" data-id="${html(vm.id)}">${html(view.action.label)}</button><span class="small t2">${html(vm.actionFee ?? "")}</span></div>`
     : "";
   const details = vm.details
     .map((row) => `<div class="kv"><dt class="k">${html(row.label)}</dt><dd class="v">${row.html ?? `<span class="num">${html(row.value)}</span>`}</dd></div>`)
@@ -294,11 +331,13 @@ const actionNeedsWallet = (kind) =>
   `<span class="tag">${icon("laptop")}${kind === "prove" ? "Prove" : "Claim"} with Dusk Wallet</span>`;
 
 export function transferRow(row, { canAct = true } = {}) {
-  const right = row.action
-    ? canAct
-      ? `<button type="button" class="btn pri xs" data-action="withdrawal-${row.action.kind}" data-id="${html(row.id)}">${html(row.action.kind === "prove" ? "Prove" : "Claim")}<span class="sr-only"> ${html(row.amountText)} from ${html(row.title)}</span></button>`
-      : actionNeedsWallet(row.action.kind)
-    : statusWord(row.status, row.statusWord) || `<span class="lnk">Receipt ${icon("chev-r")}</span>`;
+  let right;
+  if (!row.action) right = statusWord(row.status, row.statusWord) || `<span class="lnk">Receipt ${icon("chev-r")}</span>`;
+  else if (!canAct) right = actionNeedsWallet(row.action.kind);
+  // A claim waiting for the account that proved it: its receipt says which.
+  else if (row.action.blocked) right = `<span class="tag">${icon("info")}Switch account to claim</span>`;
+  else
+    right = `<button type="button" class="btn pri xs" data-action="withdrawal-${row.action.kind}" data-id="${html(row.id)}">${html(row.action.kind === "prove" ? "Prove" : "Claim")}<span class="sr-only"> ${html(row.amountText)} from ${html(row.title)}</span></button>`;
   return `<li class="tr" data-status="${html(row.status)}"><a class="tr-link" href="${html(row.href)}" aria-label="${html(row.title)}, ${html(row.amountText)}, ${html(row.statusWord)}. Open the receipt"></a>${pairMark(row.pair[0], row.pair[1])}<div class="tr-main"><div class="t1">${html(row.title)}</div><div class="t2">${html(row.subline)}</div>${trackerBars(row.tracker)}</div><div class="rt"><span class="am num">${html(row.amountText)}</span>${right}</div></li>`;
 }
 

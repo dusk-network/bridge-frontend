@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { encodeDuskExternalAssetRecipient } from "@dusk/evm-sdk";
-import { encodeAbiParameters, pad } from "viem";
+import { encodeAbiParameters, encodeFunctionData, pad, parseAbi } from "viem";
 
 import { decodeBase58 } from "./base58.js";
 import { MAINNET_BSC_BRIDGE_ACCOUNT, TESTNET_REGGIO_BRIDGE_ACCOUNT } from "./config.js";
@@ -82,6 +82,7 @@ test("the archive's entries are read as the bridge transfers they are", () => {
     blockHeight: 12,
     hash: h(3),
     kind: "payout",
+    payer: OTHER,
     sourceHash: memo,
   });
   assert.equal(bridgeEntry(ACCOUNT, plain(4, 13), cfg), null);
@@ -135,6 +136,57 @@ test("the history sync reads the newest blocks first, widens, and carries on lat
   assert.equal(Object.keys(second.state.entries).length, 4);
 });
 
+test("a block with more than a page of the account's entries is read to its last page, across runs", async () => {
+  const tip = 4_687_950;
+  const crowd = 4_687_000;
+  // 120 deposits in one block, one above it: pages of 50, in order.
+  const entries = [...Array.from({ length: 120 }, (_, n) => deposit(100 + n, crowd)), deposit(1, crowd + 300)];
+  const calls = [];
+  const query = async (selection) => {
+    calls.push(selection);
+    const data = {};
+    if (selection.includes("lastBlockPair")) data.pair = { json: { last_finalized_block: [tip, "x"] } };
+    for (const [alias, direction] of [["out", "sender"], ["in", "receiver"]]) {
+      const match = new RegExp(`${alias}: moonlightHistory\\(${direction}: "[^"]+", fromBlock: (\\d+)(?:, toBlock: (\\d+))?, maxCount: 50(?:, pageCount: (\\d+))?`, "u").exec(selection);
+      if (!match) continue;
+      const [from, to, page] = [Number(match[1]), match[2] === undefined ? Infinity : Number(match[2]), Number(match[3] ?? 1)];
+      const list = entries.filter((entry) => {
+        const ours = entry.events.some((event) => event.data?.[direction] === ACCOUNT);
+        return ours && entry.block_height >= from && entry.block_height <= to;
+      });
+      const pageOf = list.slice((page - 1) * 50, page * 50);
+      data[alias] = pageOf.length ? { json: pageOf } : null;
+    }
+    return data;
+  };
+
+  let state;
+  const found = new Set();
+  for (let run = 0; run < 12 && !(state && topGap(state.covered, state.target) === null); run += 1) {
+    ({ state } = await syncDuskHistory({ account: ACCOUNT, cfg, maxRequests: 2, query, state }).then((result) => {
+      for (const entry of result.found) found.add(entry.hash);
+      return result;
+    }));
+    // The block counts as read only once its last page is.
+    const blockCovered = state.covered.some(([lo, hi]) => lo <= crowd && crowd <= hi);
+    if (state.crowded) assert.equal(blockCovered, false);
+    if (blockCovered) assert.equal(found.size, 121);
+  }
+  assert.equal(found.size, 121);
+  assert.equal(state.crowded, null);
+  assert.ok(calls.some((selection) => /fromBlock: 4687000, toBlock: 4687000, maxCount: 50, pageCount: 3\)/u.test(selection)));
+
+  // A gap of that one block: its first page fills, then the rest, page by page.
+  let lone = { covered: [[crowd + 1, tip - 10], [0, crowd - 1]], crowded: null, entries: {}, target: tip - 10, window: 1 };
+  const loneFound = new Set();
+  for (let run = 0; run < 6 && topGap(lone.covered, lone.target) !== null; run += 1) {
+    const result = await syncDuskHistory({ account: ACCOUNT, cfg, maxRequests: 2, query, state: lone });
+    for (const entry of result.found) loneFound.add(entry.hash);
+    lone = result.state;
+  }
+  assert.equal(loneFound.size, 120);
+});
+
 test("coverage joins touching ranges and names the highest gap", () => {
   assert.deepEqual(addCoverage([[50, 60]], 61, 80), [[50, 80]]);
   assert.deepEqual(addCoverage([[50, 60]], 10, 20), [[50, 60], [10, 20]]);
@@ -156,7 +208,7 @@ test("withdrawals are found by the EVM address, a window at a time, from the new
   const calls = [];
   const rpc = async (method, params) => {
     calls.push([method, params]);
-    if (method === "eth_blockNumber") return `0x${head.toString(16)}`;
+    if (method === "eth_getBlockByNumber") return { number: `0x${head.toString(16)}` };
     const [{ fromBlock, toBlock, topics }] = params;
     const [from, to] = [Number(fromBlock), Number(toBlock)];
     if (to - from + 1 > 100_000) throw Object.assign(new Error("query exceeds max block range 100000"), { code: -32602 });
@@ -178,7 +230,7 @@ test("withdrawals are found by the EVM address, a window at a time, from the new
     bridge,
     maxRequests: 4,
     rpc: async (method, params) => {
-      if (method === "eth_blockNumber") return `0x${head.toString(16)}`;
+      if (method === "eth_getBlockByNumber") return { number: `0x${head.toString(16)}` };
       const [{ fromBlock, toBlock }] = params;
       if (Number(toBlock) - Number(fromBlock) + 1 > 25_000) throw new Error("block range limit exceeded");
       return [];
@@ -186,6 +238,35 @@ test("withdrawals are found by the EVM address, a window at a time, from the new
   });
   assert.equal(narrow.state.window, 25_000);
   assert.deepEqual(narrow.state.covered, [[head - 50_000 + 1, head]]);
+
+  // Only final blocks are covered: a log above the finalized head waits, and
+  // coverage an older run kept above it is read again.
+  const latest = head + 600;
+  let finalized = head;
+  const final = async (method, params) => {
+    if (method === "eth_getBlockByNumber") return { number: `0x${finalized.toString(16)}` };
+    const [{ fromBlock, toBlock }] = params;
+    return [withdrawalLog(4, head + 300)].filter((log) => Number(log.blockNumber) >= Number(fromBlock) && Number(log.blockNumber) <= Number(toBlock));
+  };
+  const kept = { covered: [[head - 1_000, latest]], entries: {}, target: latest, window: 100_000 };
+  const before = await syncWithdrawals({ address: EVM, bridge, maxRequests: 3, rpc: final, state: kept });
+  assert.deepEqual(before.found, []);
+  assert.equal(Math.max(...before.state.covered.map(([, hi]) => hi)), head);
+  finalized = latest;
+  const after = await syncWithdrawals({ address: EVM, bridge, maxRequests: 3, rpc: final, state: before.state });
+  assert.deepEqual(after.found.map((entry) => entry.hash), [`0x${h(4)}`]);
+  // A node that doesn't answer "finalized": the latest block, less about an hour.
+  const older = await syncWithdrawals({
+    address: EVM,
+    bridge,
+    maxRequests: 2,
+    rpc: async (method) => {
+      if (method === "eth_getBlockByNumber") throw new Error("invalid block tag");
+      if (method === "eth_blockNumber") return `0x${latest.toString(16)}`;
+      return [];
+    },
+  });
+  assert.equal(older.state.target, latest - 1_800);
 });
 
 test("a transfer found twice, or found and sent here, is one entry", () => {
@@ -233,32 +314,71 @@ test("transfers group into Needs you, In progress, Completed and Failed", () => 
   );
 });
 
-test("a payout counts as a migration only when its memo names one", async () => {
+const migrateInput = (amountLux, account) =>
+  encodeFunctionData({
+    abi: parseAbi(["function migrate(uint256 amount, string mainnetDuskAddress)"]),
+    args: [BigInt(amountLux) * 1_000_000_000n, account],
+    functionName: "migrate",
+  });
+
+test("a payout counts as a migration only when its memo names a migration of that amount to this account", async () => {
+  const hashOf = (byte) => `0x${byte.repeat(32)}`;
   const records = [
-    { hash: h(7), kind: "payout", sourceHash: `0x${"aa".repeat(32)}` },
-    { hash: h(8), kind: "payout", sourceHash: `0x${"bb".repeat(32)}` },
+    { amountLux: "1000000000000", hash: h(7), kind: "payout", payer: OTHER, sourceHash: hashOf("aa") },
+    { amountLux: "1000000000000", hash: h(8), kind: "payout", payer: OTHER, sourceHash: hashOf("bb") },
+    // Spoofs: someone else's migration, and the right migration with a token amount.
+    { amountLux: "1000000000000", hash: h(9), kind: "payout", payer: OTHER, sourceHash: hashOf("cc") },
+    { amountLux: "1", hash: h(10), kind: "payout", payer: OTHER, sourceHash: hashOf("aa") },
   ];
+  const txs = {
+    [hashOf("aa")]: { from: "0xD63B00000000000000000000000000000000DF40", input: migrateInput("1000000000000", ACCOUNT), to: MIGRATOR.toLowerCase() },
+    [hashOf("bb")]: { input: "0x", to: "0x0000000000000000000000000000000000000001" },
+    [hashOf("cc")]: { input: migrateInput("1000000000000", OTHER), to: MIGRATOR.toLowerCase() },
+  };
   const batches = [];
   await verifyPayouts(records, {
+    account: ACCOUNT,
     cfg,
     rpcBatch: async (network, calls) => {
       batches.push([network, calls.length]);
-      return calls.map(({ params }) =>
-        params[0] === `0x${"aa".repeat(32)}` ? { from: "0xD63B00000000000000000000000000000000DF40", to: MIGRATOR.toLowerCase() } : { to: "0x0000000000000000000000000000000000000001" },
-      );
+      return calls.map(({ params }) => txs[params[0]]);
     },
   });
-  assert.deepEqual(batches, [["ethereum", 2]]);
+  assert.deepEqual(batches, [["ethereum", 4]]);
   assert.equal(records[0].routeId, "ethereum-to-dusk");
-  assert.equal(records[1].rejected, true);
-  const entry = entryFromHistory({ ...records[0], amountLux: "1000000000000" }, ACCOUNT, cfg);
+  assert.deepEqual(records.slice(1).map((record) => record.rejected), [true, true, true]);
+  const entry = entryFromHistory(records[0], ACCOUNT, cfg);
   assert.deepEqual(
     { hash: entry.hash, routeId: entry.routeId, status: entry.status, destinationHash: entry.destinationHash },
-    { destinationHash: h(7), hash: `0x${"aa".repeat(32)}`, routeId: "ethereum-to-dusk", status: "completed" },
+    { destinationHash: h(7), hash: hashOf("aa"), routeId: "ethereum-to-dusk", status: "completed" },
   );
   assert.equal(entryFromHistory(records[1], ACCOUNT, cfg), null);
   // Settled payouts aren't asked about again.
-  await verifyPayouts(records, { cfg, rpcBatch: async () => assert.fail("asked twice") });
+  await verifyPayouts(records, { account: ACCOUNT, cfg, rpcBatch: async () => assert.fail("asked twice") });
+
+  // With the payout account known, the same transfer from anyone else doesn't count.
+  const fromOther = [{ amountLux: "1000000000000", hash: h(11), kind: "payout", payer: ACCOUNT, sourceHash: hashOf("aa") }];
+  await verifyPayouts(fromOther, { account: ACCOUNT, cfg: { ...cfg, migrationPayoutAccount: OTHER }, rpcBatch: async (network, calls) => calls.map(({ params }) => txs[params[0]]) });
+  assert.equal(fromOther[0].rejected, true);
+});
+
+test("a payout a chain couldn't be asked about stays open for the next visit", async () => {
+  const records = [
+    { amountLux: "5", hash: h(12), kind: "payout", sourceHash: `0x${"dd".repeat(32)}` },
+    { amountLux: "5", hash: h(13), kind: "payout", sourceHash: `0x${"ee".repeat(32)}` },
+  ];
+  await verifyPayouts(records, {
+    account: ACCOUNT,
+    cfg,
+    rpcBatch: async () => {
+      throw new Error("RPC batch failed with HTTP 503");
+    },
+  });
+  assert.deepEqual(records.map((record) => [record.rejected, record.routeId]), [[undefined, undefined], [undefined, undefined]]);
+
+  // One call unanswered, one a plain "not found": only the second is settled.
+  await verifyPayouts(records, { account: ACCOUNT, cfg, rpcBatch: async () => [undefined, null] });
+  assert.deepEqual(records.map((record) => record.rejected), [undefined, true]);
 });
 
 test("discovery keeps each account's progress per network and asks again only for what's new", async () => {

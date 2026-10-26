@@ -467,7 +467,7 @@ test("a deposit waits while the adapter hasn't seen it, and fails with its Dusk 
 });
 
 test("a withdrawal follows its stages, and a sent proof waits for Dusk", async () => {
-  let status = { blockNumber: 50n, details: { amountWei: 10n ** 17n }, stage: "ready_to_prove" };
+  let status = { blockNumber: 50n, details: { amountWei: 10n ** 17n }, stage: "ready_to_prove", withdrawal: { gasLimit: 519_542n } };
   let error = null;
   const asked = [];
   const withdrawals = {
@@ -492,6 +492,8 @@ test("a withdrawal follows its stages, and a sent proof waits for Dusk", async (
   assert.equal(ready.stage, "ready_to_prove");
   assert.equal(ready.amountLux, "100000000");
   assert.equal(ready.sourceAt, (1_792_980_000 + 50) * 1_000);
+  // The withdrawal's own gas, which claiming adds to its limit.
+  assert.equal(ready.withdrawalGas, "519542");
 
   const proving = { ...entry, pendingAction: "prove", pendingHash: "aa".repeat(32) };
   assert.equal((await tracking.refresh(proving, ROUTES.withdrawal)).stage, "prove_submitted");

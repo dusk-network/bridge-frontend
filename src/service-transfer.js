@@ -30,6 +30,6 @@ export async function serviceTransferRequest({ amountLux, destination, node }) {
 
 export async function submitServiceTransfer(options) {
   const request = options.request ?? (await serviceTransferRequest(options));
-  const { hash } = await sendDuskTransfer(request);
+  const { hash } = await sendDuskTransfer(request, { account: options.account });
   return { hash, to: request.memo };
 }

@@ -62,8 +62,6 @@ const ETH = Object.freeze({ decimals: 18, name: "Ether", symbol: "ETH" });
 const nativeCurrency = (id, chainId) =>
   id === "bsc" ? { decimals: 18, name: "BNB", symbol: chainId === 97 ? "tBNB" : "BNB" } : ETH;
 
-const DOCS = "https://docs.dusk.network/learn/guides";
-
 const url = (name) => {
   const raw = value(name);
   return /^https?:\/\//iu.test(raw) ? raw : "";
@@ -253,13 +251,14 @@ export function loadConfig() {
   const multicallId = contractId("VITE_DUSK_MULTICALL_CONTRACT_ID", DUSK_MULTICALL_CONTRACT_ID);
 
   return Object.freeze({
-    defaultDuskRecipient: value("VITE_DEFAULT_DUSK_RECIPIENT"),
     // Shown only when set: nothing here is guessed.
     links: Object.freeze({
+      // Guides written for this page only: the docs' bridge guides describe
+      // the web wallet's own bridge.
       docs: Object.freeze({
-        duskEvm: value("VITE_DOCS_DUSKEVM_URL", `${DOCS}/duskevm-bridge/`),
-        migration: value("VITE_DOCS_MIGRATION_URL", `${DOCS}/mainnet-migration/`),
-        service: value("VITE_DOCS_SERVICE_URL", `${DOCS}/bep20-bridge/`),
+        duskEvm: url("VITE_DOCS_DUSKEVM_URL"),
+        migration: url("VITE_DOCS_MIGRATION_URL"),
+        service: url("VITE_DOCS_SERVICE_URL"),
       }),
       privacy: url("VITE_PRIVACY_URL"),
       sites: Object.freeze({

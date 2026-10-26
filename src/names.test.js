@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { contractGroups } from "./contracts.js";
 import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 import { bridgeTasks, networkName, networkNames, routeTitle } from "./names.js";
@@ -58,7 +59,13 @@ test("routes and tasks use the same names everywhere", () => {
   const mainnet = profile("mainnet");
   const tasks = bridgeTasks(mainnet, buildRoutes(mainnet));
   assert.deepEqual(tasks.map((task) => task.title), ["Move old DUSK to Dusk", "Send DUSK to BNB Smart Chain"]);
-  assert.equal(tasks[0].what, "You hold DUSK as a token on Ethereum or BNB Smart Chain");
+  // The old token has one name, as a token, wherever it's named.
+  assert.equal(tasks[0].what, "You hold old DUSK (ERC20 on Ethereum) or old DUSK (BEP20 on BSC)");
+  assert.equal(tasks[1].what, "Paid out as old DUSK (BEP20 on BSC)");
+  assert.equal(bridgeTasks(cfg, routes)[3].what, "Paid out as old DUSK (ERC20 on Sepolia)");
+  const sheet = contractGroups(cfg).flatMap((group) => group.rows.map((row) => row.label));
+  assert.ok(sheet.filter((label) => label === "Old DUSK (ERC20 on Sepolia)").length === 2, sheet.join(" | "));
+  assert.ok(!sheet.some((label) => /DUSK token/u.test(label)));
   assert.equal(networkName(mainnet, "dusk-evm"), "DuskEVM");
 });
 

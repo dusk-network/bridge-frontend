@@ -20,6 +20,12 @@ const rows = (quote) => Object.fromEntries(quote.rows.map((row) => [row.key, [ro
 test("amounts take at most 9 decimals and nothing else", () => {
   assert.deepEqual(parseAmount("25"), { error: "", lux: 25n * DUSK });
   assert.deepEqual(parseAmount("1,000.5"), { error: "", lux: 1_000_500_000_000n });
+  assert.deepEqual(parseAmount("1,234,567"), { error: "", lux: 1_234_567n * DUSK });
+  // A decimal comma reads as one; a comma that could be either is asked about.
+  assert.deepEqual(parseAmount("0,5"), { error: "", lux: DUSK / 2n });
+  assert.deepEqual(parseAmount("12,75"), { error: "", lux: 12_750_000_000n });
+  assert.equal(parseAmount("1,234").error, "Is that 1234 or 1.234? Write it without the comma.");
+  for (const odd of ["1,2,3", "1,23.4", ",5", "1,234,5"]) assert.equal(parseAmount(odd).error, "Use a point for decimals, like 0.5.", odd);
   assert.deepEqual(parseAmount("0.000000001"), { error: "", lux: 1n });
   assert.equal(parseAmount("0.0000000001").error, "Use at most 9 decimals.");
   assert.equal(parseAmount("1e3").error, "Enter an amount like 25 or 0.5.");
@@ -88,10 +94,21 @@ test("a withdrawal quotes its DuskEVM step and the two Dusk steps after it", () 
     arrives: "about 7 days, in three steps",
     bridge: "None",
     fee: "about 0.0014 DUSK | step 1 · on DuskEVM, paid by you",
-    "fee-dusk": "up to 0.05 DUSK per step | usually about 0.0023 DUSK each · prove and claim on Dusk, paid by you",
+    "fee-dusk": "up to 0.051 DUSK per step | usually about 0.0023 DUSK each · prove and claim on Dusk, paid by you",
     receive: "200 DUSK on Dusk",
     send: "200 DUSK on DuskEVM",
   });
-  const fees = routeDuskFees(routes["duskevm-withdrawal"], { gasPrice: 1n, withdrawalGas: 200_000n });
-  assert.equal(fees.claim.maxLux, 50_200_000n);
+  // A claim's limit is 50M plus the withdrawal's own gas: the real figure once
+  // known (519,542 for a 10 DUSK testnet withdrawal), a bound until then.
+  const known = routeDuskFees(routes["duskevm-withdrawal"], { gasPrice: 1n, withdrawalGas: 519_542n });
+  assert.equal(known.claim.maxLux, 50_519_542n);
+  assert.equal(known.prove.maxLux, 50_000_000n);
+  assert.equal(routeDuskFees(routes["duskevm-withdrawal"], { gasPrice: 1n }).claim.maxLux, 51_000_000n);
+
+  // Without DuskEVM's gas price there's no Max, and the whole balance is too much.
+  const unpriced = { balance: 312n * 10n ** 18n, cfg, evmGas: { priceWei: null, withdraw: 138_439n }, gasPrice: 1n };
+  assert.equal(buildQuote(routes["duskevm-withdrawal"], "200", unpriced).maxLux, null);
+  assert.equal(buildQuote(routes["duskevm-withdrawal"], "200", unpriced).error, "");
+  assert.equal(buildQuote(routes["duskevm-withdrawal"], "312", unpriced).error, "That's more than you have on DuskEVM, with its network fee.");
+  assert.ok(quote.maxLux > 311n * 10n ** 9n);
 });

@@ -96,6 +96,7 @@ export async function depositRequest({ amountLux, node, recipient }) {
   };
 }
 
+/** Sends the deposit; `account` is the Dusk account it was reviewed for. */
 export async function submitDuskEvmDeposit(options) {
-  return sendDuskContractCall(options.request ?? (await depositRequest(options)));
+  return sendDuskContractCall(options.request ?? (await depositRequest(options)), { account: options.account });
 }

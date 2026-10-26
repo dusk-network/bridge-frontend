@@ -3,7 +3,9 @@
 // by `from`. DuskEVM answers at most 100,000 blocks (about 2.3 days) per log
 // query, so the scan goes from the newest block down a window at a time, a
 // bounded number per run, and keeps the heights it covered: the next run
-// carries on below them and reads only what is new above.
+// carries on below them and reads only what is new above. Only finalized
+// blocks count as covered: a block above can still be reorged away, with
+// the withdrawals in it, so those are read once final (within minutes).
 
 import { decodeAbiParameters, pad, toEventSelector, toHex } from "viem";
 
@@ -37,6 +39,20 @@ export function withdrawalFromLog(log) {
 
 const tooWide = (error) => /range|limit|too many|exceed/iu.test(error?.message ?? "");
 
+/** Blocks under the head counted as final where a node doesn't answer "finalized": about an hour. */
+export const UNFINALIZED_MARGIN = 1_800;
+
+/** The highest block that can't be reorged away. */
+async function finalHead(rpc) {
+  try {
+    const block = await rpc("eth_getBlockByNumber", ["finalized", false]);
+    if (block?.number) return Number(BigInt(block.number));
+  } catch {
+    // An older node: the latest block, less a margin.
+  }
+  return Math.max(0, Number(BigInt(await rpc("eth_blockNumber", []))) - UNFINALIZED_MARGIN);
+}
+
 /**
  * One run over `address`'s withdrawals.
  *
@@ -49,12 +65,13 @@ const tooWide = (error) => /range|limit|too many|exceed/iu.test(error?.message ?
  */
 export async function syncWithdrawals({ address, bridge, maxRequests = L2_RUN_REQUESTS, rpc, state }) {
   const kept = state ?? emptyScan();
-  let covered = (kept.covered ?? []).map((range) => [...range]);
+  const target = await finalHead(rpc);
+  // Coverage kept above the final head (older runs read the latest) is read again.
+  let covered = (kept.covered ?? []).map(([lo, hi]) => [lo, Math.min(hi, target)]).filter(([lo, hi]) => hi >= lo);
   let window = Number(kept.window) || L2_WINDOW;
   const entries = { ...(kept.entries ?? {}) };
   const found = [];
   let requests = 1;
-  const target = Number(BigInt(await rpc("eth_blockNumber", [])));
   const topics = [ETH_BRIDGE_INITIATED_TOPIC, pad(String(address).toLowerCase())];
 
   while (requests < maxRequests) {

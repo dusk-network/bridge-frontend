@@ -22,6 +22,14 @@ export const TRANSFER_GAS_TYPICAL = 1_850_000n;
  */
 export const WITHDRAWAL_GAS_LIMIT = 50_000_000n;
 
+/**
+ * The most gas a withdrawal's own call asks for, for the quote before it's
+ * known: claiming adds it to the 50M limit. The bridge's withdrawals forward
+ * a 200,000 minimum, which DuskEVM's messenger raises to about 520,000
+ * (519,542 for a 10 DUSK testnet withdrawal).
+ */
+export const WITHDRAWAL_RELAY_GAS_BOUND = 1_000_000n;
+
 /** What a proof or a claim usually spends (a proof: 2,209,505 gas). */
 export const WITHDRAWAL_STEP_GAS_TYPICAL = 2_300_000n;
 

@@ -14,6 +14,21 @@ export function networkNames(cfg) {
   });
 }
 
+/**
+ * The old token's one name, as a token: "old DUSK (ERC20 on Ethereum)" or
+ * "(BEP20 on BSC)", on testnet "(ERC20 on Sepolia)" or "(BEP20 on BSC
+ * testnet)". It's also what a transfer to that chain pays out.
+ */
+export function oldTokenName(cfg, id) {
+  const testnet = cfg.profile === "testnet";
+  return id === "bsc"
+    ? `old DUSK (BEP20 on ${testnet ? "BSC testnet" : "BSC"})`
+    : `old DUSK (ERC20 on ${testnet ? "Sepolia" : "Ethereum"})`;
+}
+
+/** The same, starting a line or a label. */
+export const OldTokenName = (cfg, id) => `O${oldTokenName(cfg, id).slice(1)}`;
+
 /** The name of a network by id: "dusk", "dusk-evm", "ethereum" or "bsc". */
 export const networkName = (cfg, id) => networkNames(cfg)[id] ?? String(id);
 
@@ -34,7 +49,7 @@ export function bridgeTasks(cfg, routes) {
       id: "migrate",
       routes: migrations,
       title: "Move old DUSK to Dusk",
-      what: `You hold DUSK as a token on ${migrations.map((route) => names[route.from.id]).join(" or ")}`,
+      what: `You hold ${migrations.map((route) => oldTokenName(cfg, route.from.id)).join(" or ")}`,
     });
   const deposit = routes.find((route) => route.mode === "duskevm-deposit");
   if (deposit)
@@ -58,7 +73,7 @@ export function bridgeTasks(cfg, routes) {
       id: `to-${service.to.id}`,
       routes: [service],
       title: `Send DUSK to ${names[service.to.id]}`,
-      what: `As DUSK tokens on ${names[service.to.id]}`,
+      what: `Paid out as ${oldTokenName(cfg, service.to.id)}`,
     });
   return tasks;
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { entryId, findActivity, readActivity, recordActivity, updateActivity } from "./activity.js";
+import { entryId, findActivity, readActivity, recordActivity, saveActivity, updateActivity } from "./activity.js";
 
 const storage = (initial = {}) => {
   const values = new Map(Object.entries(initial));
@@ -72,4 +72,22 @@ test("an entry stays for this visit when the browser refuses to store it", () =>
   refuse = false;
   recordActivity({ hash: `0x${"cd".repeat(32)}`, routeId: "dusk-to-dusk-evm" }, full);
   assert.equal(JSON.parse(values.get("dusk-bridge:activity:v2")).length, 2);
+});
+
+test("a full list keeps the newest transfers, not the first ones it was given", () => {
+  const store = storage();
+  const old = Array.from({ length: 200 }, (_, index) => ({
+    hash: index.toString(16).padStart(64, "0"),
+    id: `dusk-to-dusk-evm:${index}`,
+    routeId: "dusk-to-dusk-evm",
+    sourceAt: 1_000_000 + index,
+  }));
+  saveActivity(old, store);
+  // Discovery appends what it finds after what's kept.
+  const found = { hash: "f".repeat(64), id: "dusk-to-dusk-evm:found", routeId: "dusk-to-dusk-evm", sourceAt: 9_000_000 };
+  const kept = saveActivity([...readActivity(store), found], store);
+  assert.equal(kept.length, 200);
+  assert.equal(kept[0].id, "dusk-to-dusk-evm:found");
+  assert.ok(!kept.some((item) => item.sourceAt === 1_000_000), "the oldest goes");
+  assert.deepEqual(readActivity(store).map((item) => item.id), kept.map((item) => item.id));
 });

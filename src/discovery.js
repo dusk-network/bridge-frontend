@@ -6,6 +6,8 @@
 // per visit and kept here per network and account; a transfer found twice, or
 // found and also sent from this browser, is one entry.
 
+import { decodeFunctionData, parseAbi } from "viem";
+
 import { syncDuskHistory } from "./dusk-history.js";
 import { syncWithdrawals } from "./l2-withdrawals.js";
 import { entryId } from "./activity.js";
@@ -158,14 +160,39 @@ export function entryFromWithdrawal(record, address) {
   };
 }
 
+const MIGRATE_ABI = parseAbi(["function migrate(uint256 amount, string mainnetDuskAddress)"]);
+
 /**
- * Payouts whose memo names a migration: kept when that EVM transaction called
- * a configured migration contract, with its route. One batch per network.
+ * Whether a migration call pays `account` exactly this payout's amount: the
+ * memo is public, so a transfer naming someone else's migration, or carrying
+ * another amount, isn't its payout. With the payout account known, only
+ * transfers from it count.
  */
-export async function verifyPayouts(records, { cfg, rpcBatch }) {
+function paysAsMigrated(record, tx, account, payer) {
+  try {
+    const { args } = decodeFunctionData({ abi: MIGRATE_ABI, data: tx.input });
+    return (
+      args[1] === account &&
+      (args[0] / WEI_PER_LUX).toString() === String(record.amountLux) &&
+      (!payer || record.payer === payer)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Payouts whose memo names a migration: kept when that EVM transaction is a
+ * migration to `account` of the amount paid, with its route; rejected when
+ * every configured chain says it isn't. A chain that can't be asked leaves
+ * the payout to the next visit. One batch per chain.
+ */
+export async function verifyPayouts(records, { account, cfg, rpcBatch }) {
   const open = records.filter((record) => record.kind === "payout" && !record.routeId && !record.rejected);
   if (!open.length) return [];
+  const payer = cfg.migrationPayoutAccount || null;
   const settled = new Set();
+  const unknown = new Set();
   const changed = [];
   for (const network of cfg.migrations) {
     const contract = String(cfg.evmNetworks[network].migrationContract).toLowerCase();
@@ -178,20 +205,27 @@ export async function verifyPayouts(records, { cfg, rpcBatch }) {
         waiting.map((record) => ({ method: "eth_getTransactionByHash", params: [record.sourceHash] })),
       );
     } catch {
+      for (const record of waiting) unknown.add(record.hash);
       continue;
     }
     waiting.forEach((record, index) => {
       const tx = results[index];
-      if (tx && String(tx.to ?? "").toLowerCase() === contract) {
-        Object.assign(record, { routeId: `${network}-to-dusk`, sender: String(tx.from ?? "").toLowerCase() });
-        settled.add(record.hash);
-        changed.push(record);
+      // No answer for this one: whether it's a migration isn't known yet.
+      if (tx === undefined) {
+        unknown.add(record.hash);
+        return;
       }
+      if (!tx || String(tx.to ?? "").toLowerCase() !== contract) return;
+      settled.add(record.hash);
+      if (paysAsMigrated(record, tx, account, payer))
+        Object.assign(record, { routeId: `${network}-to-dusk`, sender: String(tx.from ?? "").toLowerCase() });
+      else record.rejected = true;
+      changed.push(record);
     });
   }
   // A memo that is no migration on any configured chain isn't one.
   for (const record of open)
-    if (!settled.has(record.hash)) {
+    if (!settled.has(record.hash) && !unknown.has(record.hash)) {
       record.rejected = true;
       changed.push(record);
     }
@@ -242,7 +276,7 @@ export function createDiscovery({ cfg, node, rpc, rpcBatch, storage = defaultSto
       state: loadState(key, storage),
     });
     const records = Object.values(state.entries);
-    await verifyPayouts(records, { cfg, rpcBatch });
+    await verifyPayouts(records, { account, cfg, rpcBatch });
     await addDetails(records, node);
     saveState(key, state, storage);
     return { entries: records.map((record) => entryFromHistory(record, account, cfg)).filter(Boolean), state };
