@@ -1,0 +1,165 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { createDuskNode, parseJsonExact } from "./dusk-node.js";
+
+const NODE = "https://testnet.nodes.example";
+
+/**
+ * Answers like Rusk's GraphQL endpoint: the body is the query text itself. A
+ * JSON body fails to parse ("expected selection"), as the live node answers.
+ */
+function ruskLike(answers) {
+  const requests = [];
+  const fetch = async (url, init) => {
+    requests.push({ body: init.body, headers: init.headers, url });
+    if (url.endsWith("/on/graphql/query")) {
+      const body = String(init.body);
+      const match = /^query \{ (.*) \}$/su.exec(body);
+      if (!match)
+        return new Response(
+          JSON.stringify({ data: null, errors: [{ message: " --> 1:2\n  = expected selection" }] }),
+        );
+      const answer = answers.graphql(match[1]);
+      // Text as the node writes it, for numbers JSON.stringify can't keep.
+      return new Response(typeof answer === "string" ? answer : JSON.stringify(answer));
+    }
+    if (url.endsWith("/on/blocks/gas-price"))
+      return answers.gasPrice?.() ?? new Response(JSON.stringify({ median: 3 }));
+    return answers.contract(url, init);
+  };
+  return { fetch, requests };
+}
+
+test("node queries send the GraphQL text itself, which Rusk parses", async () => {
+  const rusk = ruskLike({
+    graphql: (selection) => {
+      assert.equal(selection, "block(height: -1) { header { timestamp } }");
+      return { block: { header: { timestamp: 1_792_980_039 } } };
+    },
+  });
+  const node = createDuskNode({ fetch: rusk.fetch, url: `${NODE}/` });
+
+  assert.equal(await node.latestBlockTimestamp(), 1_792_980_039n);
+  assert.equal(rusk.requests[0].url, `${NODE}/on/graphql/query`);
+  assert.equal(
+    rusk.requests[0].body,
+    "query { block(height: -1) { header { timestamp } } }",
+  );
+});
+
+test("a node error comes back as the node's message", async () => {
+  const node = createDuskNode({
+    fetch: async () =>
+      new Response(JSON.stringify({ data: null, errors: [{ message: "Unknown field" }] })),
+    url: NODE,
+  });
+  await assert.rejects(node.query("nope"), /Unknown field/u);
+});
+
+test("transaction lookups in one tick share one query", async () => {
+  const rusk = ruskLike({
+    graphql: (selection) => {
+      assert.match(selection, /^t0: tx\(hash: "a{64}"\).* t1: tx\(hash: "b{64}"\)/su);
+      return {
+        t0: {
+          blockHeight: 10,
+          blockTimestamp: 1_792_980_999,
+          err: null,
+          id: "a".repeat(64),
+          tx: {
+            callData: { contractId: "11".repeat(32), data: "00", fnName: "f" },
+            json: JSON.stringify({ sender: "S", value: 5 }),
+            memo: null,
+          },
+        },
+        t1: null,
+      };
+    },
+  });
+  const node = createDuskNode({ fetch: rusk.fetch, url: NODE });
+
+  const [found, missing] = await Promise.all([
+    node.transaction("A".repeat(64)),
+    node.transaction(`0x${"b".repeat(64)}`),
+  ]);
+
+  assert.equal(rusk.requests.length, 1);
+  assert.equal(found.blockHeight, 10n);
+  assert.equal(found.blockTimestamp, 1_792_980_999n);
+  assert.equal(found.callData.fnName, "f");
+  assert.equal(found.json.sender, "S");
+  assert.equal(missing, null);
+  assert.throws(() => node.transaction("not-a-hash"), /invalid/u);
+});
+
+test("contract queries post rkyv bytes to the configured node", async () => {
+  const rusk = ruskLike({
+    contract: async (url, init) => {
+      assert.equal(url, `${NODE}/on/contracts:${"ab".repeat(32)}/gameCount`);
+      assert.equal(init.headers["content-type"], "application/octet-stream");
+      assert.deepEqual([...init.body], [1, 2]);
+      return new Response(new Uint8Array([9]));
+    },
+  });
+  const node = createDuskNode({ fetch: rusk.fetch, url: NODE });
+
+  assert.deepEqual([...(await node.contractCall(`0x${"AB".repeat(32)}`, "gameCount", new Uint8Array([1, 2])))], [9]);
+});
+
+test("the gas price is the node's median, or 1 Lux without one", async () => {
+  const median = createDuskNode({ fetch: ruskLike({}).fetch, url: NODE });
+  assert.equal(await median.gasPrice(), 3n);
+
+  const down = createDuskNode({
+    fetch: async () => {
+      throw new Error("offline");
+    },
+    url: NODE,
+  });
+  assert.equal(await down.gasPrice(), 1n);
+});
+
+test("memo lookups return the node's transfer list", async () => {
+  const rusk = ruskLike({
+    graphql: (selection) => {
+      assert.equal(selection, 'transactionsByMemo(memo: "0xabc") { json }');
+      return { transactionsByMemo: { json: [{ origin: "d".repeat(64) }] } };
+    },
+  });
+  const node = createDuskNode({ fetch: rusk.fetch, url: NODE });
+
+  assert.deepEqual(await node.transfersByMemo("0xabc"), [{ origin: "d".repeat(64) }]);
+});
+
+test("amounts past 2^53 Lux keep every digit, in transactions and in query answers", async () => {
+  // Rusk writes a transfer's value and deposit as bare numbers; its fees as text.
+  const inner = '{"type":"moonlight","value":18446744073709551615,"nonce":19,"deposit":9007199254740993,"fee":{"gas_limit":"5000000","gas_price":"1"},"memo":"12345678901234567890"}';
+  const rusk = ruskLike({
+    graphql: (selection) =>
+      selection.startsWith("t0:")
+        ? JSON.stringify({ t0: { blockHeight: 10, blockTimestamp: 1_792_980_999, err: null, gasSpent: 1_986_533, id: "a".repeat(64), tx: { json: inner } } })
+        : '{"h":{"json":[{"block_height":4688278,"events":[{"topic":"moonlight","data":{"value":12345678901234567891,"memo":"0x"}}]}]}}',
+  });
+  const node = createDuskNode({ fetch: rusk.fetch, url: NODE });
+
+  const tx = await node.transaction("a".repeat(64));
+  assert.equal(BigInt(tx.json.value), 18_446_744_073_709_551_615n);
+  assert.equal(BigInt(tx.json.deposit), 9_007_199_254_740_993n);
+  assert.equal(tx.json.nonce, 19);
+  assert.equal(tx.json.memo, "12345678901234567890");
+  assert.equal(tx.gasSpent, 1_986_533);
+
+  const history = await node.query("h: moonlightHistory(sender: \"x\", fromBlock: 0) { json }");
+  assert.equal(BigInt(history.h.json[0].events[0].data.value), 12_345_678_901_234_567_891n);
+  assert.equal(history.h.json[0].block_height, 4_688_278);
+
+  // Only whole numbers that can pass 2^53 change; text, decimals and exponents stay.
+  assert.deepEqual(parseJsonExact('{"s":"12345678901234567890 \\" 1","d":0.12345678901234567890,"e":1.5e300,"n":-12345678901234567890,"k":[9007199254740991]}'), {
+    d: 0.12345678901234568,
+    e: 1.5e300,
+    k: [9_007_199_254_740_991],
+    n: "-12345678901234567890",
+    s: '12345678901234567890 " 1',
+  });
+});
