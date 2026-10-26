@@ -9,6 +9,7 @@ import { decodeBase58 } from "./base58.js";
 import { config } from "./config.js";
 import { ensureDuskConnected } from "./dusk-wallet.js";
 import { ensureEvmChain, getEvmClients } from "./evm-wallet.js";
+import { normalizeDuskAddress } from "./validation.js";
 
 /** DuskEVM counts 18 decimals; Dusk holds whole Lux (9). */
 export const WEI_PER_LUX = 1_000_000_000n;
@@ -23,6 +24,7 @@ export function withdrawalAmountWei(amount) {
 
 export const duskEvmNetwork = () => ({
   chainId: config.duskEvm.chainId,
+  // What the wallet lists: "DuskEVM Testnet" on testnet.
   chainName: config.duskEvm.name,
   currency: { decimals: 18, name: "DUSK", symbol: "DUSK" },
   explorerUrl: config.duskEvm.explorerUrl,
@@ -38,16 +40,21 @@ export function prepareWithdrawalCall({ account, amountWei, duskAccount }) {
   });
 }
 
-export async function submitDuskEvmWithdrawal({ amount }) {
+/**
+ * Sends the DuskEVM step and returns its hash once the wallet has sent it;
+ * the tracker follows it from there. The Dusk recipient is the one given, or
+ * the connected Dusk account.
+ */
+export async function submitDuskEvmWithdrawal({ amount, duskAccount }) {
   const amountWei = withdrawalAmountWei(amount);
-  const profile = await ensureDuskConnected();
+  const recipient = duskAccount ? normalizeDuskAddress(duskAccount) : (await ensureDuskConnected()).account;
   const network = duskEvmNetwork();
   await ensureEvmChain(network);
-  const { account, publicClient, walletClient } = getEvmClients(network);
+  const { account, walletClient } = getEvmClients(network);
   const operation = prepareWithdrawalCall({
     account,
     amountWei,
-    duskAccount: profile.account,
+    duskAccount: recipient,
   });
   const hash = await walletClient.sendTransaction({
     account,
@@ -55,10 +62,5 @@ export async function submitDuskEvmWithdrawal({ amount }) {
     to: operation.l2Transaction.to,
     value: operation.l2Transaction.value,
   });
-  return {
-    amountWei,
-    duskAccount: profile.account,
-    hash,
-    receipt: await publicClient.waitForTransactionReceipt({ hash }),
-  };
+  return { amountWei, duskAccount: recipient, hash };
 }

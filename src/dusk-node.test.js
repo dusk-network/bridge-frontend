@@ -163,3 +163,18 @@ test("amounts past 2^53 Lux keep every digit, in transactions and in query answe
     s: '12345678901234567890 " 1',
   });
 });
+
+test("a public balance is read from the node as Lux, without losing digits", async () => {
+  const calls = [];
+  const node = createDuskNode({
+    fetch: async (url, init) => {
+      calls.push([url, init.method]);
+      return new Response('{"balance":18446744073709551615,"next_nonce":19,"nonce":18}');
+    },
+    url: "https://node.example",
+  });
+  const account = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
+  assert.equal(await node.accountBalance(account), 18_446_744_073_709_551_615n);
+  assert.deepEqual(calls, [[`https://node.example/on/account:${account}/status`, "POST"]]);
+  await assert.rejects(node.accountBalance("not base58 0OIl"), /base58/u);
+});

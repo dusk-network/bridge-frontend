@@ -152,6 +152,19 @@ export function createDuskNode({ url, fetch = globalThis.fetch }) {
     return BigInt(timestamp);
   }
 
+  /** A public account's balance in Lux. */
+  async function accountBalance(account) {
+    const key = String(account ?? "").trim();
+    if (!/^[1-9A-HJ-NP-Za-km-z]+$/u.test(key)) throw new Error("Dusk account is not valid base58.");
+    const response = await post(`/on/account:${key}/status`, {});
+    if (!response.ok) throw new Error(`Dusk balance query failed with HTTP ${response.status}.`);
+    const text = await response.text();
+    // The balance can exceed 2^53 Lux: read it as text.
+    const match = /"balance"\s*:\s*"?(\d+)/u.exec(text);
+    if (!match) throw new Error("The Dusk node gave no balance.");
+    return BigInt(match[1]);
+  }
+
   /** Moonlight transfers whose memo is exactly `memo` (archive nodes). */
   async function transfersByMemo(memo) {
     const text = String(memo).replace(/["\\]/gu, "");
@@ -161,6 +174,7 @@ export function createDuskNode({ url, fetch = globalThis.fetch }) {
   }
 
   return Object.freeze({
+    accountBalance,
     contractCall,
     gasPrice,
     latestBlockTimestamp,

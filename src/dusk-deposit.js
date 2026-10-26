@@ -2,6 +2,7 @@ import { formatUnits } from "./amount.js";
 import { config } from "./config.js";
 import { fromHex } from "./data-driver.js";
 import { sendDuskContractCall } from "./dusk-wallet.js";
+import { networkName } from "./names.js";
 import { DEPOSIT_GAS_LIMIT, gasAtNodePrice } from "./gas.js";
 import { normalizeEvmAddress } from "./validation.js";
 
@@ -68,18 +69,22 @@ export function decodeDepositArgs(data) {
 /** What the wallet shows as the dApp's own (unverified) description. */
 export function depositDisplay({ amountLux, recipient }) {
   return {
-    label: `Bridge ${formatUnits(amountLux, 9)} DUSK to ${config.duskEvm.name}`,
+    label: `Bridge ${formatUnits(amountLux, 9)} DUSK to ${networkName(config, "dusk-evm")}`,
     recipient,
   };
 }
 
-export async function submitDuskEvmDeposit({ amountLux, node, recipient }) {
+/**
+ * The deposit as Dusk Wallet receives it: the review shows this request, and
+ * the same request is sent.
+ */
+export async function depositRequest({ amountLux, node, recipient }) {
   if (!config.duskEvm.enabled)
     throw new Error("DuskEVM deposits are not configured for this deployment.");
   const to = normalizeEvmAddress(recipient);
-  return sendDuskContractCall({
+  return {
     contractId: config.duskEvm.l1StandardBridgeContractId,
-    depositLux: amountLux,
+    depositLux: BigInt(amountLux),
     display: depositDisplay({ amountLux, recipient: to }),
     fnArgs: encodeDepositArgs({
       amountLux,
@@ -88,5 +93,9 @@ export async function submitDuskEvmDeposit({ amountLux, node, recipient }) {
     }),
     fnName: DEPOSIT_FN_NAME,
     gas: await gasAtNodePrice(DEPOSIT_GAS_LIMIT, node),
-  });
+  };
+}
+
+export async function submitDuskEvmDeposit(options) {
+  return sendDuskContractCall(options.request ?? (await depositRequest(options)));
 }

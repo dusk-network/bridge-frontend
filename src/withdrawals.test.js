@@ -142,6 +142,7 @@ test("a withdrawal's amount and Dusk recipient come from its relayed call", asyn
 
   assert.equal(details.amountWei, 10_000_000_000_000_000_000n);
   assert.match(details.recipientSubmitter, /^0x[0-9a-f]{40}$/u);
+  assert.equal(details.from.toLowerCase(), "0xeb9ea22334e679cdbc669cf9ad2d713b559708b1");
 });
 
 test("a proven withdrawal waits when the finalize preflight refuses", async () => {

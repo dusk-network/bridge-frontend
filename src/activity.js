@@ -1,10 +1,11 @@
-// Recent transfers, kept in this browser only. An entry needs just its route
-// and source transaction hash: the tracker rebuilds everything else from the
+// The transfers this browser knows: sent here, looked up here, or found on
+// the networks for a connected account. An entry needs just its route and
+// source transaction hash: the tracker rebuilds everything else from the
 // chain, so a lost or cleared entry can be added back from its hash.
 
 const STORAGE_KEY = "dusk-bridge:activity:v2";
 const LEGACY_KEY = "dusk-bridge:activity:v1";
-const MAX_ITEMS = 40;
+const MAX_ITEMS = 200;
 
 const defaultStorage = () => globalThis.localStorage;
 
@@ -67,6 +68,11 @@ function save(items, storage) {
     unsaved.set(storage, kept);
   }
   return kept;
+}
+
+/** Replaces the kept list, newest first as given. */
+export function saveActivity(items, storage = defaultStorage()) {
+  return storage ? save(items.filter(validItem), storage) : items.slice(0, MAX_ITEMS);
 }
 
 export function readActivity(storage = defaultStorage()) {

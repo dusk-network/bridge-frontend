@@ -20,7 +20,8 @@ const DUSK_HASH = "ab".repeat(32);
 const EVM_HASH = `0x${"cd".repeat(32)}`;
 
 const cfg = {
-  dusk: { label: "Dusk Testnet" },
+  profile: "testnet",
+  dusk: {},
   duskEvm: {
     l1StandardBridgeContractId: "11".repeat(32),
     l2StandardBridgeAddress: "0x4200000000000000000000000000000000000010",
@@ -106,7 +107,7 @@ test("a migration is pending until Messina pays it out on Dusk", async () => {
 
   const waiting = await tracking.refresh(entry, ROUTES.migration);
   assert.equal(waiting.status, "pending");
-  assert.equal(waiting.note, "Waiting for Sepolia.");
+  assert.equal(waiting.note, "Waiting for Ethereum (Sepolia).");
   // Rebuilt from the hash alone: the amount and recipient come from the call.
   assert.equal(waiting.amountLux, "3000000000");
   assert.equal(waiting.destination, SENDER);
@@ -114,7 +115,7 @@ test("a migration is pending until Messina pays it out on Dusk", async () => {
   receipt = { blockNumber: toHex(100n), status: "0x1" };
   const mined = await tracking.refresh(entry, ROUTES.migration);
   assert.equal(mined.status, "pending");
-  assert.match(mined.note, /Paid out on Dusk Testnet/u);
+  assert.match(mined.note, /Paid out on Dusk,/u);
 
   payouts = [
     { events: [{ data: { receiver: "someone else", value: "3000000000" }, reverted: false, topic: "moonlight" }], origin: "00".repeat(32) },

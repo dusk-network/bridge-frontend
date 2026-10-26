@@ -74,12 +74,15 @@ test("reads made together go to the node as one multicall", async () => {
   assert.equal(check, "OptimismPortal2: withdrawal not proven");
 });
 
-test("a lone read is sent directly", async () => {
+test("a lone read goes through the multicall too, so a panic is an answer, not an HTTP error", async () => {
   const node = fakeNode(answers);
   const reader = createContractReader({ multicall: MULTICALL, node });
+  const portal = contractFacade(reader, PORTAL);
 
-  assert.equal(await contractFacade(reader, PORTAL).call.respectedGameType(), 8);
-  assert.deepEqual(node.calls, [{ fnName: "respectedGameType", id: PORTAL.id }]);
+  assert.equal(await portal.call.respectedGameType(), 8);
+  assert.deepEqual(node.calls, [{ fnName: "aggregate", id: MULTICALL.id }]);
+  await assert.rejects(portal.call.checkWithdrawal([[1], [2]]), /^Error: OptimismPortal2: withdrawal not proven$/u);
+  assert.deepEqual(node.calls.map(({ fnName }) => fnName), ["aggregate", "aggregate"]);
 });
 
 test("reads fall back to one query each when the multicall fails", async () => {

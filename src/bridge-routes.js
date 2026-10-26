@@ -1,4 +1,5 @@
 import { config } from "./config.js";
+import { networkName } from "./names.js";
 
 /**
  * The routes one deployment offers, all on its profile's network: old-token
@@ -6,9 +7,8 @@ import { config } from "./config.js";
  * where its contracts are configured.
  */
 export function buildRoutes(cfg) {
-  const dusk = Object.freeze({ id: "dusk", kind: "dusk", label: cfg.dusk.label });
-  const evm = (id) =>
-    Object.freeze({ id, kind: "evm", label: cfg.evmNetworks[id].chainName });
+  const dusk = Object.freeze({ id: "dusk", kind: "dusk", label: networkName(cfg, "dusk") });
+  const evm = (id) => Object.freeze({ id, kind: "evm", label: networkName(cfg, id) });
   const routes = cfg.migrations.map((id) => ({
     amountDecimals: 9,
     from: evm(id),
@@ -30,7 +30,7 @@ export function buildRoutes(cfg) {
     const duskEvm = Object.freeze({
       id: "dusk-evm",
       kind: "evm",
-      label: cfg.duskEvm.name,
+      label: networkName(cfg, "dusk-evm"),
     });
     routes.push(
       {

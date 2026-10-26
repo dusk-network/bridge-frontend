@@ -79,10 +79,10 @@ test("the testnet profile stays on Dusk testnet, Sepolia and DuskEVM testnet", (
   assert.deepEqual(
     routes.map((route) => `${route.from.label} → ${route.to.label}`),
     [
-      "Sepolia → Dusk Testnet",
-      "Dusk Testnet → Sepolia",
-      "Dusk Testnet → DuskEVM Testnet",
-      "DuskEVM Testnet → Dusk Testnet",
+      "Ethereum (Sepolia) → Dusk",
+      "Dusk → Ethereum (Sepolia)",
+      "Dusk → DuskEVM",
+      "DuskEVM → Dusk",
     ],
   );
 });
@@ -151,4 +151,23 @@ test("the gas bound, fee and multicall come from config", () => {
     withConfig({ VITE_BRIDGE_PROFILE: "testnet" }).cfg.multicall.contractId,
     "93de287b7d349d678a0038fe7772e8960e1a84a1b5da2d0b1f62f532616ce1d4",
   );
+});
+
+test("links, operators and contacts appear only when configured", () => {
+  const bare = withConfig({ VITE_BRIDGE_PROFILE: "mainnet" }).cfg;
+  assert.equal(bare.links.support, "");
+  assert.equal(bare.links.sites.testnet, "");
+  assert.deepEqual({ ...bare.operators }, { duskEvm: "", migration: "", service: "" });
+  assert.match(bare.links.docs.migration, /^https:\/\/docs\.dusk\.network\//u);
+
+  const set = withConfig({
+    VITE_BRIDGE_PROFILE: "mainnet",
+    VITE_SERVICE_OPERATOR: "Example Operator B.V.",
+    VITE_SUPPORT_URL: "javascript:alert(1)",
+    VITE_TESTNET_BRIDGE_URL: "https://bridge.example.org",
+  }).cfg;
+  assert.equal(set.operators.service, "Example Operator B.V.");
+  assert.equal(set.links.sites.testnet, "https://bridge.example.org");
+  // Only http(s) links are shown.
+  assert.equal(set.links.support, "");
 });

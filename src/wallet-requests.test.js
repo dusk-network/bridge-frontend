@@ -96,7 +96,18 @@ test("a DuskEVM deposit carries the typed recipient, its own gas and a label", a
   assert.equal(args.to, getAddress(TYPED));
   assert.equal(args.amountLux, 100_000_000n);
   assert.deepEqual(params.display, {
-    label: "Bridge 0.1 DUSK to DuskEVM Testnet",
+    label: "Bridge 0.1 DUSK to DuskEVM",
     recipient: getAddress(TYPED),
   });
+});
+
+test("with the node, a Dusk → Sepolia transfer carries the gas the quote shows", async () => {
+  const wallet = fakeWallet();
+  useDuskWallet(wallet);
+
+  await submitServiceTransfer({ amountLux: 2_000_000_000n, destination: TYPED, node });
+
+  const [{ params }] = wallet.sent;
+  assert.deepEqual(params.gas, { limit: "2500000", price: "1" });
+  assert.equal(params.memo, getAddress(TYPED));
 });
