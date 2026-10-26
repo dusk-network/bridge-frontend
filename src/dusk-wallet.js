@@ -38,11 +38,16 @@ export function getDuskApp() {
   return app;
 }
 
+export function isRecoverableDuskSessionError(error) {
+  return error?.code === 4100;
+}
+
 export async function ensureDuskConnected(
   chainId = config.dusk.mainnet.chainId,
 ) {
   const current = getDuskWallet();
-  if (!current.state.selectedProfile)
+  await current.refresh().catch(() => {});
+  if (!current.state.authorized || !current.state.selectedProfile)
     await current.connect({ reason: "bridge_recipient" });
   if (current.state.chainId !== chainId) await current.switchChain({ chainId });
   const profile = current.state.selectedProfile;
@@ -50,14 +55,29 @@ export async function ensureDuskConnected(
   return profile;
 }
 
-export async function sendDuskTransfer({ amountLux, chainId, memo, to }) {
+async function withDuskSession(chainId, operation) {
   await ensureDuskConnected(chainId);
-  return getDuskWallet().sendTransfer({
-    amount: BigInt(amountLux).toString(),
-    memo: String(memo ?? ""),
-    privacy: "public",
-    to,
-  });
+  try {
+    return await operation();
+  } catch (error) {
+    if (!isRecoverableDuskSessionError(error)) throw error;
+    const current = getDuskWallet();
+    await current.refresh().catch(() => {});
+    await current.connect({ reason: "bridge_transaction" });
+    await ensureDuskConnected(chainId);
+    return operation();
+  }
+}
+
+export async function sendDuskTransfer({ amountLux, chainId, memo, to }) {
+  return withDuskSession(chainId, () =>
+    getDuskWallet().sendTransfer({
+      amount: BigInt(amountLux).toString(),
+      memo: String(memo ?? ""),
+      privacy: "public",
+      to,
+    }),
+  );
 }
 
 export function buildContractCallRequest({
@@ -83,6 +103,7 @@ export function buildContractCallRequest({
 
 export async function sendDuskContractCall(request) {
   const { chainId } = request;
-  await ensureDuskConnected(chainId);
-  return getDuskWallet().sendContractCall(buildContractCallRequest(request));
+  return withDuskSession(chainId, () =>
+    getDuskWallet().sendContractCall(buildContractCallRequest(request)),
+  );
 }
