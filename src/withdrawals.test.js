@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { WITHDRAWAL_GAS_REFUSAL, gasAtNodePrice, withdrawalGasLimit } from "./gas.js";
-import { encodeAbiParameters, encodeEventTopics, encodeFunctionData, parseAbi } from "viem";
+import { encodeDuskExternalAssetRecipient } from "@dusk/evm-sdk";
+import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, encodeFunctionData, parseAbi } from "viem";
 
+import { WITHDRAWAL_GAS_REFUSAL, gasAtNodePrice, withdrawalGasLimit } from "./gas.js";
 import {
   NOT_A_DUSK_WITHDRAWAL,
   createWithdrawals,
@@ -14,6 +15,14 @@ import {
   withdrawalDetails,
 } from "./withdrawals.js";
 import { contractFacade, createContractReader } from "./contract-reader.js";
+import { DUSK_WALLET_BRIDGE_CONTRACTS, duskCallLines } from "./wallet-lines.js";
+import { decodeBase58 } from "./base58.js";
+
+const ACCOUNT = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
+const RELAY = parseAbi([
+  "function relayMessage(uint256 _nonce, address _sender, address _target, uint256 _value, uint256 _minGasLimit, bytes _message)",
+  "function finalizeBridgeETH(address _from, address _to, uint256 _amount, bytes _extraData)",
+]);
 
 // A DuskEVM withdrawal of 10 DUSK (web wallet fixture): relayMessage(...) to
 // L1's bridge, finalizeBridgeETH(from, to, amount, Dusk recipient).
@@ -274,6 +283,37 @@ test("a claim sends the SDK-serialized withdrawal with its own gas on top", asyn
   assert.equal(args.gas_limit.length, 32);
   assert.equal(args.sender.length, 20);
   assert.equal(args.target.length, 20);
+
+  // The claim carries its withdrawal, so the review lists what Dusk Wallet
+  // reads from the call. This one's extra data is in an older form that
+  // names no Dusk account, so the window shows a plain contract call.
+  const prepared = await withdrawals.prepareFinalize(TX);
+  const claimLines = (withdrawal) => {
+    const details = withdrawalDetails(withdrawal);
+    return duskCallLines({
+      chainId: "dusk:2",
+      contractId: DUSK_WALLET_BRIDGE_CONTRACTS["dusk:2"].portal,
+      fnArgs: [1],
+      fnName: prepared.fnName,
+      gas: prepared.gas,
+      withdrawal: details && { ...details, value: withdrawal.value },
+    });
+  };
+  assert.equal(withdrawalDetails(prepared.withdrawal).amountWei, 10n * 10n ** 18n);
+  assert.equal((await claimLines(prepared.withdrawal))[0].title, "Contract call");
+
+  // The same withdrawal paying a Dusk account as the bridge writes it now.
+  const relay = decodeFunctionData({ abi: RELAY, data: prepared.withdrawal.data });
+  const bridged = decodeFunctionData({ abi: RELAY, data: relay.args[5] });
+  const extraData = encodeDuskExternalAssetRecipient(decodeBase58(ACCOUNT));
+  const message = encodeFunctionData({ abi: RELAY, args: [...bridged.args.slice(0, 3), extraData], functionName: "finalizeBridgeETH" });
+  const lines = await claimLines({ ...prepared.withdrawal, data: encodeFunctionData({ abi: RELAY, args: [...relay.args.slice(0, 5), message], functionName: "relayMessage" }) });
+  assert.deepEqual([lines[0].title, lines[0].amount, lines[0].tag], ["Claim a DuskEVM withdrawal", "10 DUSK", "Known DuskEVM bridge call"]);
+  assert.deepEqual(lines.slice(1, 4).map((line) => [line.label, line.address ?? line.value]), [
+    ["Pays to", ACCOUNT],
+    ["Amount", "10 DUSK"],
+    ["Sent from DuskEVM", "0xEb9Ea22334e679cDbC669cF9AD2d713b559708B1"],
+  ]);
 });
 
 test("a status check reads the Portal and game factory in one node query", async () => {

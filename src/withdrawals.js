@@ -825,7 +825,7 @@ export function createWithdrawals(deps) {
     return { limit: limit.toString(), price: (await deps.gasPrice()).toString() };
   }
 
-  /** The proof call for a withdrawal, ready to review and send. */
+  /** The proof call for a withdrawal, ready to review and send, with the withdrawal it carries. */
   async function prepareProve(txHash) {
     const event = parseWithdrawalReceipt(await fetchL2Receipt(txHash));
     const submitter = deps.proofSubmitter();
@@ -854,10 +854,11 @@ export function createWithdrawals(deps) {
       ],
       fnName: "proveWithdrawalTransaction",
       gas: await withdrawalGas(),
+      withdrawal: event.withdrawal,
     };
   }
 
-  /** The claim call for a withdrawal that is ready, to review and send. */
+  /** The claim call for a withdrawal that is ready, to review and send, with the withdrawal it carries. */
   async function prepareFinalize(txHash) {
     const status = await loadWithdrawalStatus(txHash, {
       proofSubmitter: deps.proofSubmitter(),
@@ -868,6 +869,7 @@ export function createWithdrawals(deps) {
       args: withdrawalToDriverInput(status.withdrawal),
       fnName: "finalizeWithdrawalTransaction",
       gas: await withdrawalGas(status.withdrawal.gasLimit),
+      withdrawal: status.withdrawal,
     };
   }
 

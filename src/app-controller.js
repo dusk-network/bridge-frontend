@@ -58,6 +58,7 @@ import {
   transfersPage,
 } from "./views.js";
 import { approveLines, duskCallLines, duskTransferLines, migrateLines, withdrawLines } from "./wallet-lines.js";
+import { withdrawalDetails } from "./withdrawals.js";
 
 export { friendlyWalletError };
 
@@ -895,11 +896,10 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
           route.mode === "duskevm-deposit"
             ? await depositRequest({ amountLux: lux, node: services.node, recipient: destination })
             : await serviceTransferRequest({ amountLux: lux, destination, node: services.node });
-        const network = { chainId: cfg.dusk.chainId, name: names.badge };
         const lines =
           route.mode === "duskevm-deposit"
-            ? await duskCallLines({ ...request, from: duskAccount(), network, note: "The DuskEVM bridge contract on Dusk." })
-            : duskTransferLines({ amountLux: request.amountLux, from: duskAccount(), gas: request.gas, memo: request.memo, network, to: request.to });
+            ? await duskCallLines({ ...request, chainId: cfg.dusk.chainId, from: duskAccount(), fromName: duskName(), note: "The DuskEVM bridge contract on Dusk." })
+            : duskTransferLines({ amountLux: request.amountLux, from: duskAccount(), fromName: duskName(), gas: request.gas, memo: request.memo, to: request.to });
         return { lines, request };
       },
       ({ lines, request }) => {
@@ -986,11 +986,15 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         if (kind === "finalize" && proverMismatch(entry, proofSubmitterFor(duskAccount()))) throw new Error(switchToProver(entry));
         const prepared = kind === "prove" ? await services.withdrawals.prepareProve(entry.hash) : await services.withdrawals.prepareFinalize(entry.hash);
         const request = await services.portalRequest(prepared);
+        // What the call carries, as Dusk Wallet reads it from the call.
+        const details = prepared.withdrawal ? withdrawalDetails(prepared.withdrawal) : null;
         const lines = await duskCallLines({
           ...request,
+          chainId: cfg.dusk.chainId,
           from: duskAccount(),
-          network: { chainId: cfg.dusk.chainId, name: names.badge },
+          fromName: duskName(),
           note: "The DuskEVM withdrawal portal on Dusk.",
+          withdrawal: details && { ...details, value: prepared.withdrawal.value },
         });
         return { account: duskAccount(), lines, request };
       },

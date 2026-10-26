@@ -58,10 +58,11 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   network fee as a maximum and its usual cost, the bridge fee, what you
   receive and when. One line says what becomes public.
 - **Review**: the checked facts (balances, gas, where the payout goes), then
-  each wallet step with the exact lines its popup will show, raw values
-  decoded next to them and every address in full. Cancel and confirm are
-  equal. A Dusk call is built before the review, so the arguments' hash shown
-  is the one Dusk Wallet prints, and the reviewed request is what is sent.
+  each wallet step with the lines its window will show, in its order and
+  words, raw values decoded next to them and every recipient in full. Cancel
+  and confirm are equal. A Dusk call is built before the review, so the call
+  data's sha256 shown is the one Dusk Wallet prints (older versions show a
+  bridge call only as its bytes), and the reviewed request is what is sent.
 - **Receipt**, at `#/transfer/<hash>`: the steps with times, explorer links
   and hashes, both transactions in full, the fees paid and the receipt link.
   It shows no balances: the link is safe to share. A withdrawal waiting for

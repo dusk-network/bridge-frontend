@@ -204,15 +204,31 @@ export function formPage(vm) {
 // Review sheet
 // ---------------------------------------------------------------------------
 
+// The top of a wallet's window: its title, the amount, to whom, and its tag.
+function walletHead(head) {
+  const to = head.to
+    ? ` to <code class="mono" title="${html(head.toFull ?? head.to)}">${html(head.to)}</code>${head.where ? ` ${html(head.where)}` : ""}`
+    : "";
+  return `<div class="wlhd"><div class="wlt">${html(head.title)}</div>${head.amount || to ? `<div class="wlto">${head.amount ? `<span class="num">${html(head.amount)}</span>` : ""}${to}</div>` : ""}${head.sub ? `<div class="wlto">${html(head.sub)}</div>` : ""}${head.tag ? `<span class="tag">${icon("check")}${html(head.tag)}</span>` : ""}</div>`;
+}
+
 export function walletLines(lines, cfgLinks) {
-  return `<dl class="wls">${lines
-    .map((line) => {
-      const value = line.address
-        ? `${line.value ? `<span class="wl-name">${html(line.value)}</span>` : ""}${fullValue({ explorer: cfgLinks.explorer(line.network, line.address), label: line.label, value: line.address })}`
-        : `<span class="${line.mono ? "mono wrap" : "num"}">${html(line.value)}</span>`;
-      return `<div class="wl"><dt>${html(line.label)}</dt><dd>${value}${line.note ? `<span class="wl-note">${html(line.note)}</span>` : ""}</dd></div>`;
-    })
-    .join("")}</dl>`;
+  const head = lines.find((line) => line.kind === "head");
+  const row = (line) => {
+    const text = `<span class="${line.mono ? "mono wrap" : "num"}"${line.full ? ` title="${html(line.full)}"` : ""}>${html(line.value)}</span>`;
+    const value = line.address
+      ? `${line.value ? `<span class="wl-name">${html(line.value)}</span>` : ""}${fullValue({ explorer: cfgLinks.explorer(line.network, line.address), label: line.label, value: line.address })}`
+      : line.suffix
+        ? `<span>${text}<span class="t2"> · ${html(line.suffix)}</span></span>`
+        : text;
+    return `<div class="wl${line.gap ? " gap" : ""}"><dt>${html(line.label)}</dt><dd>${value}${line.note ? `<span class="wl-note">${html(line.note)}</span>` : ""}</dd></div>`;
+  };
+  const shown = lines.filter((line) => line.kind !== "head" && !line.fold);
+  // What the window folds under Details: the function, the hash, the site's words.
+  const folded = lines.filter((line) => line.fold);
+  return `${head ? walletHead(head) : ""}<dl class="wls">${shown.map(row).join("")}</dl>${
+    folded.length ? `<details class="wl-more"><summary>Details</summary><dl class="wls">${folded.map(row).join("")}</dl></details>` : ""
+  }`;
 }
 
 // A proof's or a claim's review leads with what the step costs and what moves.
