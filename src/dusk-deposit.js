@@ -1,18 +1,17 @@
-import { duskEvmDepositConfigured, config } from "./config.js";
+import { formatUnits } from "./amount.js";
+import { config } from "./config.js";
+import { fromHex } from "./data-driver.js";
 import { sendDuskContractCall } from "./dusk-wallet.js";
+import { DEPOSIT_GAS_LIMIT, gasAtNodePrice } from "./gas.js";
 import { normalizeEvmAddress } from "./validation.js";
 
 export const BRIDGE_DEPOSIT_MIN_GAS_LIMIT = 200_000;
+export const DEPOSIT_FN_NAME = "depositETHToWithValue";
 const UINT32_MAX = 2n ** 32n - 1n;
 const UINT64_MAX = 2n ** 64n - 1n;
 
 function hexToBytes(input, expectedLength) {
-  const value = String(input).replace(/^0x/u, "");
-  if (!/^(?:[0-9a-f]{2})+$/iu.test(value))
-    throw new Error("Expected hexadecimal bytes.");
-  const bytes = Uint8Array.from(
-    value.match(/../gu).map((byte) => Number.parseInt(byte, 16)),
-  );
+  const bytes = fromHex(input);
   if (bytes.length !== expectedLength)
     throw new Error(`Expected ${expectedLength} bytes.`);
   return bytes;
@@ -26,6 +25,14 @@ function writeUintLe(out, offset, value, bytes) {
   }
 }
 
+function readUintLe(bytes, offset, length) {
+  let out = 0n;
+  for (let index = length - 1; index >= 0; index -= 1)
+    out = (out << 8n) + BigInt(bytes[offset + index]);
+  return out;
+}
+
+/** `depositETHToWithValue(u64, [u8; 20], u32, Vec<u8>)`, rkyv as Rust writes it. */
 export function encodeDepositArgs({ amountLux, minGasLimit, to }) {
   const amount = BigInt(amountLux);
   const gas = BigInt(minGasLimit);
@@ -41,18 +48,45 @@ export function encodeDepositArgs({ amountLux, minGasLimit, to }) {
   return out;
 }
 
-export async function submitDuskEvmDeposit({ amountLux, recipient }) {
-  if (!duskEvmDepositConfigured())
+/**
+ * The amount and DuskEVM recipient of a deposit call. rkyv puts the argument
+ * tuple last, after any `extraData` bytes it points back to.
+ */
+export function decodeDepositArgs(data) {
+  const bytes = typeof data === "string" ? fromHex(data) : Uint8Array.from(data);
+  if (bytes.length < 40) throw new Error("Deposit arguments are too short.");
+  const root = bytes.length - 40;
+  return Object.freeze({
+    amountLux: readUintLe(bytes, root, 8),
+    minGasLimit: Number(readUintLe(bytes, root + 28, 4)),
+    to: normalizeEvmAddress(
+      `0x${Array.from(bytes.slice(root + 8, root + 28), (b) => b.toString(16).padStart(2, "0")).join("")}`,
+    ),
+  });
+}
+
+/** What the wallet shows as the dApp's own (unverified) description. */
+export function depositDisplay({ amountLux, recipient }) {
+  return {
+    label: `Bridge ${formatUnits(amountLux, 9)} DUSK to ${config.duskEvm.name}`,
+    recipient,
+  };
+}
+
+export async function submitDuskEvmDeposit({ amountLux, node, recipient }) {
+  if (!config.duskEvm.enabled)
     throw new Error("DuskEVM deposits are not configured for this deployment.");
+  const to = normalizeEvmAddress(recipient);
   return sendDuskContractCall({
-    chainId: config.duskEvm.l1ChainId,
     contractId: config.duskEvm.l1StandardBridgeContractId,
     depositLux: amountLux,
+    display: depositDisplay({ amountLux, recipient: to }),
     fnArgs: encodeDepositArgs({
       amountLux,
       minGasLimit: BRIDGE_DEPOSIT_MIN_GAS_LIMIT,
-      to: recipient,
+      to,
     }),
-    fnName: "depositETHToWithValue",
+    fnName: DEPOSIT_FN_NAME,
+    gas: await gasAtNodePrice(DEPOSIT_GAS_LIMIT, node),
   });
 }

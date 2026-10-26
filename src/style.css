@@ -124,6 +124,15 @@ select { appearance: none; padding-right: 2.5rem; }
 .activity-list li div { display: grid; gap: .15rem; }
 .activity-list span, .activity-list code { color: var(--muted); font-size: .7rem; }
 .activity-list code { font-family: "Sohne Mono", ui-monospace, monospace; }
+.activity-list li.activity-item { display: grid; gap: .5rem; align-items: start; justify-content: stretch; }
+.activity-note { margin: 0; color: var(--muted); font-size: .72rem; line-height: 1.45; }
+.activity-note.error { color: #ff9caf; }
+.activity-steps { display: grid; gap: .3rem; margin: 0; padding: 0; list-style: none; }
+.activity-list .activity-steps li { display: grid; grid-template-columns: 11rem minmax(0, 1fr); gap: .75rem; padding: 0; border: 0; }
+.activity-steps li.done span:first-child { color: #f2f0eb; }
+.activity-steps a, .activity-links a { color: var(--muted); }
+.activity-links { display: flex; flex-wrap: wrap; gap: .4rem 1rem; font-size: .72rem; }
+.activity-item > button { justify-self: start; min-height: 2.25rem; padding: .45rem .9rem; font-size: .8rem; }
 footer { width: min(42rem, calc(100% - 2rem)); margin: 0 auto; padding: 0 0 2rem; text-align: right; }
 footer a { color: var(--muted); font-size: .75rem; text-decoration: none; }
 footer a:hover { color: var(--accent); }
@@ -138,4 +147,5 @@ footer a:hover { color: var(--accent); }
   .network-strip strong { font-size: .85rem; }
   .actions { flex-direction: column; }
   .section-heading { align-items: flex-start; flex-direction: column; gap: .25rem; }
+  .activity-list .activity-steps li { grid-template-columns: minmax(0, 1fr); gap: .1rem; }
 }

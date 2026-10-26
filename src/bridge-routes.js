@@ -1,65 +1,61 @@
 import { config } from "./config.js";
 
-const defineRoute = (route) => Object.freeze(route);
-
-export const networks = Object.freeze({
-  bsc: Object.freeze({
-    id: "bsc",
-    kind: "evm",
-    label: config.legacy.migrations.bsc.chainName,
-  }),
-  duskL1: Object.freeze({ id: "dusk-l1", kind: "dusk", label: "Dusk L1" }),
-  duskMainnet: Object.freeze({
-    id: "dusk-mainnet",
-    kind: "dusk",
-    label: config.legacy.duskLabel,
-  }),
-  duskEvm: Object.freeze({ id: "dusk-evm", kind: "evm", label: "DuskEVM" }),
-  ethereum: Object.freeze({
-    id: "ethereum",
-    kind: "evm",
-    label: config.legacy.migrations.ethereum.chainName,
-  }),
-});
-
-const migrationRoutes = config.legacy.migrationKeys.map((networkId) =>
-  defineRoute({
-    amountDecimals: 18,
-    from: networks[networkId],
-    id: `${networkId}-to-dusk`,
+/**
+ * The routes one deployment offers, all on its profile's network: old-token
+ * migrations into Dusk, the operated Dusk -> EVM transfer, and DuskEVM only
+ * where its contracts are configured.
+ */
+export function buildRoutes(cfg) {
+  const dusk = Object.freeze({ id: "dusk", kind: "dusk", label: cfg.dusk.label });
+  const evm = (id) =>
+    Object.freeze({ id, kind: "evm", label: cfg.evmNetworks[id].chainName });
+  const routes = cfg.migrations.map((id) => ({
+    amountDecimals: 9,
+    from: evm(id),
+    id: `${id}-to-dusk`,
     mode: "migration",
     signer: "evm",
-    to: networks.duskMainnet,
-  }),
-);
+    to: dusk,
+  }));
+  if (cfg.service)
+    routes.push({
+      amountDecimals: 9,
+      from: dusk,
+      id: `dusk-to-${cfg.service.network}`,
+      mode: "service-transfer",
+      signer: "dusk",
+      to: evm(cfg.service.network),
+    });
+  if (cfg.duskEvm.enabled) {
+    const duskEvm = Object.freeze({
+      id: "dusk-evm",
+      kind: "evm",
+      label: cfg.duskEvm.name,
+    });
+    routes.push(
+      {
+        amountDecimals: 9,
+        from: dusk,
+        id: "dusk-to-dusk-evm",
+        mode: "duskevm-deposit",
+        signer: "dusk",
+        to: duskEvm,
+      },
+      {
+        // Dusk holds whole Lux, so a withdrawal moves at most 9 decimals.
+        amountDecimals: 9,
+        from: duskEvm,
+        id: "dusk-evm-to-dusk",
+        mode: "duskevm-withdrawal",
+        signer: "evm",
+        to: dusk,
+      },
+    );
+  }
+  return Object.freeze(routes.map((route) => Object.freeze(route)));
+}
 
-export const bridgeRoutes = Object.freeze([
-  ...migrationRoutes,
-  defineRoute({
-    amountDecimals: 9,
-    from: networks.duskMainnet,
-    id: `dusk-to-${config.legacy.serviceNetworkId}`,
-    mode: "service-transfer",
-    signer: "dusk",
-    to: networks[config.legacy.serviceNetworkId],
-  }),
-  defineRoute({
-    amountDecimals: 9,
-    from: networks.duskL1,
-    id: "dusk-to-dusk-evm",
-    mode: "duskevm-deposit",
-    signer: "dusk",
-    to: networks.duskEvm,
-  }),
-  defineRoute({
-    amountDecimals: 18,
-    from: networks.duskEvm,
-    id: "dusk-evm-to-dusk",
-    mode: "duskevm-withdrawal",
-    signer: "evm",
-    to: networks.duskL1,
-  }),
-]);
+export const bridgeRoutes = buildRoutes(config);
 
 export const getBridgeRoute = (routeId) =>
   bridgeRoutes.find(({ id }) => id === routeId);

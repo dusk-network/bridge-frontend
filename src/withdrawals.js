@@ -36,6 +36,10 @@ const L2_CROSS_DOMAIN_MESSENGER = "0x4200000000000000000000000000000000000007";
 
 /** Why a DuskEVM transaction isn't followed, proved or claimed as a withdrawal. */
 export const NOT_A_DUSK_WITHDRAWAL = "That DuskEVM transaction isn't a DUSK withdrawal.";
+
+/** Why a claim waits: the Portal lets only the account that proved claim with its proof. */
+export const PROVED_BY_ANOTHER_ACCOUNT =
+  "Another account proved this withdrawal. Your DUSK isn't affected, but only that account can claim with its proof: switch Dusk Wallet to it, or prove it again with this one.";
 const ZERO_HASH =
   "0x0000000000000000000000000000000000000000000000000000000000000000";
 const GAME_STATUS = Object.freeze({
@@ -304,7 +308,9 @@ function finalizationNotReadyMessage(status) {
     case "waiting_for_output":
       return "The withdrawal is waiting for an output proposal.";
     case "ready_to_prove":
-      return "The withdrawal must be proven before it can be finalized.";
+      return status.provenByOther
+        ? PROVED_BY_ANOTHER_ACCOUNT
+        : "The withdrawal must be proven before it can be finalized.";
     case "prove_submitted":
       return "The withdrawal proof transaction is still pending.";
     case "proven_waiting":

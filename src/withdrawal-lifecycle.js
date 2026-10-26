@@ -88,7 +88,7 @@ export function withdrawalActionFailure(stage, error = "") {
  * that proof, so another account's proof doesn't spare the user their own.
  */
 export const PROVEN_BY_OTHER_ACCOUNT =
-  "Proven by another account, which only lets that account claim. Prove it yourself to claim it.";
+  "Someone else sent a proof for this withdrawal. Your DUSK isn't affected; prove it yourself to claim it.";
 
 export function withdrawalSentMessage(waitingPeriodSeconds = null) {
   const total =

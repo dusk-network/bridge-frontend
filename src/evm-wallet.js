@@ -100,21 +100,24 @@ async function initializeReown() {
         public: { http: [rpcUrl] },
       },
     });
-    const legacyNetworkIds = new Set([
-      ...config.legacy.migrationKeys,
-      config.legacy.serviceNetworkId,
+    // Only this deployment's networks: its old-token chains and DuskEVM.
+    const evmIds = new Set([
+      ...config.migrations,
+      ...(config.service ? [config.service.network] : []),
     ]);
     const networks = [
-      ...[...legacyNetworkIds].map((id) =>
-        network(config.legacy.migrations[id]),
-      ),
-      network({
-        chainId: config.duskEvm.chainId,
-        chainName: config.duskEvm.name,
-        currency: { decimals: 18, name: "Dusk", symbol: "DUSK" },
-        explorerUrl: config.duskEvm.explorerUrl,
-        rpcUrl: config.duskEvm.rpcUrl,
-      }),
+      ...[...evmIds].map((id) => network(config.evmNetworks[id])),
+      ...(config.duskEvm.enabled
+        ? [
+            network({
+              chainId: config.duskEvm.chainId,
+              chainName: config.duskEvm.name,
+              currency: { decimals: 18, name: "Dusk", symbol: "DUSK" },
+              explorerUrl: config.duskEvm.explorerUrl,
+              rpcUrl: config.duskEvm.rpcUrl,
+            }),
+          ]
+        : []),
     ];
     const adapter = new WagmiAdapter({
       networks,
