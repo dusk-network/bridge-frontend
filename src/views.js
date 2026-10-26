@@ -90,12 +90,16 @@ export function footer(vm) {
   // Who runs each route, where that's configured.
   const operators = (vm.operators ?? []).map(({ name, route }) => `${html(name)} for ${html(route)}`);
   const runBy = operators.length ? `<p class="small t2 run-by">Run by ${operators.join(" · ")}.</p>` : "";
-  return `<footer class="foot"><nav aria-label="About the bridge">${links.join("")}</nav>${site}${runBy}</footer>`;
+  const servers = vm.servers ? `<p class="small t2 servers">${html(vm.servers)}</p>` : "";
+  return `<footer class="foot"><nav aria-label="About the bridge">${links.join("")}</nav>${site}${runBy}${servers}</footer>`;
 }
 
 // ---------------------------------------------------------------------------
 // Start page
 // ---------------------------------------------------------------------------
+
+/** A wallet card's account: which one is connected, by name or short code. */
+const connectedAs = (who) => `<span class="t2 small">Connected${who ? ` · <span class="who">${html(who)}</span>` : ""}</span>`;
 
 export function landing(vm) {
   const rows = vm.tasks
@@ -112,8 +116,8 @@ export function landing(vm) {
     ? `<div class="group pad note-box"><div class="note">${icon("phone")}<span><b>On this phone</b> you can move old DUSK with a mobile EVM wallet and follow your transfers. Dusk Wallet is a browser extension for computers, so sending from Dusk happens there.</span></div><div class="btn-row"><button type="button" class="btn sec sm" data-copy="${html(vm.pageUrl)}" aria-label="Copy this page's link">${icon("link")}Copy link</button>${vm.canShare ? `<button type="button" class="btn sec sm" data-action="share">${icon("share")}Share link</button>` : ""}</div></div>`
     : "";
   const wallets = `<h2 class="sec-t">Wallets you'll need</h2><ul class="group list">
-    <li class="row w">${chainMark("dusk")}<div><div class="tt">Dusk Wallet</div><div class="sb">To send from Dusk, and to prove and claim. The official Dusk browser extension.</div></div>${vm.dusk.state === "connected" ? '<span class="t2 small">Connected</span>' : vm.dusk.state === "missing" ? `<a class="btn sec sm" href="${html(vm.dusk.getUrl)}" target="_blank" rel="noreferrer">Get it ${icon("ext")}<span class="sr-only"> (opens in a new tab)</span></a>` : '<button type="button" class="btn sec sm" data-action="connect-dusk">Connect</button>'}</li>
-    <li class="row w"><span class="cm">${icon("wallet")}</span><div><div class="tt">An EVM wallet</div><div class="sb">MetaMask, Rabby or similar. For old DUSK and for DuskEVM.</div></div>${vm.evm.state === "connected" ? '<span class="t2 small">Connected</span>' : '<button type="button" class="btn sec sm" data-action="connect-evm">Connect</button>'}</li>
+    <li class="row w">${chainMark("dusk")}<div><div class="tt">Dusk Wallet</div><div class="sb">To send from Dusk, and to prove and claim. The official Dusk browser extension.</div></div>${vm.dusk.state === "connected" ? connectedAs(vm.dusk.name || short(vm.dusk.account)) : vm.dusk.state === "missing" ? `<a class="btn sec sm" href="${html(vm.dusk.getUrl)}" target="_blank" rel="noreferrer">Get it ${icon("ext")}<span class="sr-only"> (opens in a new tab)</span></a>` : '<button type="button" class="btn sec sm" data-action="connect-dusk">Connect</button>'}</li>
+    <li class="row w"><span class="cm">${icon("wallet")}</span><div><div class="tt">An EVM wallet</div><div class="sb">MetaMask, Rabby or similar. For old DUSK and for DuskEVM.</div></div>${vm.evm.state === "connected" ? connectedAs(short(vm.evm.account)) : '<button type="button" class="btn sec sm" data-action="connect-evm">Connect</button>'}</li>
   </ul>`;
   return `<main class="col" id="main" tabindex="-1">
     <h1>What do you want to do?</h1>
@@ -158,12 +162,21 @@ const availability = (vm) =>
  * recipient. The page renders each in a `data-region` and replaces them all
  * when anything changes, so none goes stale while someone types.
  */
+/** Under the recipient: the account a typed name points to, the lookup, or the capitals' fix. */
+function recipientNote(to) {
+  if (to.resolved) return `${html(to.resolved.name)} points to <code class="mono wrap">${html(to.resolved.address)}</code>`;
+  if (to.looking) return `Looking up ${html(to.looking)}…`;
+  if (to.fix) return `<button type="button" class="linkish" data-action="recipient-fix">If every character is right, fix the capitals</button>`;
+  return "";
+}
+
 export function formRegions(vm) {
   return {
     avail: availability(vm),
     from: accountRow(vm.from),
     privacy: html(vm.privacy),
     quote: quoteBlock(vm),
+    "recipient-note": recipientNote(vm.to),
     "review-hint": html(vm.reviewHint ?? ""),
   };
 }
@@ -179,8 +192,10 @@ export function formPage(vm) {
   const notice = vm.notice ? `<div class="group pad notice-box" role="note"><div class="note">${icon(vm.notice.icon ?? "info")}<span>${vm.notice.html}</span></div>${vm.notice.actions ?? ""}</div>` : "";
   const from = `<div data-region="from">${regions.from}</div>`;
   const amount = `<div class="amount-field"><label for="amount" class="amount-label">Amount</label><div class="bigamt${vm.amountError ? " invalid" : ""}"><input id="amount" name="amount" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="0" value="${html(vm.amount)}" aria-describedby="amount-help amount-error"${vm.amountError ? ' aria-invalid="true"' : ""}><span class="u">${html(vm.unit)}</span></div><div class="avail" id="amount-help" data-region="avail">${regions.avail}</div>${vm.balanceNote ? `<p class="small t2 center">${html(vm.balanceNote)}</p>` : ""}<p class="field-error" id="amount-error" role="alert">${html(vm.amountError ?? "")}</p></div>`;
+  // Under the field: what a typed name points to, the lookup, or the capitals' fix.
+  const note = `<p class="small t2 rnote" id="recipient-note" data-region="recipient-note" aria-live="polite">${regions["recipient-note"]}</p>`;
   const to = vm.to.editing
-    ? `<div class="group acc edit">${chainMark(vm.to.chain)}<div class="acc-main"><label class="l1" for="recipient">${html(vm.to.label)}</label><input id="recipient" name="recipient" class="mono-input" autocomplete="off" spellcheck="false" placeholder="${html(vm.to.placeholder)}" value="${html(vm.to.input)}" aria-describedby="recipient-error"${vm.to.error ? ' aria-invalid="true"' : ""}><p class="field-error" id="recipient-error" role="alert">${html(vm.to.error ?? "")}</p></div>${vm.to.canReset ? '<button type="button" class="linkish" data-action="recipient-reset">Use my account</button>' : ""}</div>`
+    ? `<div class="group acc edit">${chainMark(vm.to.chain)}<div class="acc-main"><label class="l1" for="recipient">${html(vm.to.label)}</label><textarea id="recipient" name="recipient" class="mono-input wrap-input" rows="2" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${html(vm.to.placeholder)}" aria-describedby="recipient-error recipient-note"${vm.to.error ? ' aria-invalid="true"' : ""}>${html(vm.to.input)}</textarea><p class="field-error" id="recipient-error" role="alert">${html(vm.to.error ?? "")}</p>${note}</div>${vm.to.canReset ? '<button type="button" class="linkish" data-action="recipient-reset">Use my account</button>' : ""}</div>`
     : accountRow({
         chain: vm.to.chain,
         label: vm.to.label,
@@ -191,7 +206,7 @@ export function formPage(vm) {
             : `<span class="t2">${html(vm.to.empty)}</span>`,
         valueNote: vm.to.valueNote,
         balance: `<button type="button" class="linkish" data-action="recipient-edit">Change</button>`,
-      });
+      }) + note;
   const button = `<button type="button" class="btn pri full" data-action="review" ${vm.canReview ? "" : "disabled"}>${html(vm.reviewLabel)}</button>`;
   return `<main class="col" id="main" tabindex="-1">${head}${pick}${notice}${from}${amount}${to}<div data-region="quote">${regions.quote}</div>
     <p class="note">${icon("eye")}<span><b>Public.</b> <span data-region="privacy">${regions.privacy}</span> The bridge works with public balances only. Seeing them doesn't let anyone move your DUSK.</span></p>
@@ -231,9 +246,13 @@ export function walletLines(lines, cfgLinks) {
   }`;
 }
 
+// Before the steps: the DUSK goes to another account than the connected one.
+const otherAccount = (text) =>
+  `<div class="group pad warn-box" role="note"><div class="note">${icon("person")}<span><b>Another account gets this DUSK.</b> ${html(text)}</span></div></div>`;
+
 // A proof's or a claim's review leads with what the step costs and what moves.
 function actionLead(lead) {
-  return `<div class="flow group lead"><div><div class="k">${html(lead.label)}</div><div class="v num">${html(lead.amount)}<span class="u">DUSK</span></div><div class="w">${lead.chain ? chainMark(lead.chain, "xs") : ""}<span>${html(lead.line)}</span></div></div></div>${lead.notYours ? `<p class="note">${icon("info")}<span>${html(lead.notYours)}</span></p>` : ""}`;
+  return `<div class="flow group lead"><div><div class="k">${html(lead.label)}</div><div class="v num">${html(lead.amount)}<span class="u">DUSK</span></div><div class="w">${lead.chain ? chainMark(lead.chain, "xs") : ""}<span>${html(lead.line)}</span></div></div></div>${lead.notYours ? otherAccount(lead.notYours) : ""}`;
 }
 
 export function reviewSheet(vm) {
@@ -259,7 +278,7 @@ export function reviewSheet(vm) {
       <div><div class="k">You send</div><div class="v num">${html(vm.send.amount)}<span class="u">${html(vm.send.unit)}</span></div><div class="w">${chainMark(vm.send.chain, "xs")}${html(vm.send.where)}</div></div>
       <div class="dn" aria-hidden="true">${icon("back", "down")}</div>
       <div><div class="k">You receive</div><div class="v num">${html(vm.receive.amount)}<span class="u">${html(vm.receive.unit)}</span></div><div class="w">${chainMark(vm.receive.chain, "xs")}${html(vm.receive.where)}</div></div>
-    </div>`}
+    </div>${vm.notYours ? otherAccount(vm.notYours) : ""}`}
     ${checks}
     <dl class="group kvs">${quoteRows({ rows: vm.feeRows })}</dl>
     ${steps}
@@ -338,8 +357,8 @@ export function receiptPage(vm) {
 function trackerBars(tracker) {
   if (!tracker) return "";
   return `<div class="trk" aria-hidden="true">${tracker
-    .map((part) => `<div class="${part.state}"><i></i><span>${html(part.label)}</span></div>`)
-    .join("")}</div><span class="sr-only">${tracker.map((part) => `${part.label}: ${stateWord(part.state)}`).join(", ")}</span>`;
+    .map((part) => `<div class="${part.state}"><i></i><span>${html(part.label)}</span>${part.when ? `<span class="when">${html(part.when)}</span>` : ""}</div>`)
+    .join("")}</div><span class="sr-only">${tracker.map((part) => `${part.label}${part.when ? ` ${part.when}` : ""}: ${stateWord(part.state)}`).join(", ")}</span>`;
 }
 
 /** Prove and Claim need Dusk Wallet: without it, the row says so instead. */
@@ -357,6 +376,22 @@ export function transferRow(row, { canAct = true } = {}) {
   return `<li class="tr" data-status="${html(row.status)}"><a class="tr-link" href="${html(row.href)}" aria-label="${html(row.title)}, ${html(row.amountText)}, ${html(row.statusWord)}. Open the receipt"></a>${pairMark(row.pair[0], row.pair[1])}<div class="tr-main"><div class="t1">${html(row.title)}</div><div class="t2">${html(row.subline)}</div>${trackerBars(row.tracker)}</div><div class="rt"><span class="am num">${html(row.amountText)}</span>${right}</div></li>`;
 }
 
+/**
+ * Without a connected Dusk account, as on a phone: follow one by its account
+ * or .dusk name, read-only, or stop following it.
+ */
+function watchBlock(watch) {
+  if (watch.following)
+    return `<p class="small t2 watching">Following ${html(watch.following)} on this device. Nothing can be sent from here. <button type="button" class="linkish" data-action="unwatch">Stop following</button></p>`;
+  return `<form class="group pad watch" data-form="watch">
+      <label for="watch" class="l1">Follow a Dusk account</label>
+      <textarea id="watch" name="watch" class="mono-input wrap-input" rows="2" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="A Dusk account or .dusk name" aria-describedby="watch-help watch-error">${html(watch.input ?? "")}</textarea>
+      <p class="small t2" id="watch-help">Lists its bridge transfers here, without a wallet. Nothing can be sent from it.</p>
+      <p class="field-error" id="watch-error" role="alert">${html(watch.error ?? "")}</p>
+      <button type="submit" class="btn sec sm" ${watch.busy ? "disabled" : ""}>${watch.busy ? "Looking…" : "Show its transfers"}</button>
+    </form>`;
+}
+
 export function transfersPage(vm) {
   const group = (title, rows) =>
     rows.length
@@ -368,6 +403,7 @@ export function transfersPage(vm) {
   return `<main class="tp" id="main" tabindex="-1">
     <div class="tp-h"><div><h1>My transfers</h1><p class="lede">${vm.lede}</p></div><a class="btn sec sm" href="#/lookup">${icon("search")}Look up</a></div>
     <p class="small t2" role="status" aria-live="polite">${html(vm.syncText)}</p>
+    ${vm.watch ? watchBlock(vm.watch) : ""}
     ${body}
     ${vm.more ? `<p class="links-row"><button type="button" class="btn sec sm" data-action="discover-more">Look further back</button></p>` : ""}
   </main>`;

@@ -3,15 +3,14 @@
 // balances, prices and gas estimates come in, so it's the same before and
 // after the wallet opens.
 
-import { aboutFee, formatDusk, formatFee, formatLux, formatUnitsGrouped } from "./format.js";
+import { aboutFee, formatDusk, formatFee, formatLux, formatMaxFee, formatUnitsGrouped } from "./format.js";
 import {
   DEPOSIT_GAS_LIMIT,
   DEPOSIT_GAS_TYPICAL,
   TRANSFER_GAS_LIMIT,
   TRANSFER_GAS_TYPICAL,
-  WITHDRAWAL_GAS_LIMIT,
-  WITHDRAWAL_RELAY_GAS_BOUND,
   WITHDRAWAL_STEP_GAS_TYPICAL,
+  withdrawalStepGas,
 } from "./gas.js";
 import { gasCoin, networkName } from "./names.js";
 import {
@@ -61,24 +60,23 @@ export function duskFee(limit, typical, gasPrice) {
 
 const feeText = ({ maxLux, typicalLux }) => ({
   detail: `usually about ${formatFee(typicalLux)} DUSK`,
-  value: `up to ${formatFee(maxLux, 9, { round: "up" })} DUSK`,
+  value: `up to ${formatMaxFee(maxLux)} DUSK`,
 });
 
 /**
- * What each Dusk-side step of a route costs at most, and usually. A claim
- * adds the withdrawal's own gas to its limit: the real figure when it's
- * known, a bound above anything the bridge's withdrawals ask for otherwise.
+ * What each Dusk-side step of a route costs at most, and usually. A proof
+ * and a claim share one limit (`withdrawalStepGas`): the withdrawal's own
+ * gas on top, at least a bound above what the bridge's withdrawals ask for.
  */
-export function routeDuskFees(route, { gasPrice = 1n, withdrawalGas = WITHDRAWAL_RELAY_GAS_BOUND } = {}) {
+export function routeDuskFees(route, { gasPrice = 1n, withdrawalGas = 0n } = {}) {
   if (route.mode === "duskevm-deposit")
     return { send: duskFee(DEPOSIT_GAS_LIMIT, DEPOSIT_GAS_TYPICAL, gasPrice) };
   if (route.mode === "service-transfer")
     return { send: duskFee(TRANSFER_GAS_LIMIT, TRANSFER_GAS_TYPICAL, gasPrice) };
-  if (route.mode === "duskevm-withdrawal")
-    return {
-      claim: duskFee(WITHDRAWAL_GAS_LIMIT + BigInt(withdrawalGas), WITHDRAWAL_STEP_GAS_TYPICAL, gasPrice),
-      prove: duskFee(WITHDRAWAL_GAS_LIMIT, WITHDRAWAL_STEP_GAS_TYPICAL, gasPrice),
-    };
+  if (route.mode === "duskevm-withdrawal") {
+    const step = duskFee(withdrawalStepGas(withdrawalGas), WITHDRAWAL_STEP_GAS_TYPICAL, gasPrice);
+    return { claim: step, prove: step };
+  }
   return {};
 }
 
@@ -214,7 +212,7 @@ export function buildQuote(route, amount, ctx) {
       detail: `${feeText(fees.prove).detail} each · prove and claim on ${to}, paid by you`,
       key: "fee-dusk",
       label: "Then, on Dusk",
-      value: `up to ${formatFee(fees.claim.maxLux, 9, { round: "up" })} DUSK per step`,
+      value: `up to ${formatMaxFee(fees.claim.maxLux)} DUSK per step`,
     },
     { key: "bridge", label: "Bridge fee", value: "None" },
     { key: "receive", label: "You receive", strong: true, value: lux === null ? "—" : `${formatDusk(lux)} on ${to}` },

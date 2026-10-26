@@ -46,6 +46,19 @@ export function formatFee(value, decimals = LUX_DECIMALS, { round = "nearest" } 
 }
 
 /**
+ * The most a Dusk fee can be, as Dusk Wallet writes it: DUSK to four
+ * decimals, rounded up, trailing zeros trimmed ("0.051"). Every "up to" fee
+ * on the page is written this way, so it reads as the wallet's window does.
+ */
+export function formatMaxFee(lux) {
+  const value = BigInt(lux);
+  if (value <= 0n) return "0";
+  const units = (value + 99_999n) / 100_000n;
+  const fraction = (units % 10_000n).toString().padStart(4, "0").replace(/0+$/u, "");
+  return `${formatUnitsGrouped(units / 10_000n, 0)}${fraction ? `.${fraction}` : ""}`;
+}
+
+/**
  * An estimated fee in a coin with `decimals`: "about 0.00021 ETH", or "less
  * than 0.000001 ETH" when it rounds to nothing a person would read.
  */

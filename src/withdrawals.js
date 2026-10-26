@@ -853,7 +853,8 @@ export function createWithdrawals(deps) {
         proof.withdrawalProof.map((node) => hexToArray(node, undefined)),
       ],
       fnName: "proveWithdrawalTransaction",
-      gas: await withdrawalGas(),
+      // The claim's limit too: one "up to" fee for both steps.
+      gas: await withdrawalGas(event.withdrawal.gasLimit),
       withdrawal: event.withdrawal,
     };
   }

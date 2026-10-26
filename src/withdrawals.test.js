@@ -122,8 +122,9 @@ function setup({
 }
 
 test("proofs and claims get a large gas limit, within the bound, at the node's price", async () => {
-  assert.equal(withdrawalGasLimit(), 50_000_000n);
-  assert.equal(withdrawalGasLimit(519_542n), 50_519_542n);
+  assert.equal(withdrawalGasLimit(), 51_000_000n);
+  assert.equal(withdrawalGasLimit(519_542n), 51_000_000n);
+  assert.equal(withdrawalGasLimit(9_000_000n), 59_000_000n);
   assert.equal(withdrawalGasLimit(950_000_000n), 1_000_000_000n);
   assert.throws(() => withdrawalGasLimit(950_000_001n), { message: WITHDRAWAL_GAS_REFUSAL });
   assert.deepEqual(await gasAtNodePrice(5_000_000n, { gasPrice: async () => 3n }), {
@@ -277,8 +278,9 @@ test("a claim sends the SDK-serialized withdrawal with its own gas on top", asyn
   assert.equal(await withdrawals.finalizeWithdrawal(TX), "finalize-hash");
   const [{ args, fnName, gas }] = sent;
   assert.equal(fnName, "finalizeWithdrawalTransaction");
-  // 50M plus the 519,542 gas the withdrawal asks for, at the node's price.
-  assert.deepEqual(gas, { limit: "50519542", price: "2" });
+  // 50M plus the 519,542 gas the withdrawal asks for, raised to the 1M bound
+  // the proof uses too, at the node's price.
+  assert.deepEqual(gas, { limit: "51000000", price: "2" });
   assert.deepEqual(args.data.slice(0, 4), [0xd7, 0x64, 0xad, 0x0b]);
   assert.equal(args.gas_limit.length, 32);
   assert.equal(args.sender.length, 20);

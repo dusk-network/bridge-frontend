@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
-import { contractGroups, explorerAddressUrl } from "./contracts.js";
+import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
 import { bridgeTasks } from "./names.js";
 import { actionLead, actionPrivacy, availableLine, landingTasks, pricedReview, receiptModel, reviewChecks, transfersModel } from "./page-models.js";
 import { buildQuote } from "./quote.js";
@@ -335,14 +335,17 @@ test("the Contracts sheet lists every address in full, per route, with an operat
     testnet.evmNetworks.ethereum.migrationContract,
     testnet.evmNetworks.ethereum.tokenContract,
     testnet.service.account,
-    testnet.duskEvm.l1StandardBridgeContractId,
-    testnet.duskEvm.optimismPortalContractId,
-    testnet.duskEvm.disputeGameFactoryContractId,
+    // Dusk contracts as Dusk Wallet writes them: 0x and all 64 hex characters, copied the same.
+    `0x${testnet.duskEvm.l1StandardBridgeContractId}`,
+    `0x${testnet.duskEvm.optimismPortalContractId}`,
+    `0x${testnet.duskEvm.disputeGameFactoryContractId}`,
     "0x4200000000000000000000000000000000000010",
     "0x4200000000000000000000000000000000000016",
-    testnet.multicall.contractId,
-  ])
+    `0x${testnet.multicall.contractId}`,
+  ]) {
     assert.ok(html.includes(`<code class="mono">${value}</code>`), value);
+    assert.ok(html.includes(`data-copy="${value}"`), value);
+  }
   assert.ok(html.includes(`https://apps.testnet.dusk.network/explorer/accounts/?key=${testnet.service.account}`));
   assert.doesNotMatch(html, /Operated by/u);
   assert.match(html, /Keeps the old DUSK locked\. It has no function to send them out\./u);
@@ -415,23 +418,28 @@ test("a proof's review says it moves no DUSK and what it costs; a claim, where t
   const amountLux = 1_008n * 10n ** 9n;
   const other = { destination: testnet.service.account };
   // Paying another account than Dusk Wallet's says so, by the wallet's .dusk name.
-  const prove = actionLead("prove", other, { account: ACCOUNT, amountLux, maxLux: 50_000_000n, name: "alice.dusk" });
+  const prove = actionLead("prove", other, { account: ACCOUNT, amountLux, maxLux: 51_000_000n, name: "alice.dusk" });
   assert.deepEqual(prove, {
-    amount: "0.05",
+    amount: "0.051",
     label: "Proving costs up to",
     line: "No DUSK moves now. The 1,008 DUSK stays in the DuskEVM bridge until it's claimed, about 7 days after the proof.",
-    notYours: "This withdrawal pays 25z9o6…5Etftt, not your alice.dusk.",
+    notYours: "This withdrawal pays 25z9o6…5Etftt, not your alice.dusk. Proving it doesn't change that.",
   });
-  const claim = actionLead("finalize", { destination: ACCOUNT }, { account: ACCOUNT, amountLux, maxLux: 50_519_542n });
+  const claim = actionLead("finalize", { destination: ACCOUNT }, { account: ACCOUNT, amountLux, maxLux: 51_000_000n });
   assert.deepEqual(claim, { amount: "1,008", chain: "dusk", label: "You claim", line: "To 21n5nc…fMMLNz on Dusk · costs up to 0.051 DUSK", notYours: "" });
-  assert.equal(actionLead("finalize", other, { account: ACCOUNT, amountLux, maxLux: 1n }).notYours, "This withdrawal pays 25z9o6…5Etftt, not your account.");
+  assert.equal(
+    actionLead("finalize", other, { account: ACCOUNT, amountLux, maxLux: 1n }).notYours,
+    "This withdrawal pays 25z9o6…5Etftt, not your connected Dusk account. The claim sends the DUSK there.",
+  );
 
   const sheet = reviewSheet({
     canConfirm: true, cfgLinks: explorer, checks: [], confirmLabel: "Prove on Dusk", feeRows: [], lead: prove,
     privacy: "x", steps: [], sub: "", walletCheckName: "Dusk Wallet",
   });
-  assert.match(sheet, /<div class="k">Proving costs up to<\/div><div class="v num">0\.05<span class="u">DUSK<\/span>/u);
-  assert.match(sheet, /This withdrawal pays 25z9o6…5Etftt, not your alice\.dusk\./u);
+  assert.match(sheet, /<div class="k">Proving costs up to<\/div><div class="v num">0\.051<span class="u">DUSK<\/span>/u);
+  // A warning before the steps, not a line among them.
+  assert.match(sheet, /<div class="group pad warn-box" role="note"><div class="note">.*<b>Another account gets this DUSK\.<\/b> This withdrawal pays 25z9o6…5Etftt, not your alice\.dusk\./u);
+  assert.ok(sheet.indexOf("warn-box") < sheet.indexOf('class="group kvs"'));
   assert.doesNotMatch(sheet, /You send|You receive/u);
 });
 
@@ -489,4 +497,69 @@ test("your Dusk account shows by the .dusk name Dusk Wallet sent", () => {
   const url = "https://bridge.example/#/transfer/x";
   assert.match(receiptModel(entry, { cfg: testnet, own: { account: ACCOUNT, name: "alice.dusk" }, route: T["duskevm-deposit"], url }).fromTo, /^From alice\.dusk on Dusk/u);
   assert.match(receiptModel(entry, { cfg: testnet, own: { account: "someone else", name: "bob.dusk" }, route: T["duskevm-deposit"], url }).fromTo, /^From <code class="mono">21n5nc…fMMLNz<\/code> on Dusk/u);
+});
+
+test("a typed .dusk name shows the account it points to, and wrong capitals offer the fix", () => {
+  const quote = buildQuote(T["duskevm-withdrawal"], "1", { balance: null, cfg: testnet, gasPrice: 1n });
+  const vm = {
+    amount: "1",
+    amountError: "",
+    available: "",
+    from: { balance: "", chain: "dusk-evm", label: "From DuskEVM", value: "x" },
+    privacy: "p",
+    quote,
+    reviewLabel: "Review",
+    routeId: "dusk-evm-to-dusk",
+    sources: [{ id: "dusk-evm-to-dusk", name: "DuskEVM" }],
+    title: "Move DUSK to Dusk",
+    to: { chain: "dusk", editing: true, input: "alice.dusk", label: "To Dusk", resolved: { address: ACCOUNT, name: "alice.dusk" }, value: ACCOUNT },
+    unit: "DUSK",
+  };
+  const page = formPage(vm);
+  // The field wraps, so the whole address shows on a phone.
+  assert.match(page, /<textarea id="recipient" name="recipient" class="mono-input wrap-input" rows="2"[^>]*>alice\.dusk<\/textarea>/u);
+  assert.ok(page.includes(`alice.dusk points to <code class="mono wrap">${ACCOUNT}</code>`));
+  const note = (to) => formRegions({ ...vm, to: { ...vm.to, resolved: null, ...to } })["recipient-note"];
+  assert.equal(note({ looking: "alice.dusk" }), "Looking up alice.dusk…");
+  assert.match(note({ error: "x", fix: EVM }), /<button type="button" class="linkish" data-action="recipient-fix">If every character is right, fix the capitals<\/button>/u);
+  assert.equal(note({}), "");
+});
+
+test("the wallet cards say which account is connected", () => {
+  const html = landing({
+    canShare: false,
+    dusk: { account: ACCOUNT, name: "alice.dusk", state: "connected" },
+    evm: { account: EVM, state: "connected" },
+    pageUrl: "",
+    phone: true,
+    tasks: [],
+  });
+  assert.match(html, /Connected · <span class="who">alice\.dusk<\/span>/u);
+  assert.match(html, /Connected · <span class="who">0xd63b…8df4<\/span>/u);
+  assert.match(landing({ canShare: false, dusk: { account: ACCOUNT, state: "connected" }, evm: { state: "connect" }, pageUrl: "", phone: false, tasks: [] }), /Connected · <span class="who">21n5nc…fMMLNz<\/span>/u);
+});
+
+test("the footer names, in one line, the servers the page reads from", async () => {
+  const line = serversLine(testnet);
+  assert.equal(
+    line,
+    "This page reads from testnet.nodes.dusk.network (the Dusk node and its archive), rpc.testnet.evm.dusk.network (DuskEVM), ethereum-sepolia-rpc.publicnode.com (Ethereum (Sepolia)) and testnet.dusk.domains (for .dusk names).",
+  );
+  assert.match(footer({ links: {}, officialSite: "", servers: line }), /<p class="small t2 servers">This page reads from testnet\.nodes\.dusk\.network/u);
+  // The names' host is the one each release fetches its lens driver from.
+  const { default: releases } = await import("./dusk-domains-releases.js");
+  for (const release of Object.values(releases)) assert.ok(serversLine({ ...testnet, dusk: { ...testnet.dusk, chainId: release.chainId } }).includes(`${new URL(release.artifactBaseUrl).host} (for .dusk names)`));
+});
+
+test("My transfers can follow a Dusk account without a wallet, and stop", () => {
+  const page = (watch) => transfersPage({ empty: "e", groups: {}, lede: "l", syncText: "", watch });
+  const form = page({ busy: false, error: "", following: "", input: "" });
+  assert.match(form, /<form class="group pad watch" data-form="watch">\s*<label for="watch" class="l1">Follow a Dusk account<\/label>/u);
+  assert.match(form, /placeholder="A Dusk account or \.dusk name"/u);
+  assert.match(page({ busy: false, error: "bob.dusk isn't an active .dusk name.", following: "", input: "bob.dusk" }), /role="alert">bob\.dusk isn&#039;t an active \.dusk name\.<\/p>/u);
+  const following = page({ following: "alice.dusk" });
+  assert.match(following, /Following alice\.dusk on this device\. Nothing can be sent from here\. <button type="button" class="linkish" data-action="unwatch">Stop following<\/button>/u);
+  assert.doesNotMatch(following, /data-form="watch"/u);
+  // With Dusk Wallet connected, there's nothing to follow.
+  assert.doesNotMatch(page(null), /Follow a Dusk account|Following/u);
 });

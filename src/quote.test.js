@@ -98,12 +98,13 @@ test("a withdrawal quotes its DuskEVM step and the two Dusk steps after it", () 
     receive: "200 DUSK on Dusk",
     send: "200 DUSK on DuskEVM",
   });
-  // A claim's limit is 50M plus the withdrawal's own gas: the real figure once
-  // known (519,542 for a 10 DUSK testnet withdrawal), a bound until then.
+  // A proof and a claim share one limit, 50M plus the withdrawal's own gas
+  // and at least a 1M bound, so each step reads the same "up to" everywhere.
   const known = routeDuskFees(routes["duskevm-withdrawal"], { gasPrice: 1n, withdrawalGas: 519_542n });
-  assert.equal(known.claim.maxLux, 50_519_542n);
-  assert.equal(known.prove.maxLux, 50_000_000n);
+  assert.equal(known.claim.maxLux, 51_000_000n);
+  assert.equal(known.prove.maxLux, 51_000_000n);
   assert.equal(routeDuskFees(routes["duskevm-withdrawal"], { gasPrice: 1n }).claim.maxLux, 51_000_000n);
+  assert.equal(routeDuskFees(routes["duskevm-withdrawal"], { gasPrice: 2n, withdrawalGas: 9_000_000n }).prove.maxLux, 118_000_000n);
 
   // Without DuskEVM's gas price there's no Max, and the whole balance is too much.
   const unpriced = { balance: 312n * 10n ** 18n, cfg, evmGas: { priceWei: null, withdraw: 138_439n }, gasPrice: 1n };
