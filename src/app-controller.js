@@ -6,6 +6,7 @@
 
 import { entryId, readActivity, recordActivity, saveActivity, updateActivity, useActivityNetwork } from "./activity.js";
 import { bridgeRoutes, getBridgeRoute } from "./bridge-routes.js";
+import { choosePair, defaultPair, flipRoute, fromChoices, primaryButton, routeBetween, toChoices } from "./bridge-card.js";
 import { claimReminder } from "./calendar.js";
 import { config } from "./config.js";
 import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
@@ -17,20 +18,20 @@ import { createDuskConnection, ensureDuskConnected, sendDuskContractCall } from 
 import { submitDuskEvmWithdrawal } from "./duskevm-withdrawal.js";
 import { connectEvmWallet, getEvmState, initializeEvmWallet, subscribeEvmWallet } from "./evm-wallet.js";
 import { createFormReads } from "./form-reads.js";
-import { formatDusk, formatFee, formatLux, formatUnitsGrouped } from "./format.js";
+import { formatDusk, formatLux, formatUnitsGrouped } from "./format.js";
 import { approveMigration, submitMigration } from "./legacy-migration.js";
 import { bridgeTasks, networkName, networkNames } from "./names.js";
 import {
   actionLead,
   actionPrivacy,
-  availableLine,
   pricedReview,
   DUSK_WALLET_URL,
   evmWalletName,
-  landingTasks,
   lateLine,
   receiptModel,
   reviewChecks,
+  routeLine,
+  routeSteps,
   transfersModel,
 } from "./page-models.js";
 import { canonicalHash, parseLocation, receiptUrl, transferHref } from "./permalink.js";
@@ -45,18 +46,17 @@ import { createReviewSession, sameSigner, sentActionPatch } from "./review-sessi
 import { createScheduler, takenByAnother } from "./tracking.js";
 import { friendlyWalletError, html, privacyLine, proverMismatch, short, switchToProver, transferView } from "./transfer-view.js";
 import {
+  activityPanel,
+  cardPage,
+  cardRegions,
   contractsSheet,
   footer,
-  formPage,
-  formRegions,
   header,
-  landing,
   lookupPage,
   networkSheet,
   receiptPage,
   reviewSheet,
   strip,
-  transfersPage,
 } from "./views.js";
 import { approveLines, duskCallLines, duskTransferLines, migrateLines, withdrawLines } from "./wallet-lines.js";
 import { withdrawalDetails } from "./withdrawals.js";
@@ -88,7 +88,6 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     evmState: getEvmState(),
     form: null,
     lookup: { busy: false, error: "", query: "" },
-    menuOpen: false,
     page: parseLocation(globalThis.location?.hash),
     sheet: null,
     // A Dusk account followed without a wallet, and its form on My transfers.
@@ -119,7 +118,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         namesFound.set(account, name);
         if (!name || account !== duskAccount()) return;
         renderChrome();
-        if (state.page.page === "move") refreshFormAndHeader();
+        if (isCardPage()) refreshFormAndHeader();
         else renderMain();
       })
       .catch(() => {})
@@ -134,7 +133,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   /** Reads the gas price again, and shows the page again where it moved. */
   function refreshPrice() {
     return formReads.price().then((moved) => {
-      if (moved && state.page.page !== "move") renderMain();
+      if (!moved) return;
+      if (isCardPage()) refreshForm();
+      else renderMain();
     });
   }
   // The review on screen; a request prepared for it fills nothing else.
@@ -194,8 +195,6 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       dusk: duskVm(),
       evm: evmVm(),
       isTestnet: cfg.profile === "testnet",
-      menuOpen: state.menuOpen,
-      nav: page === "transfers" || page === "transfer" || page === "lookup" ? "mine" : "move",
       needsCount: transfersVm().needs,
       otherName: other === "mainnet" ? "Mainnet" : "Testnet",
       otherSite: cfg.links.sites[other],
@@ -258,18 +257,10 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
 
   function pageHtml() {
     const { page } = state.page;
-    if (page === "move") return formHtml();
     if (page === "transfer") return receiptHtml();
-    if (page === "transfers") return transfersHtml();
     if (page === "lookup") return lookupPage(state.lookup);
-    return landing({
-      canShare: Boolean(globalThis.navigator?.share),
-      dusk: duskVm(),
-      evm: evmVm(),
-      pageUrl: globalThis.location?.href ?? "",
-      phone: isPhone() && !duskState().installed,
-      tasks: landingTasks(cfg, tasks, { duskInstalled: duskState().installed, gasPrice: duskGasPrice(), phone: isPhone() }),
-    });
+    // The card: its Bridge tab, or its Activity tab for My transfers.
+    return cardHtml(page === "transfers" ? "activity" : "bridge");
   }
 
   // -------------------------------------------------------------------------
@@ -280,21 +271,55 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     return tasks.find((task) => task.id === id) ?? null;
   }
 
-  function ensureForm(taskId) {
-    const task = taskFor(taskId);
-    if (!task) return null;
-    if (state.form?.taskId !== taskId)
+  /**
+   * The card's state. A link to a task opens it on that task's route; the
+   * card otherwise opens on the pair the connected wallets suggest, and keeps
+   * whatever pair was picked.
+   */
+  function ensureCard(page = state.page) {
+    const task = page?.page === "move" ? taskFor(page.task) : null;
+    if (!state.form) {
+      const route = task?.routes[0] ?? defaultPair(routes, { dusk: Boolean(duskAccount()), evm: Boolean(evmAccount()) });
       state.form = {
         amount: "",
         error: "",
         // What each .dusk name typed as the recipient pointed to when looked up.
         lookups: {},
+        menu: null,
+        pairChosen: Boolean(task),
         recipientEditing: false,
         recipientInput: "",
-        routeId: task.routes[0].id,
-        taskId,
+        routeId: route.id,
+        routeOpen: false,
       };
+    } else if (task) setPair(task.routes[0]);
     return state.form;
+  }
+
+  /** Moves the card to `route`: its reads start again, and a typed recipient of the other kind goes. */
+  function setPair(route, { chosen = true } = {}) {
+    const form = state.form;
+    if (!route || !form) return;
+    form.menu = null;
+    form.pairChosen ||= chosen;
+    if (route.id === form.routeId) return;
+    const before = routeOf(form.routeId);
+    form.routeId = route.id;
+    form.error = "";
+    if (before?.to.kind !== route.to.kind) {
+      form.recipientInput = "";
+      form.recipientEditing = false;
+    }
+    formReads.reset(["migration", "l2"]);
+    void loadReads();
+  }
+
+  /** Before anything was picked or typed, the card follows the wallets as they connect. */
+  function followWallets() {
+    const form = state.form;
+    if (!form || form.pairChosen || form.amount) return;
+    const route = defaultPair(routes, { dusk: Boolean(duskAccount()), evm: Boolean(evmAccount()) });
+    if (route && route.id !== form.routeId) setPair(route, { chosen: false });
   }
 
   const formRoute = () => (state.form ? routeOf(state.form.routeId) : null);
@@ -380,74 +405,67 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     return route.signer === "dusk" ? Boolean(duskAccount()) : Boolean(evmAccount());
   }
 
-  function formVm() {
-    const task = taskFor(state.form.taskId);
+  const netOf = (id) => ({ id, name: networkName(cfg, id) });
+
+  /** The card's networks to choose from, with DuskEVM shown as not live yet where it isn't. */
+  function networkChoices(side, route) {
+    const nameOf = (id) => networkName(cfg, id);
+    const choices = side === "from" ? fromChoices(routes, route.from.id, nameOf) : toChoices(routes, route.from.id, route.to.id, nameOf);
+    const listed = choices.map((choice) => ({
+      ...choice,
+      name: nameOf(choice.id),
+      note: choice.route ? routeLine(choice.route, cfg, { gasPrice: duskGasPrice() }) : "",
+    }));
+    if (!cfg.duskEvm.enabled) listed.push({ disabled: `Not on ${names.badge} yet`, id: "dusk-evm", name: names["dusk-evm"] });
+    return listed;
+  }
+
+  function cardVm() {
     const route = formRoute();
     const quote = quoteFor(route);
-    const from = networkName(cfg, route.from.id);
     const to = networkName(cfg, route.to.id);
     const reads = formReads.reads;
     const walletName = evmWalletName(state.evmState);
     const phoneOnly = isPhone() && !duskState().installed;
-    let fromRow;
-    if (route.signer === "dusk") {
-      fromRow = {
-        balance: reads.duskBalance === null ? "" : `<b class="num">${html(formatDusk(reads.duskBalance, 4))}</b>public balance`,
-        chain: "dusk",
-        label: `From ${from}`,
-        value: !duskAccount()
-          ? `<span class="t2">Dusk Wallet isn't connected</span>`
-          : duskName()
-            ? `<span>${html(duskName())}</span>`
-            : `<code class="mono">${html(short(duskAccount()))}</code>`,
-        valueNote: !duskAccount() ? "" : duskName() ? `${short(duskAccount())} · your Dusk account` : "your Dusk account",
-      };
-
-    } else {
-      const holdings = route.mode === "migration" ? reads.migration?.balanceWei : reads.l2?.balanceWei;
-      fromRow = {
-        balance:
-          holdings === null || holdings === undefined
-            ? ""
-            : `<b class="num">${html(formatUnitsGrouped(holdings, 18, 4))} ${route.mode === "migration" ? "old DUSK" : "DUSK"}</b>on ${html(from)}`,
-        chain: route.from.id,
-        label: `From ${from}`,
-        value: evmAccount() ? `<code class="mono">${html(short(evmAccount()))}</code>` : `<span class="t2">No EVM wallet connected</span>`,
-        valueNote: evmAccount() ? `your ${walletName}` : "",
-      };
-
-    }
+    const unit = route.mode === "migration" ? "old DUSK" : "DUSK";
+    // What the source holds: the public balance on Dusk, the wallet's on an EVM chain.
+    const holdings = route.signer === "dusk" ? reads.duskBalance : route.mode === "migration" ? reads.migration?.balanceWei : reads.l2?.balanceWei;
+    const balance =
+      holdings === null || holdings === undefined
+        ? ""
+        : route.signer === "dusk"
+          ? formatDusk(holdings, 4)
+          : `${formatUnitsGrouped(holdings, 18, 4)} ${unit}`;
     const destination = destinationFor(route);
     const typed = typedRecipient(route);
     // A typed .dusk name, once its lookup found the account it points to.
     const resolved = typed?.name && typed.address ? { address: typed.address, name: typed.name } : null;
     const destinationIsOwn =
       route.to.kind === "dusk" ? destination && destination === duskAccount() : destination && destination.toLowerCase() === evmAccount().toLowerCase();
+    const who = resolved
+      ? `<b>${html(resolved.name)}</b> (${html(short(destination))})`
+      : destinationIsOwn && route.to.kind === "dusk" && duskName()
+        ? `<b>${html(duskName())}</b>`
+        : `<b class="mono">${html(short(destination))}</b>`;
+    const line = !destination
+      ? route.to.kind === "dusk"
+        ? "Connect Dusk Wallet, or add a Dusk account"
+        : "Connect an EVM wallet, or add a 0x address"
+      : destinationIsOwn
+        ? `to your ${route.to.kind === "dusk" ? "account" : walletName} ${who}`
+        : `to ${who}`;
     const toVm = {
       canReset: Boolean(state.form.recipientInput) && Boolean(route.to.kind === "dusk" ? duskAccount() : evmAccount()),
-      chain: route.to.id,
-      editing: state.form.recipientEditing || !destination,
-      empty: route.to.kind === "dusk" ? "Connect Dusk Wallet or paste a Dusk account" : "Connect an EVM wallet or paste a 0x address",
+      editing: state.form.recipientEditing || (!destination && Boolean(state.form.recipientInput)),
       error: typed?.error ?? "",
       fix: typed?.fix ?? "",
       input: state.form.recipientInput,
-      label: `To ${to}`,
+      label: `Recipient on ${to}`,
+      line,
       looking: typed?.pending ? typed.name : "",
-      // Your own Dusk account by its .dusk name, its short code beside it;
-      // a typed name the same way.
-      name: resolved ? resolved.name : destinationIsOwn && route.to.kind === "dusk" ? duskName() : "",
+      net: netOf(route.to.id),
       placeholder: route.to.kind === "dusk" ? "A Dusk account or .dusk name" : "0x…",
       resolved,
-      value: destination,
-      valueNote: destinationIsOwn
-        ? route.to.kind === "dusk"
-          ? duskName() || resolved
-            ? `${short(destination)} · your Dusk account`
-            : "your Dusk account"
-          : `your ${walletName}, on ${to}`
-        : resolved
-          ? short(destination)
-          : "",
     };
     let notice = null;
     if (route.signer === "dusk" && phoneOnly)
@@ -456,33 +474,33 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         html: "This needs Dusk Wallet, the browser extension for computers. Open this page on your computer to send.",
         icon: "laptop",
       };
-    else if (route.signer === "dusk" && !duskState().installed)
-      notice = {
-        html: `Sending from Dusk needs Dusk Wallet, the official Dusk browser extension. <a href="${html(DUSK_WALLET_URL)}" target="_blank" rel="noreferrer">Get Dusk Wallet</a>.`,
-      };
     else if (route.mode === "duskevm-withdrawal" && phoneOnly)
       notice = { html: "Step 1 works here. Prove and claim need Dusk Wallet on a computer later.", icon: "phone" };
-    const ready = signerReady(route);
-    const amountOk = quote.amountLux !== null && !quote.error;
-    const destinationOk = Boolean(destination) && !toVm.error;
-    const reviewLabel = ready
-      ? "Review"
-      : route.signer === "dusk"
-        ? duskState().installed
-          ? "Connect Dusk Wallet"
-          : phoneOnly
-            ? "Send from a computer"
-            : "Get Dusk Wallet to send"
-        : "Connect EVM wallet";
+    const button = primaryButton({
+      amountError: quote.error,
+      amountLux: quote.amountLux,
+      destination,
+      destinationError: toVm.error,
+      duskInstalled: duskState().installed,
+      insufficient: Boolean(quote.insufficient),
+      looking: toVm.looking,
+      phoneOnly,
+      route,
+      signerConnected: signerReady(route),
+      unit,
+    });
     return {
       amount: state.form.amount,
-      amountError: quote.error,
-      ...availableLine(route, quote.maxLux),
-      balanceNote: route.signer === "dusk" ? "Your public balance. Shielded and staked DUSK aren't included." : "",
-      canReview: ready ? amountOk && destinationOk : route.signer === "dusk" ? duskState().installed : true,
+      amountError: quote.insufficient ? "" : quote.error,
+      button: { ...button, href: DUSK_WALLET_URL },
+      canFlip: Boolean(flipRoute(routes, route)),
+      canMax: quote.maxLux !== null && quote.maxLux !== undefined && quote.maxLux > 0n,
       error: state.form.error,
-      firstTime: !transfersVm().count,
-      from: fromRow,
+      from: { balance, balanceLabel: route.signer === "dusk" ? "Public balance" : "Balance", net: netOf(route.from.id) },
+      fromChoices: state.form.menu === "from" ? networkChoices("from", route) : [],
+      hint: !transfersVm().count && button.action === "review" ? "First time? Try a small amount first." : "",
+      menu: state.form.menu,
+      needsCount: transfersVm().needs,
       notice,
       privacy: privacyLine(route, cfg, {
         dusk: route.to.kind === "dusk" ? destination : duskAccount(),
@@ -490,51 +508,44 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         name: duskPartyName(route.to.kind === "dusk" ? destination : duskAccount(), resolved),
       }),
       quote,
-      reviewHint:
-        ready && amountOk && !destinationOk
-          ? toVm.looking
-            ? `Looking up ${toVm.looking}…`
-            : toVm.error
-              ? "Fix the address first."
-              : "Add where it goes first."
-          : "",
-      reviewLabel,
-      routeId: route.id,
-      sources: task.routes.map((item) => ({ id: item.id, name: networkName(cfg, item.from.id) })),
-      title: task.title,
+      receive: quote.receiveLux !== null && quote.receiveLux > 0n ? formatLux(quote.receiveLux) : "",
+      receiveUnit: "DUSK",
+      routeLine: routeLine(route, cfg, { gasPrice: duskGasPrice() }),
+      routeOpen: state.form.routeOpen,
+      steps: routeSteps(route, quote),
+      tab: "bridge",
       to: toVm,
-      unit: route.mode === "migration" ? "old DUSK" : "DUSK",
+      toChoices: state.form.menu === "to" ? networkChoices("to", route) : [],
+      unit,
     };
   }
 
-  function formHtml() {
-    if (!ensureForm(state.page.task)) {
-      const disabled = state.page.task === "to-duskevm" && !cfg.duskEvm.enabled;
-      return `<main class="col" id="main" tabindex="-1"><h1>${disabled ? `${html(names["dusk-evm"])} isn't on ${html(names.badge)} yet` : "That task isn't here"}</h1><p class="lede">${disabled ? "Moving DUSK to DuskEVM opens here once it is live." : "This bridge doesn't offer it on this network."}</p><p class="links-row"><a class="lnk" href="#/">All tasks</a></p></main>`;
-    }
-    return formPage(formVm());
+  function cardHtml(tab) {
+    ensureCard();
+    if (tab === "activity") return cardPage({ activity: activityHtml(), needsCount: transfersVm().needs, tab: "activity" });
+    return cardPage(cardVm());
   }
 
   /**
-   * Brings the form up to date without touching its inputs: every region the
-   * view declares (balance, Available and Max, quote, privacy, hint), the
-   * amount's error and the button.
+   * Brings the card up to date without touching its inputs: every region the
+   * view declares (balance and Max, what arrives, the route, the button), and
+   * the amount's and the recipient's errors.
    */
   function refreshForm() {
-    if (state.page.page !== "move" || !state.form) return;
+    if (!isCardPage() || !state.form || !slot("main").querySelector(".bcard [data-region]")) return;
     const main = slot("main");
-    const vm = formVm();
-    for (const [name, markup] of Object.entries(formRegions(vm))) {
+    const vm = cardVm();
+    for (const [name, markup] of Object.entries(cardRegions(vm))) {
       const region = main.querySelector(`[data-region="${name}"]`);
       if (region && region.innerHTML !== markup) region.innerHTML = markup;
     }
+    main.querySelector('[data-region="receive"]')?.classList.toggle("empty", !vm.receive);
     const error = main.querySelector("#amount-error");
     if (error) error.textContent = vm.amountError ?? "";
     const amount = main.querySelector("#amount");
     if (amount) {
       if (vm.amountError) amount.setAttribute("aria-invalid", "true");
       else amount.removeAttribute("aria-invalid");
-      amount.closest(".bigamt")?.classList.toggle("invalid", Boolean(vm.amountError));
     }
     const recipientError = main.querySelector("#recipient-error");
     if (recipientError) recipientError.textContent = vm.to.error ?? "";
@@ -543,12 +554,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       if (vm.to.error) recipient.setAttribute("aria-invalid", "true");
       else recipient.removeAttribute("aria-invalid");
     }
-    const button = main.querySelector('[data-action="review"]');
-    if (button) {
-      button.disabled = !vm.canReview;
-      button.textContent = vm.reviewLabel;
-    }
   }
+
+  const isCardPage = () => ["home", "move"].includes(state.page.page);
 
   /** Balances and prices for the form's route, from the node and the chains. */
   function loadReads() {
@@ -578,7 +586,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
 
   function refreshFormAndHeader() {
     renderChrome();
-    if (state.page.page === "move") {
+    if (isCardPage()) {
       const main = slot("main");
       // While the amount has focus, its regions are replaced around it.
       if (!main.contains(globalThis.document?.activeElement) || globalThis.document?.activeElement?.id !== "amount") renderMain();
@@ -688,7 +696,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     if (state.page.page === "transfers") renderMain();
   }
 
-  function transfersHtml() {
+  function activityHtml() {
     const vm = transfersVm();
     const watching = !duskAccount() && state.watching ? state.watching : null;
     const who = [
@@ -714,7 +722,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
           ? "Looking for transfers…"
           : "No bridge transfers found for these accounts yet."
         : "Connect a wallet, or follow a Dusk account below, to see its transfers. Transfers you send or look up on this device show here too.";
-    return transfersPage({
+    return activityPanel({
       canAct: duskState().installed,
       empty,
       emptyActions: who.length ? "" : `<div class="btn-row">${duskState().installed ? '<button type="button" class="btn sec sm" data-action="connect-dusk">Connect Dusk Wallet</button>' : ""}<button type="button" class="btn sec sm" data-action="connect-evm">Connect EVM wallet</button></div>`,
@@ -1278,7 +1286,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   }
 
   function showError(message) {
-    if (state.form && state.page.page === "move") {
+    if (state.form && isCardPage()) {
       state.form.error = message;
       renderMain();
     } else announce(message);
@@ -1292,16 +1300,15 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const next = parseLocation(globalThis.location?.hash);
     if (state.sheet === "review") closeSheet();
     state.page = next;
-    state.menuOpen = false;
-    if (next.page === "move") {
-      ensureForm(next.task);
+    if (next.page === "home" || next.page === "move") {
+      ensureCard(next);
       void loadReads();
     }
     if (next.page === "transfer") void openReceipt(next.hash);
     if (next.page === "transfers") void discover();
     // Pages that show a fee read the node's gas price again, so they quote
     // what the form and the wallet will.
-    if (next.page !== "move") void refreshPrice();
+    if (!["home", "move"].includes(next.page)) void refreshPrice();
     if (next.page === "lookup") {
       lookupFlow.cancel();
       state.lookup = { busy: false, error: "", query: next.query ?? state.lookup.query ?? "" };
@@ -1400,12 +1407,22 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     }
   });
 
-  root.addEventListener("change", (event) => {
-    if (event.target.name === "source" && state.form) {
-      state.form.routeId = event.target.value;
-      formReads.reset(["migration"]);
+  // The route row's open state stays as it was when the card is drawn again.
+  root.addEventListener(
+    "toggle",
+    (event) => {
+      if (state.form && event.target.matches?.("details.route")) state.form.routeOpen = event.target.open;
+    },
+    true,
+  );
+
+  // Escape closes the network list.
+  root.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && state.form?.menu) {
+      const side = state.form.menu;
+      state.form.menu = null;
       renderMain();
-      void loadReads();
+      root.querySelector(`[data-action="open-menu"][data-side="${side}"]`)?.focus();
     }
   });
 
@@ -1421,10 +1438,11 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   });
 
   root.addEventListener("click", (event) => {
-    // A link chosen in the phone menu closes it, even to the page already open.
-    if (state.menuOpen && event.target.closest(".menu a")) {
-      state.menuOpen = false;
-      setTimeout(renderChrome, 0);
+    // A click outside the network list closes it.
+    if (state.form?.menu && !event.target.closest(".netsel") && isCardPage()) {
+      state.form.menu = null;
+      renderMain();
+      if (!event.target.closest("[data-action]")) return;
     }
     const copyTarget = event.target.closest("[data-copy]");
     if (copyTarget) {
@@ -1488,20 +1506,45 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         renderMain();
       },
       skip: () => slot("main").querySelector("#main")?.focus(),
-      "toggle-menu": () => {
-        state.menuOpen = !state.menuOpen;
-        renderChrome();
-        root.querySelector('[data-action="toggle-menu"]')?.focus();
+      // The card: its network lists, the flip, and the recipient and gas.
+      "open-menu": () => {
+        const side = target.dataset.side;
+        state.form.menu = state.form.menu === side ? null : side;
+        renderMain();
+        root.querySelector('.netmenu .netopt[aria-selected="true"], .netmenu .netopt:not([aria-disabled="true"])')?.focus();
+      },
+      "close-menu": () => {
+        state.form.menu = null;
+        renderMain();
+      },
+      "pick-net": () => {
+        if (target.getAttribute("aria-disabled") === "true") return;
+        const route = formRoute();
+        const net = target.dataset.net;
+        const next = target.dataset.side === "from" ? choosePair(routes, { from: net, to: route.to.id }) : routeBetween(routes, route.from.id, net);
+        if (next) setPair(next);
+        state.form.menu = null;
+        renderMain();
+        root.querySelector(`[data-action="open-menu"][data-side="${target.dataset.side}"]`)?.focus();
+      },
+      flip: () => {
+        const back = flipRoute(routes, formRoute());
+        if (!back) return;
+        setPair(back);
+        renderMain();
+        root.querySelector('[data-action="flip"]')?.focus();
+      },
+      settings: () => {
+        state.form.recipientEditing = true;
+        state.form.routeOpen = true;
+        renderMain();
+        root.querySelector("#recipient")?.focus();
       },
       "withdrawal-finalize": () => openActionReview(target.dataset.id, "finalize", target),
       "withdrawal-prove": () => openActionReview(target.dataset.id, "prove", target),
     };
     if (actions[action]) {
       event.preventDefault();
-      if (state.menuOpen && action !== "toggle-menu" && target.closest(".menu")) {
-        state.menuOpen = false;
-        renderChrome();
-      }
       void actions[action]();
     }
   });
@@ -1514,9 +1557,20 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
 
   globalThis.addEventListener?.("hashchange", navigate);
 
+  // On a phone, the card's button stays above the keyboard: the height the
+  // keyboard covers, from the visual viewport, as the web wallet keeps it.
+  const viewport = globalThis.visualViewport;
+  if (viewport) {
+    const keyboardInset = () =>
+      root.style.setProperty("--keyboard-inset", `${Math.max(0, Math.round(globalThis.innerHeight - viewport.height - viewport.offsetTop))}px`);
+    viewport.addEventListener("resize", keyboardInset);
+    viewport.addEventListener("scroll", keyboardInset);
+    keyboardInset();
+  }
+
   return {
     async start() {
-      if (state.page.page === "move") ensureForm(state.page.task);
+      if (isCardPage()) ensureCard();
       render();
       for (const entry of state.activity) if (entry.status === "pending" || !entry.status) track(entry.id);
       if (state.page.page === "transfer") void openReceipt(state.page.hash);
@@ -1534,10 +1588,11 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
           for (const entry of state.activity)
             if (entry.status === "pending" && routeOf(entry.routeId)?.mode === "duskevm-withdrawal") track(entry.id);
           void discover();
-          if (state.page.page === "move") void loadReads();
+          followWallets();
+          if (isCardPage()) void loadReads();
         }
         renderChrome();
-        if (changed || state.page.page !== "move") renderMain();
+        if (changed || !isCardPage()) renderMain();
       });
       subscribeEvmWallet((next) => {
         const changed = next.account !== state.evmState.account || next.chainId !== state.evmState.chainId;
@@ -1550,11 +1605,10 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
           void discover();
         }
         renderChrome();
+        if (accountChanged) followWallets();
         if (changed) {
-          if (state.page.page === "move") {
-            renderMain();
-            void loadReads();
-          } else renderMain();
+          renderMain();
+          if (isCardPage()) void loadReads();
         }
       });
       const refreshDusk = () => {
@@ -1563,7 +1617,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       };
       globalThis.addEventListener?.("focus", refreshDusk);
       globalThis.document?.addEventListener("visibilitychange", refreshDusk);
-      if (state.page.page === "move") void loadReads();
+      if (isCardPage()) void loadReads();
       // The gas price every "up to" fee is figured at, on any page.
       else void refreshPrice();
       void discover();

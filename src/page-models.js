@@ -31,46 +31,34 @@ export const evmWalletName = (evm) => evm?.walletName || "your EVM wallet";
 // Start page
 // ---------------------------------------------------------------------------
 
-/** The start page's task rows, with time and cost, and on phones whether they work there. */
-export function landingTasks(cfg, tasks, { duskInstalled = false, gasPrice = 1n, phone = false } = {}) {
-  const names = networkNames(cfg);
-  const fees = (mode) => routeDuskFees({ mode }, { gasPrice });
-  const phoneLimited = phone && !duskInstalled;
-  const rows = tasks.map((task) => {
-    const route = task.routes[0];
-    let meta;
-    let phoneTag = null;
-    if (task.id === "migrate") {
-      const coins = [...new Set(task.routes.map((item) => gasCoin(cfg, item.from.id)))].join(" or ");
-      meta = `About ${roughDuration(cfg.migrationDelaySeconds ?? 3_600)} · two wallet steps · a network fee in ${coins}`;
-      phoneTag = { ok: true, text: "Works on this phone" };
-    } else if (route.mode === "duskevm-deposit") {
-      meta = `Usually arrives within a minute · network fee up to ${formatMaxFee(fees("duskevm-deposit").send.maxLux)} DUSK`;
-      phoneTag = { ok: false, text: "Needs a computer" };
-    } else if (route.mode === "duskevm-withdrawal") {
-      meta = `Three steps over about ${roughDuration(WITHDRAWAL_REPORT_SECONDS + WITHDRAWAL_WAITING_PERIOD_SECONDS)} · ${stepFeeText({ gasPrice })} on Dusk`;
-      phoneTag = { ok: true, text: "Step 1 works here. Prove and claim need a computer." };
-    } else {
-      meta = `Usually within ${roughDuration(cfg.service?.delaySeconds ?? 3_600)} · ${formatDusk(cfg.service.feeLux)} bridge fee, taken from the amount`;
-      phoneTag = { ok: false, text: "Needs a computer" };
-    }
-    return {
-      id: task.id,
-      meta,
-      pair: [route.from.id, route.to.id],
-      phoneTag: phoneLimited ? phoneTag : null,
-      title: task.title,
-      what: task.what,
-    };
-  });
-  if (!cfg.duskEvm.enabled)
-    rows.splice(Math.min(1, rows.length), 0, {
-      id: "to-duskevm",
-      pair: ["dusk", "dusk-evm"],
-      title: `Move DUSK to ${names["dusk-evm"]}`,
-      unavailable: `${names["dusk-evm"]} · not on ${names.badge} yet`,
-    });
-  return rows;
+/** A duration as the card writes it: "1 min", "1 hour", "7 days". */
+export function shortDuration(seconds) {
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} hour${hours === 1 ? "" : "s"}`;
+  return `${Math.round(hours / 24)} days`;
+}
+
+/**
+ * A route in one line, time then cost: the card's route row and its network
+ * list. The fee comes from the same calculation as the quote and the review.
+ */
+export function routeLine(route, cfg, { gasPrice = 1n } = {}) {
+  if (route.mode === "duskevm-deposit")
+    return `≈ 1 min · fee up to ${formatMaxFee(routeDuskFees(route, { gasPrice }).send.maxLux)} DUSK`;
+  if (route.mode === "duskevm-withdrawal")
+    return `≈ ${shortDuration(WITHDRAWAL_REPORT_SECONDS + WITHDRAWAL_WAITING_PERIOD_SECONDS)}, three steps · ${stepFeeText({ gasPrice })} on Dusk`;
+  if (route.mode === "service-transfer")
+    return `≈ ${shortDuration(cfg.service?.delaySeconds ?? 3_600)} · ${formatDusk(cfg.service.feeLux)} bridge fee`;
+  return `≈ ${shortDuration(cfg.migrationDelaySeconds ?? 3_600)} · two wallet steps · fee in ${gasCoin(cfg, route.from.id)}`;
+}
+
+/** Who does what, in one line: the route's steps and the wallets they take. */
+export function routeSteps(route, quote = null) {
+  if (route.mode === "duskevm-withdrawal") return "Send on DuskEVM, then prove and claim on Dusk";
+  if (route.mode === "migration") return quote?.steps === 1 ? "One, in your EVM wallet" : "Approve, then migrate, in your EVM wallet";
+  return "One, in Dusk Wallet";
 }
 
 // ---------------------------------------------------------------------------

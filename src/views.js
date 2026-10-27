@@ -60,22 +60,12 @@ function evmPill(evm) {
   return `<button type="button" class="wpill" data-action="connect-evm" aria-label="${html(evm.walletName || "EVM wallet")}, ${html(evm.account)}${evm.chainName ? `, on ${html(evm.chainName)}` : ""}"><span class="av">${icon("wallet")}</span><code class="mono">${html(short(evm.account))}</code>${evm.chainName ? `<span class="chainchip">${html(evm.chainName)}</span>` : ""}</button>`;
 }
 
+/** The thin top bar: the name, the network, the wallets. The card's tabs are the pages. */
 export function header(vm) {
   const net = `<button type="button" class="net ${vm.isTestnet ? "test" : "main"}" data-action="open-network" aria-haspopup="dialog" aria-label="Network: ${html(vm.badge)}. Show network details"><span class="dot"></span><span class="net-name">${html(vm.badge)}</span>${icon("chev-d")}</button>`;
-  const count = vm.needsCount ? `<span class="cnt" aria-label="${vm.needsCount} need you">${vm.needsCount}</span>` : "";
-  const nav = `<nav class="navs" aria-label="Pages"><a href="#/" ${vm.nav === "move" ? 'aria-current="page"' : ""}>Move DUSK</a><a href="#/transfers" ${vm.nav === "mine" ? 'aria-current="page"' : ""}>My transfers${count}</a></nav>`;
-  // An icon with its label on hover and focus, as the web wallet's settings.
-  const contracts = `<button type="button" class="icon-btn bar tip" data-action="open-contracts" aria-haspopup="dialog" aria-label="Contracts" data-tip="Contracts">${icon("doc")}</button>`;
   return `<header class="hdr"><div class="hdr-in">
     <a class="brand" href="#/" aria-label="Dusk Bridge, start">${GLYPH}<span>Dusk Bridge</span></a>
-    ${nav}
-    <div class="hdr-r">${net}${duskPill(vm.dusk)}${evmPill(vm.evm)}${contracts}</div>
-    <button type="button" class="menu-btn" data-action="toggle-menu" aria-expanded="${vm.menuOpen ? "true" : "false"}" aria-controls="menu" aria-label="Menu">${icon("menu")}</button>
-  </div>
-  <div id="menu" class="menu" ${vm.menuOpen ? "" : "hidden"}>
-    <a href="#/">Move DUSK</a><a href="#/transfers">My transfers${count}</a><a href="#/lookup">Look up a transfer</a>
-    <button type="button" data-action="open-about">About this page</button>
-    <div class="menu-wallets">${duskPill(vm.dusk)}${evmPill(vm.evm)}</div>
+    <div class="hdr-r">${net}${duskPill(vm.dusk)}${evmPill(vm.evm)}</div>
   </div></header>`;
 }
 
@@ -95,57 +85,7 @@ export function footer(vm) {
 }
 
 // ---------------------------------------------------------------------------
-// Start page
-// ---------------------------------------------------------------------------
-
-/** A wallet card's account: which one is connected, by name or short code. */
-const connectedAs = (who) => `<span class="t2 small sb">Connected${who ? ` · <span class="who">${html(who)}</span>` : ""}</span>`;
-
-export function landing(vm) {
-  // One line for the task, one for its time and cost, and the route as two
-  // marks with an arrow.
-  const rows = vm.tasks
-    .map((task) => {
-      const tag = task.phoneTag
-        ? `<span class="tag${task.phoneTag.ok ? " ok" : ""}">${icon(task.phoneTag.ok ? "phone" : "laptop")}${html(task.phoneTag.text)}</span>`
-        : "";
-      if (task.unavailable)
-        return `<li class="task off">${pairMark(task.pair[0], task.pair[1])}<span class="task-main"><span class="tt">${html(task.title)}</span><span class="sb">${html(task.unavailable)}</span></span></li>`;
-      return `<li><a class="task" href="#/move/${html(task.id)}">${pairMark(task.pair[0], task.pair[1])}<span class="task-main"><span class="tt">${html(task.title)}</span><span class="sb">${html(task.meta)}</span>${tag}</span>${icon("chev-r", "chev")}</a></li>`;
-    })
-    .join("");
-  const phone = vm.phone
-    ? `<div class="card note-box"><div class="note">${icon("phone")}<span><b>On this phone</b> you can move old DUSK with a mobile EVM wallet and follow your transfers. Dusk Wallet is a browser extension for computers, so sending from Dusk happens there.</span></div><div class="btn-row"><button type="button" class="btn sec sm" data-copy="${html(vm.pageUrl)}" aria-label="Copy this page's link">${icon("link")}Copy link</button>${vm.canShare ? `<button type="button" class="btn sec sm" data-action="share">${icon("share")}Share link</button>` : ""}</div></div>`
-    : "";
-  // Two rows: what each wallet is for, or which account is connected.
-  const duskConnected = vm.dusk.state === "connected";
-  const evmConnected = vm.evm.state === "connected";
-  const duskAction = duskConnected
-    ? ""
-    : vm.dusk.state === "missing"
-      ? `<a class="btn sec xs" href="${html(vm.dusk.getUrl)}" target="_blank" rel="noreferrer">Get it ${icon("ext")}<span class="sr-only"> (opens in a new tab)</span></a>`
-      : '<button type="button" class="btn sec xs" data-action="connect-dusk">Connect</button>';
-  const evmAction = evmConnected ? "" : '<button type="button" class="btn sec xs" data-action="connect-evm">Connect</button>';
-  const wallets = `<section class="card side-card" aria-labelledby="wallets-t"><h2 class="side-t" id="wallets-t">Wallets you'll need</h2><ul class="wrows">
-    <li>${chainMark("dusk")}<span class="wr-main"><span class="tt">Dusk Wallet</span>${duskConnected ? connectedAs(vm.dusk.name || short(vm.dusk.account)) : '<span class="sb">Sends from Dusk, proves and claims</span>'}</span>${duskAction}</li>
-    <li><span class="cm">${icon("wallet")}</span><span class="wr-main"><span class="tt">An EVM wallet</span>${evmConnected ? connectedAs(short(vm.evm.account)) : '<span class="sb">For old DUSK and DuskEVM</span>'}</span>${evmAction}</li>
-  </ul></section>`;
-  return `<main class="page start" id="main" tabindex="-1">
-    <div class="start-main">
-      <h1>Move DUSK</h1>
-      <p class="lede">Pick a task. You see the cost and the time before anything is sent.</p>
-      ${phone}
-      <ul class="tasks">${rows}</ul>
-    </div>
-    <aside class="start-side" aria-label="Wallets and transfers">
-      ${wallets}
-      <nav class="card side-links" aria-label="Your transfers"><a href="#/transfers">Sent something before? My transfers ${icon("chev-r")}</a><a href="#/lookup">Look up a transfer ${icon("search")}</a></nav>
-    </aside>
-  </main>`;
-}
-
-// ---------------------------------------------------------------------------
-// Form
+// The bridge card: From, a flip, To, the route, one button
 // ---------------------------------------------------------------------------
 
 export function quoteRows(quote) {
@@ -157,28 +97,6 @@ export function quoteRows(quote) {
     .join("");
 }
 
-export function quoteBlock(vm) {
-  const leaves = vm.quote.leaves
-    ? `<div class="kv"><dt class="k">Leaves your Dusk account</dt><dd class="v"><span class="num">${html(vm.quote.leaves)}</span></dd></div>`
-    : "";
-  const first = vm.firstTime ? `<p class="hint">First time? Try a small amount first.</p>` : "";
-  return `<dl class="kvs sum-rows" aria-label="Quote">${quoteRows(vm.quote)}${leaves}</dl>${first}`;
-}
-
-function accountRow({ balance, chain, label, value, valueNote, wallet }) {
-  return `<div class="group acc">${chainMark(chain)}<div class="acc-main"><div class="l1">${html(label)}</div><div class="l2">${value}${valueNote ? ` <span class="t2 small">${html(valueNote)}</span>` : ""}</div>${wallet ? `<div class="small t2">${wallet}</div>` : ""}</div>${balance ? `<div class="r">${balance}</div>` : ""}</div>`;
-}
-
-const availability = (vm) =>
-  vm.available
-    ? `<span>${html(vm.availableLabel ?? "Available")} <span class="num">${html(vm.available)}</span></span>${vm.canMax ? '<button type="button" class="mini" data-action="max">Max</button>' : ""}`
-    : `<span>${html(vm.availableNote ?? "")}</span>`;
-
-/**
- * The parts of the form that follow balances, prices, the amount and the
- * recipient. The page renders each in a `data-region` and replaces them all
- * when anything changes, so none goes stale while someone types.
- */
 /** Under the recipient: the account a typed name points to, the lookup, or the capitals' fix. */
 function recipientNote(to) {
   if (to.resolved) return `${html(to.resolved.name)} points to <code class="mono wrap">${html(to.resolved.address)}</code>`;
@@ -187,55 +105,78 @@ function recipientNote(to) {
   return "";
 }
 
-export function formRegions(vm) {
+const netButton = (side, net, open) =>
+  `<button type="button" class="netbtn" data-action="open-menu" data-side="${side}" aria-haspopup="listbox" aria-expanded="${open ? "true" : "false"}" aria-label="${side === "from" ? "From" : "To"}: ${html(net.name)}. Choose the network">${chainMark(net.id)}<span>${html(net.name)}</span>${icon("chev-d")}</button>`;
+
+/** The networks to choose from: under the button on a computer, a sheet from the bottom on a phone. */
+function netMenu(side, choices) {
+  const title = side === "from" ? "Where it comes from" : "Where it goes";
+  const options = choices
+    .map(
+      (choice) =>
+        `<button type="button" class="netopt" role="option" data-action="pick-net" data-side="${side}" data-net="${html(choice.id)}" aria-selected="${choice.selected ? "true" : "false"}"${choice.disabled ? ' aria-disabled="true"' : ""}>${chainMark(choice.id)}<span><span class="nm">${html(choice.name)}</span>${choice.disabled || choice.note ? `<span class="sb">${html(choice.disabled || choice.note)}</span>` : ""}</span>${choice.selected ? icon("check") : ""}</button>`,
+    )
+    .join("");
+  return `<div class="netscrim" data-action="close-menu"></div><div class="netmenu" role="listbox" aria-label="${title}"><p class="netmenu-t">${title}</p>${options}</div>`;
+}
+
+/** The card's one button: a link where it leads to Dusk Wallet's page. */
+function primaryControl(button) {
+  if (button.action === "get-dusk")
+    return `<a class="btn pri full" href="${html(button.href)}" target="_blank" rel="noreferrer">${html(button.label)} ${icon("ext")}<span class="sr-only"> (opens in a new tab)</span></a>`;
+  return `<button type="button" class="btn pri full" data-action="${html(button.action ?? "none")}" ${button.enabled ? "" : "disabled"}>${html(button.label)}</button>`;
+}
+
+/**
+ * The parts of the card that follow balances, prices, the amount and the
+ * recipient. The page renders each in a `data-region` and replaces them all
+ * when anything changes, so none goes stale while someone types.
+ */
+export function cardRegions(vm) {
+  const leaves = vm.quote.leaves
+    ? `<div class="kv"><dt class="k">Leaves your Dusk account</dt><dd class="v"><span class="num">${html(vm.quote.leaves)}</span></dd></div>`
+    : "";
   return {
-    avail: availability(vm),
-    from: accountRow(vm.from),
-    privacy: html(vm.privacy),
-    quote: quoteBlock(vm),
+    cta: `${vm.error ? `<p class="message error" role="alert">${html(vm.error)}</p>` : ""}${primaryControl(vm.button)}<p class="small t2 hint">${html(vm.hint ?? "")}</p>`,
+    "from-foot": `<span>${html(vm.from.balanceLabel)}</span><span class="bal">${vm.from.balance ? `<span class="num">${html(vm.from.balance)}</span>` : ""}${vm.canMax ? '<button type="button" class="mini" data-action="max">Max</button>' : ""}</span>`,
+    receive: html(vm.receive || "0"),
     "recipient-note": recipientNote(vm.to),
-    "review-hint": html(vm.reviewHint ?? ""),
+    route: `<summary>${icon("clock")}<span>${html(vm.routeLine)}</span>${icon("chev-d", "chev")}</summary>
+      <dl class="kvs" aria-label="Quote"><div class="kv"><dt class="k">Steps</dt><dd class="v">${html(vm.steps)}</dd></div>${quoteRows({ rows: vm.quote.rows.filter((row) => !["send", "receive"].includes(row.key)) })}${leaves}</dl>
+      <p class="pubnote"><b>Public on both networks, and linked.</b> <span data-region="privacy">${html(vm.privacy)}</span> The bridge works with public balances only. Seeing them doesn't let anyone move your DUSK.</p>`,
   };
 }
 
-export function formPage(vm) {
-  const regions = formRegions(vm);
-  const head = `<div class="topbar"><a class="bk" href="#/">${icon("back")}All tasks</a><h1 class="ti">${html(vm.title)}</h1></div>`;
-  const pick = vm.sources.length > 1
-    ? `<div class="seg" role="radiogroup" aria-label="Old DUSK on">${vm.sources
-        .map((source) => `<label class="seg-opt"><input type="radio" name="source" value="${html(source.id)}" ${source.id === vm.routeId ? "checked" : ""}><span>${html(source.name)}</span></label>`)
-        .join("")}</div>`
+export function cardPage(vm) {
+  const top = `<div class="bcard-top"><nav class="tabs" aria-label="Bridge and activity"><a class="tab" href="#/" ${vm.tab === "bridge" ? 'aria-current="page"' : ""}>Bridge</a><a class="tab" href="#/transfers" ${vm.tab === "activity" ? 'aria-current="page"' : ""}>Activity${vm.needsCount ? `<span class="cnt" aria-label="${vm.needsCount} need you">${vm.needsCount}</span>` : ""}</a></nav>${
+    vm.tab === "bridge" ? `<button type="button" class="icon-btn tip" data-action="settings" aria-label="Recipient and gas" data-tip="Recipient and gas">${icon("sliders")}</button>` : ""
+  }</div>`;
+  if (vm.tab === "activity") return `<main class="swap" id="main" tabindex="-1"><section class="bcard wide" aria-label="Activity">${top}${vm.activity}</section></main>`;
+  const regions = cardRegions(vm);
+  const notice = vm.notice
+    ? `<div class="card notice-box" role="note"><div class="note">${icon(vm.notice.icon ?? "info")}<span>${vm.notice.html}</span></div>${vm.notice.actions ?? ""}</div>`
     : "";
-  const notice = vm.notice ? `<div class="card notice-box" role="note"><div class="note">${icon(vm.notice.icon ?? "info")}<span>${vm.notice.html}</span></div>${vm.notice.actions ?? ""}</div>` : "";
-  const from = `<div data-region="from">${regions.from}</div>`;
-  const amount = `<div class="amount-field"><label for="amount" class="amount-label">Amount</label><div class="bigamt${vm.amountError ? " invalid" : ""}"><input id="amount" name="amount" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="0" value="${html(vm.amount)}" aria-describedby="amount-help amount-error"${vm.amountError ? ' aria-invalid="true"' : ""}><span class="u">${html(vm.unit)}</span></div><div class="avail" id="amount-help" data-region="avail">${regions.avail}</div>${vm.balanceNote ? `<p class="small t2">${html(vm.balanceNote)}</p>` : ""}<p class="field-error" id="amount-error" role="alert">${html(vm.amountError ?? "")}</p></div>`;
+  const from = `<div class="panel"><div class="panel-h"><span class="panel-l">From</span><div class="netsel">${netButton("from", vm.from.net, vm.menu === "from")}${vm.menu === "from" ? netMenu("from", vm.fromChoices) : ""}</div></div>
+      <div class="amt-row"><input id="amount" name="amount" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="0" value="${html(vm.amount)}" aria-label="Amount, in ${html(vm.unit)}" aria-describedby="amount-help amount-error"${vm.amountError ? ' aria-invalid="true"' : ""}><span class="token">${chainMark(vm.from.net.id)}${html(vm.unit)}</span></div>
+      <div class="panel-f" id="amount-help" data-region="from-foot">${regions["from-foot"]}</div>
+      <p class="field-error" id="amount-error" role="alert">${html(vm.amountError ?? "")}</p>
+    </div>`;
+  const flip = `<div class="flip-row"><button type="button" class="flip" data-action="flip" aria-label="Swap From and To"${vm.canFlip ? "" : ' disabled title="No route back"'}>${icon("arrow-d")}</button></div>`;
   // Under the field: what a typed name points to, the lookup, or the capitals' fix.
   const note = `<p class="small t2 rnote" id="recipient-note" data-region="recipient-note" aria-live="polite">${regions["recipient-note"]}</p>`;
-  const to = vm.to.editing
-    ? `<div class="group acc edit">${chainMark(vm.to.chain)}<div class="acc-main"><label class="l1" for="recipient">${html(vm.to.label)}</label><textarea id="recipient" name="recipient" class="mono-input wrap-input" rows="2" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${html(vm.to.placeholder)}" aria-describedby="recipient-error recipient-note"${vm.to.error ? ' aria-invalid="true"' : ""}>${html(vm.to.input)}</textarea><p class="field-error" id="recipient-error" role="alert">${html(vm.to.error ?? "")}</p>${note}</div>${vm.to.canReset ? '<button type="button" class="linkish" data-action="recipient-reset">Use my account</button>' : ""}</div>`
-    : accountRow({
-        chain: vm.to.chain,
-        label: vm.to.label,
-        value: vm.to.name
-          ? `<span>${html(vm.to.name)}</span>`
-          : vm.to.value
-            ? `<code class="mono">${html(short(vm.to.value))}</code>`
-            : `<span class="t2">${html(vm.to.empty)}</span>`,
-        valueNote: vm.to.valueNote,
-        balance: `<button type="button" class="linkish" data-action="recipient-edit">Change</button>`,
-      }) + note;
-  const button = `<button type="button" class="btn pri full" data-action="review" ${vm.canReview ? "" : "disabled"}>${html(vm.reviewLabel)}</button>`;
-  // The form on the left; on the right its summary, with the button in the
-  // same card. On a phone the summary follows the form, and the button stays
-  // in a bar at the bottom that has its own place at the end of the page.
-  return `<main class="page form-page" id="main" tabindex="-1">
-    <div class="fp-main">${head}${pick}${notice}${from}${amount}${to}</div>
-    <div class="fp-side">
-      <section class="sum" aria-labelledby="sum-t"><h2 class="sum-t" id="sum-t">Summary</h2><div data-region="quote">${regions.quote}</div>
-        <details class="pub"><summary>${icon("eye")}<span>Public on both networks, and linked</span></summary><p><span data-region="privacy">${regions.privacy}</span> The bridge works with public balances only. Seeing them doesn't let anyone move your DUSK.</p></details>
-      </section>
-      <div class="cta-bar">${vm.error ? `<p class="message error" role="alert">${html(vm.error)}</p>` : ""}${button}<p class="small t2 center" data-region="review-hint">${regions["review-hint"]}</p></div>
-    </div>
+  const recipient = vm.to.editing
+    ? `<div class="recip-edit"><label class="panel-l" for="recipient">${html(vm.to.label)}</label><textarea id="recipient" name="recipient" class="mono-input wrap-input" rows="2" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${html(vm.to.placeholder)}" aria-describedby="recipient-error recipient-note"${vm.to.error ? ' aria-invalid="true"' : ""}>${html(vm.to.input)}</textarea><p class="field-error" id="recipient-error" role="alert">${html(vm.to.error ?? "")}</p>${note}${vm.to.canReset ? '<button type="button" class="linkish" data-action="recipient-reset">Use my account</button>' : ""}</div>`
+    : `<p class="recip">${vm.to.line} · <button type="button" class="linkish" data-action="recipient-edit">Change</button></p>${note}`;
+  const to = `<div class="panel"><div class="panel-h"><span class="panel-l">To</span><div class="netsel">${netButton("to", vm.to.net, vm.menu === "to")}${vm.menu === "to" ? netMenu("to", vm.toChoices) : ""}</div></div>
+      <div class="amt-row"><span class="out${vm.receive ? "" : " empty"}" data-region="receive">${regions.receive}</span><span class="token">${chainMark(vm.to.net.id)}${html(vm.receiveUnit)}</span></div>
+      <div class="panel-f"><span>You receive</span></div>
+      ${recipient}
+    </div>`;
+  return `<main class="swap" id="main" tabindex="-1">
+    <section class="bcard" aria-label="Bridge">${top}${notice}${from}${flip}${to}
+      <details class="route" data-region="route"${vm.routeOpen ? " open" : ""}>${regions.route}</details>
+      <div class="cta" data-region="cta">${regions.cta}</div>
+    </section>
   </main>`;
 }
 
@@ -418,21 +359,22 @@ function watchBlock(watch) {
     </form>`;
 }
 
-export function transfersPage(vm) {
+/** The card's Activity tab: whose transfers these are, then the list, newest first in each group. */
+export function activityPanel(vm) {
   const group = (title, rows) =>
     rows.length
-      ? `<h2 class="sec-t">${html(title)}</h2><ul class="group list trs">${rows.map((row) => transferRow(row, { canAct: vm.canAct !== false })).join("")}</ul>`
+      ? `<h2 class="sec-t">${html(title)}</h2><ul class="list trs">${rows.map((row) => transferRow(row, { canAct: vm.canAct !== false })).join("")}</ul>`
       : "";
   const body = vm.empty
-    ? `<div class="group pad empty"><p>${html(vm.empty)}</p>${vm.emptyActions ?? ""}</div>`
+    ? `<div class="empty"><p>${html(vm.empty)}</p>${vm.emptyActions ?? ""}</div>`
     : `${group("Needs you", vm.groups.needs)}${group("In progress", vm.groups.progress)}${group("Completed", vm.groups.done)}${group("Didn't go through", vm.groups.failed)}`;
-  return `<main class="page tp" id="main" tabindex="-1">
-    <div class="tp-h"><div><h1>My transfers</h1><p class="lede">${vm.lede}</p></div><a class="btn sec sm" href="#/lookup">${icon("search")}Look up</a></div>
-    <p class="small t2" role="status" aria-live="polite">${html(vm.syncText)}</p>
+  return `<div class="act">
+    <div class="act-h"><p class="lede">${vm.lede}</p><a class="btn sec sm" href="#/lookup">${icon("search")}Look up</a></div>
+    <p class="small t2 sync" role="status" aria-live="polite">${html(vm.syncText)}</p>
     ${vm.watch ? watchBlock(vm.watch) : ""}
     ${body}
     ${vm.more ? `<p class="links-row"><button type="button" class="btn sec sm" data-action="discover-more">Look further back</button></p>` : ""}
-  </main>`;
+  </div>`;
 }
 
 // ---------------------------------------------------------------------------

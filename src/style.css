@@ -137,11 +137,6 @@ svg.glyph { display: block; flex: 0 0 auto; }
 .hdr-in { height: var(--bar); padding: 0 20px 0 24px; display: flex; align-items: center; gap: 8px; }
 .brand { display: flex; align-items: center; gap: 10px; margin-right: 22px; min-height: 44px; font-size: 15.5px; font-weight: 500; text-decoration: none; white-space: nowrap; }
 .brand .glyph { width: 24px; height: 24px; }
-.navs { display: flex; align-self: stretch; }
-.navs a { position: relative; display: flex; align-items: center; gap: 8px; padding: 0 14px; color: var(--text-2); font-size: 14.5px; text-decoration: none; white-space: nowrap; }
-.navs a:hover, .navs a[aria-current="page"] { color: var(--text); }
-.navs a[aria-current="page"]::after { content: ""; position: absolute; left: 14px; right: 14px; bottom: -1px; height: 2px; border-radius: 2px; background: var(--text); }
-.navs a:focus-visible { outline-offset: -4px; }
 .cnt { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--text); color: var(--bg); font-size: 11.5px; font-weight: 500; display: inline-grid; place-items: center; }
 .hdr-r { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .net { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--surface); color: var(--text); font-size: 14px; white-space: nowrap; }
@@ -160,9 +155,6 @@ svg.glyph { display: block; flex: 0 0 auto; }
 .wpill.cta svg { width: 14px; height: 14px; }
 .wpill .mono { font-size: 13px; }
 .chainchip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; background: var(--surface-2); color: var(--text-2); font-size: 12px; }
-.menu-btn { display: none; width: 44px; height: 44px; border: 0; border-radius: 50%; background: transparent; place-items: center; }
-.menu-btn svg { width: 20px; height: 20px; }
-.menu { display: none; }
 
 /* An icon button whose label shows on hover and focus. */
 .icon-btn.bar { width: 38px; height: 38px; border-radius: 50%; color: var(--text-2); }
@@ -263,60 +255,14 @@ h1 { font-size: 28px; font-weight: 500; letter-spacing: -0.01em; line-height: 1.
 .kv.total .k, .kv.total .v { color: var(--text); font-weight: 500; }
 
 /* ------------------------------------------------------------------ */
-/* Start page: the tasks, and beside them the wallets                  */
+/* The bridge card: From, a flip, To, the route, one button            */
 /* ------------------------------------------------------------------ */
 
-.start { display: grid; grid-template-columns: minmax(0, 1fr) 22rem; gap: 40px; align-items: start; }
-.start-main { min-width: 0; max-width: 46rem; }
-.start-side { position: sticky; top: calc(var(--bar) + 24px); display: flex; flex-direction: column; gap: 12px; }
-.tasks { margin-top: 24px; border-top: 1px solid var(--hair); }
-.task { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 16px 12px; border-bottom: 1px solid var(--hair); color: inherit; text-decoration: none; }
-a.task:hover { background: var(--hover); }
-.task .tt { display: block; font-size: 16px; font-weight: 500; }
-.task .sb { display: block; margin-top: 3px; color: var(--text-2); font-size: 13.5px; }
-.task .tag { margin-top: 8px; }
-.task .chev { width: 16px; height: 16px; color: var(--text-3); }
-.task.off .pair, .task.off .tt { opacity: .55; }
-.note-box { margin-top: 18px; }
-.warn-box { margin-top: 12px; box-shadow: inset 0 0 0 1px var(--amber); }
-.side-t { margin-bottom: 4px; font-size: 15px; font-weight: 500; }
-.wrows li { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px 0; }
-.wrows li + li { border-top: 1px solid var(--hair); }
-.wr-main { min-width: 0; }
-.wr-main .tt { display: block; font-size: 14.5px; font-weight: 500; }
-.wr-main .sb { display: block; color: var(--text-2); font-size: 12.5px; }
-.wrows .who { color: var(--text); }
-.wrows li > .small { text-align: right; }
-.side-links { display: flex; flex-direction: column; padding: 6px; }
-.side-links a { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; padding: 0 12px; border-radius: 10px; font-size: 14px; text-decoration: none; }
-.side-links a + a { border-top: 1px solid var(--hair); border-radius: 0 0 10px 10px; }
-.side-links a:hover { background: var(--hover); }
-.side-links svg { width: 14px; height: 14px; color: var(--text-2); }
-
-/* ------------------------------------------------------------------ */
-/* Form: the fields on the left, the summary and its button beside     */
-/* ------------------------------------------------------------------ */
-
-.form-page { display: grid; grid-template-columns: minmax(0, 1fr) 22rem; gap: 40px; align-items: start; }
-.fp-main { display: flex; flex-direction: column; gap: 18px; min-width: 0; max-width: 42rem; }
-.fp-side { position: sticky; top: calc(var(--bar) + 24px); display: flex; flex-direction: column; }
+/* Shared by the card and the pages around it */
 .topbar { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; margin-bottom: 4px; }
 .topbar .bk { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 14px; text-decoration: none; }
 .topbar .bk:hover { color: var(--text); }
 .topbar .ti { font-size: 28px; font-weight: 500; letter-spacing: -0.01em; }
-.seg { display: flex; gap: 4px; padding: 3px; border-radius: 999px; background: var(--surface); }
-.seg-opt { flex: 1; position: relative; }
-.seg-opt input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
-.seg-opt span { display: flex; align-items: center; justify-content: center; height: 34px; border-radius: 999px; color: var(--text-2); font-size: 14px; }
-.seg-opt input:checked + span { background: var(--surface-3); color: var(--text); font-weight: 500; }
-.seg-opt input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 1px; }
-.acc { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 14px 18px; background: var(--surface); border-radius: 16px; }
-.acc .l1 { display: block; color: var(--text-2); font-size: 13px; }
-.acc .l2 { font-size: 15px; font-weight: 500; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
-.acc .l2 .mono { font-weight: 400; font-size: 14px; }
-.acc .r { text-align: right; color: var(--text-2); font-size: 13px; white-space: nowrap; }
-.acc .r b { display: block; color: var(--text); font-size: 15px; font-weight: 500; }
-.acc.edit { align-items: start; }
 .mono-input { width: 100%; margin-top: 6px; height: 44px; padding: 0 14px; border: 0; border-radius: 12px; background: var(--field); box-shadow: inset 0 0 0 1px var(--hair-2); color: var(--text); font-family: var(--mono); font-size: 13.5px; font-variant-ligatures: none; }
 .mono-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 /* The whole address shows, over lines on a phone: its end is what people compare. */
@@ -324,37 +270,94 @@ a.task:hover { background: var(--hover); }
 .rnote { margin-top: 8px; overflow-wrap: anywhere; }
 .rnote:empty { display: none; }
 .rnote code { color: var(--text); }
-.amount-field { display: flex; flex-direction: column; gap: 8px; }
-.amount-label { color: var(--text-2); font-size: 14px; }
-.bigamt { display: flex; align-items: center; gap: 10px; height: 54px; padding: 0 16px; border-radius: 12px; background: var(--field); box-shadow: inset 0 0 0 1px var(--hair-2); }
-.bigamt:focus-within { box-shadow: inset 0 0 0 1px var(--focus), 0 0 0 2px var(--focus-ring); }
-.bigamt.invalid { box-shadow: inset 0 0 0 1px var(--red-line); }
-.bigamt input { flex: 1 1 auto; width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--text); font-size: 21px; line-height: 1; text-align: left; font-variant-numeric: tabular-nums; outline: none; }
-.bigamt input::placeholder { color: var(--text-3); }
-.bigamt .u { flex: 0 0 auto; color: var(--text-2); font-size: 15px; }
-.avail { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; color: var(--text-2); font-size: 13.5px; }
-.avail:empty { display: none; }
 .mini { height: 28px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--surface-2); color: var(--text); font-size: 13px; font-weight: 500; }
+.notice-box { margin: 0 0 8px; }
 .notice-box .btn-row { margin-top: 12px; }
+.warn-box { margin-top: 12px; box-shadow: inset 0 0 0 1px var(--amber); }
+.recip-edit { margin-top: 10px; }
+.recip-edit .linkish { margin-top: 8px; font-size: 13px; }
+.panel .field-error { margin-top: 4px; }
 
-/* The summary and its button read as one card. */
-.sum { padding: 20px 22px 4px; border-radius: 16px 16px 0 0; background: var(--surface); }
-.sum-t { margin-bottom: 6px; font-size: 17px; font-weight: 500; }
-.sum-rows .kv { padding: 10px 0; font-size: 14px; }
-.sum-rows .kv::before, .sum-rows .kv + .kv::before { content: ""; position: absolute; top: 0; left: 0; right: 0; border-top: 1px solid var(--hair); }
-.sum-rows .kv .k { max-width: 50%; }
-.pub { margin: 6px 0 0; padding: 10px 0 8px; border-top: 1px solid var(--hair); color: var(--text-2); font-size: 13px; }
-.pub > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }
-.pub > summary::-webkit-details-marker { display: none; }
-.pub > summary::after { content: "Details"; margin-left: auto; color: var(--text-2); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--hair-2); }
-.pub[open] > summary::after { content: "Hide"; }
-.pub > summary svg { width: 15px; height: 15px; }
-.pub > summary span { color: var(--text); }
-.pub > p { margin-top: 8px; line-height: 1.5; }
-.cta-bar { padding: 8px 22px 22px; border-radius: 0 0 16px 16px; background: var(--surface); }
-.cta-bar .message { margin: 0 0 10px; }
-.cta-bar .small { margin-top: 10px; }
-.cta-bar > [data-region="review-hint"]:empty { display: none; }
+.swap { width: 100%; max-width: 72rem; margin: 0 auto; padding: 40px 16px 8px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.bcard { position: relative; width: 100%; max-width: 472px; padding: 8px 8px 10px; border-radius: 24px; background: var(--surface); box-shadow: 0 0 0 1px var(--hair); }
+.bcard-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 2px 8px; }
+.tabs { display: flex; gap: 2px; }
+.tab { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; border: 0; border-radius: 999px; background: transparent; color: var(--text-2); font-size: 15px; font-weight: 500; text-decoration: none; }
+.tab:hover { color: var(--text); }
+.tab[aria-current="page"] { background: var(--surface-2); color: var(--text); }
+.bcard-top .icon-btn { width: 36px; height: 36px; border-radius: 50%; }
+.bcard-top .icon-btn svg { width: 18px; height: 18px; }
+
+.panel { position: relative; padding: 14px 16px 12px; border-radius: 18px; background: var(--field); box-shadow: inset 0 0 0 1px var(--hair); }
+.panel:focus-within { box-shadow: inset 0 0 0 1px var(--hair-2); }
+.panel-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 36px; }
+.panel-l { color: var(--text-2); font-size: 14px; }
+.netsel { position: relative; }
+.netbtn { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px 0 4px; border: 0; border-radius: 999px; background: var(--surface-2); color: var(--text); font-size: 14.5px; font-weight: 500; white-space: nowrap; }
+.netbtn:hover { background: var(--surface-3); }
+.netbtn .cm { width: 28px; height: 28px; background: var(--surface-3); }
+.netbtn .cm svg.glyph, .netbtn .cm .mk-svg { width: 15px; height: 15px; }
+.netbtn > svg.ic { width: 15px; height: 15px; color: var(--text-2); }
+.netbtn .evm-tag { right: -6px; bottom: -3px; box-shadow: 0 0 0 2px var(--surface-2); font-size: 7px; line-height: 11px; }
+.netbtn .cm.evm { margin-right: 6px; }
+.amt-row { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+.amt-row input, .amt-row .out { flex: 1 1 auto; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--text); font-size: 36px; line-height: 1.2; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; outline: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.amt-row input::placeholder, .amt-row .out.empty { color: var(--text-3); }
+.token { display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 14px 0 4px; border-radius: 999px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--hair-2); font-size: 15px; font-weight: 500; white-space: nowrap; flex: 0 0 auto; }
+.token .cm { width: 28px; height: 28px; }
+.token .cm svg.glyph, .token .cm .mk-svg { width: 15px; height: 15px; }
+.token .evm-tag { display: none; }
+.panel-f { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 22px; margin-top: 8px; color: var(--text-2); font-size: 13px; }
+.panel-f .mini { height: 24px; padding: 0 10px; font-size: 12.5px; }
+.bal { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.flip-row { position: relative; z-index: 2; height: 6px; }
+.flip { position: absolute; left: 50%; top: 50%; width: 42px; height: 42px; margin: -21px 0 0 -21px; display: grid; place-items: center; padding: 0; border: 5px solid var(--surface); border-radius: 14px; background: var(--surface-2); color: var(--text); }
+.flip:hover:not(:disabled) { background: var(--surface-3); }
+.flip:disabled { color: var(--text-3); cursor: default; }
+.flip svg { width: 17px; height: 17px; }
+.recip { margin-top: 8px; color: var(--text-2); font-size: 13px; overflow-wrap: anywhere; }
+.recip b { color: var(--text); font-weight: 500; }
+.route { margin: 6px 2px 0; }
+.route > summary { display: flex; align-items: center; gap: 8px; padding: 10px 8px; color: var(--text-2); font-size: 13.5px; cursor: pointer; list-style: none; border-radius: 10px; }
+.route > summary::-webkit-details-marker { display: none; }
+.route > summary:hover { color: var(--text); }
+.route > summary svg { width: 15px; height: 15px; flex: 0 0 auto; }
+.route > summary .chev { margin-left: auto; transition: transform .15s ease; }
+.route[open] > summary .chev { transform: rotate(180deg); }
+.route .kvs .kv { padding: 8px 8px; font-size: 13.5px; }
+.route .kvs .kv::before, .route .kvs .kv + .kv::before { left: 8px; right: 8px; }
+.route .pubnote { margin: 6px 8px 12px; color: var(--text-2); font-size: 13px; line-height: 1.5; }
+.bcard .cta { margin-top: 4px; }
+.bcard .cta .btn { height: 54px; font-size: 16px; }
+.bcard .cta .hint:empty { display: none; }
+.bcard .cta .hint { margin-top: 8px; text-align: center; }
+.under { width: 100%; max-width: 472px; color: var(--text-2); font-size: 13px; text-align: center; }
+
+/* The network list: under its button on a computer, a sheet from the
+   bottom on a phone. */
+.netmenu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 20; width: 288px; padding: 6px; border-radius: 16px; background: var(--surface); box-shadow: 0 0 0 1px var(--hair-2), 0 18px 48px var(--shadow); }
+.netmenu-t { padding: 8px 10px 6px; color: var(--text-2); font-size: 12.5px; }
+.netopt { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; min-height: 50px; padding: 6px 10px; border: 0; border-radius: 12px; background: transparent; color: var(--text); text-align: left; }
+.netopt:hover:not([aria-disabled="true"]), .netopt[aria-checked="true"] { background: var(--surface-2); }
+.netopt .cm { width: 32px; height: 32px; }
+.netopt .nm { display: block; font-size: 14.5px; font-weight: 500; }
+.netopt .sb { display: block; color: var(--text-2); font-size: 12.5px; }
+.netopt[aria-disabled="true"] { cursor: not-allowed; }
+.netopt[aria-disabled="true"] .cm, .netopt[aria-disabled="true"] .nm { opacity: .45; }
+.netopt > svg.ic { width: 16px; height: 16px; }
+.netscrim { display: none; }
+
+/* The Activity tab: the transfers in the card, a little wider on a computer. */
+.bcard.wide { max-width: 720px; }
+.act { padding: 2px 6px 6px; }
+.act-h { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.act-h .lede { margin: 6px 0 0; font-size: 13.5px; }
+.act .sync { margin: 8px 0 0; min-height: 1px; }
+.act .sec-t { margin: 18px 0 0; padding: 7px 12px; border-radius: 10px; background: var(--surface-2); color: var(--text-2); font-size: 12.5px; font-weight: 400; }
+.act .trs .tr { grid-template-columns: 84px minmax(0, 1fr) auto; padding: 12px 8px; }
+.act .trs .pair .cm { width: 30px; height: 30px; }
+.act .empty { margin-top: 16px; padding: 16px; border-radius: 14px; background: var(--field); }
+.act .watch { margin-top: 14px; background: var(--field); }
 
 /* ------------------------------------------------------------------ */
 /* Sheets (native dialogs: focus stays inside, Escape closes)          */
@@ -498,12 +501,9 @@ a.task:hover { background: var(--hover); }
 .hashline code { overflow-wrap: anywhere; word-break: break-all; font-size: 11.5px; color: var(--text-2); }
 
 /* ------------------------------------------------------------------ */
-/* My transfers: rows as the web wallet's History                      */
+/* Transfer rows, as the web wallet's History                          */
 /* ------------------------------------------------------------------ */
 
-.tp-h { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
-.tp > [role="status"] { margin: 10px 0 0; min-height: 1px; color: var(--text-2); }
-.tp > .sec-t { margin: 24px 0 0; padding: 8px 16px; border-radius: 10px; background: var(--surface); color: var(--text-2); font-size: 13px; font-weight: 400; }
 .trs { background: none; border-radius: 0; }
 .tr { position: relative; display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--hair); }
 .tr-link { position: absolute; inset: 0; }
@@ -546,7 +546,6 @@ form.group .l1 { display: block; color: var(--text); font-size: 14px; font-weigh
 @media (max-width: 1023px) {
   .page, .col { padding: 28px 24px 20px; }
   .foot { padding-left: 24px; padding-right: 24px; }
-  .start, .form-page { grid-template-columns: minmax(0, 1fr) 19rem; gap: 28px; }
   .rc { grid-template-columns: minmax(0, 1fr); }
   .rc-side { position: static; }
   .chainchip { display: none; }
@@ -556,32 +555,16 @@ form.group .l1 { display: block; color: var(--text); font-size: 14px; font-weigh
   body { font-size: 15px; }
   .hdr-in { height: 56px; padding: 0 8px 0 16px; gap: 6px; }
   .brand { margin-right: 0; }
-  .brand > span, .navs, .hdr-r .tip { display: none; }
-  .menu-btn { display: inline-grid; }
+  .brand > span { display: none; }
   .hdr-r { gap: 6px; }
-  /* The wallets as their marks: which account is in the menu and on the page. */
+  /* The wallets as their marks; the card names the account. */
   .hdr-r .wpill { padding: 0 5px; }
   .hdr-r .wpill > :not(.av) { display: none; }
   .hdr-r .wpill.cta { display: none; }
-  .menu:not([hidden]) { display: flex; flex-direction: column; gap: 2px; margin: 0 12px 12px; padding: 8px; border-radius: 16px; background: var(--surface); }
-  .menu a, .menu > button { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; border: 0; border-radius: 12px; background: transparent; color: var(--text); font-size: 15px; text-align: left; text-decoration: none; }
-  .menu a:hover, .menu > button:hover { background: var(--surface-2); }
-  .menu-wallets { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 4px 4px; }
   .page, .col { padding: 16px 16px 12px; }
   .foot { margin-top: 24px; padding: 16px 16px 24px; flex-direction: column; align-items: flex-start; }
   h1, .topbar .ti { font-size: 24px; }
-  .start, .form-page { grid-template-columns: minmax(0, 1fr); gap: 16px; }
-  .start-side { position: static; }
-  .task { grid-template-columns: 84px minmax(0, 1fr) auto; gap: 12px; padding: 14px 4px; }
   .pair .cm { width: 30px; height: 30px; }
-  /* One column: the summary after the form, and the button in a bar that
-     has its own place at the end, so it never sits over the last of it. */
-  .fp-side { display: contents; }
-  .sum { border-radius: 16px; padding-bottom: 12px; }
-  .cta-bar { position: sticky; bottom: 0; z-index: 3; margin: 0 -16px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); border-radius: 0; background: var(--bg); box-shadow: 0 -1px 0 var(--hair); }
-  .acc { grid-template-columns: 34px minmax(0, 1fr); }
-  .acc .r { grid-column: 2; text-align: left; white-space: normal; }
-  .acc .r b { display: inline; margin-right: 6px; }
   .flow { grid-template-columns: 1fr; }
   .flow .dn svg { transform: rotate(-90deg); }
   .wls .wl { grid-template-columns: 1fr; gap: 2px; }
@@ -597,13 +580,21 @@ form.group .l1 { display: block; color: var(--text); font-size: 14px; font-weigh
   .tr { grid-template-columns: 82px minmax(0, 1fr); gap: 12px; padding: 14px 4px; }
   .tr .pair .cm { width: 28px; height: 28px; }
   .tr .rt { grid-column: 2; flex-direction: row; justify-content: space-between; align-items: center; }
-  .tp-h { flex-direction: column; align-items: stretch; }
   .sheet, .sheet.wide, .sheet.narrow { width: 100%; max-width: 100%; max-height: calc(100vh - 16px); margin: auto 0 0; border-radius: 18px 18px 0 0; }
   .sheet-head, .sheet-body, .sheet-foot { padding-left: 16px; padding-right: 16px; }
   /* Equal buttons, one above the other, so long labels fit. */
   .btn-pair { width: 100%; flex-direction: column-reverse; }
   .btn-pair .btn { width: 100%; min-width: 0; }
   .count { grid-template-columns: 1fr; }
+  .swap { padding: 12px 12px 0; gap: 10px; }
+  .bcard { max-width: none; border-radius: 22px; }
+  .amt-row input, .amt-row .out { font-size: 32px; }
+  /* The button stays over the keyboard, in the card's own colour. */
+  .bcard .cta { position: sticky; bottom: var(--keyboard-inset, 0px); z-index: 3; margin: 4px -8px -10px; padding: 10px 8px calc(10px + env(safe-area-inset-bottom)); border-radius: 0 0 22px 22px; background: var(--surface); }
+  .netmenu { position: fixed; left: 0; right: 0; top: auto; bottom: 0; z-index: 41; width: auto; padding: 8px 8px calc(14px + env(safe-area-inset-bottom)); border-radius: 22px 22px 0 0; }
+  .netscrim { display: block; position: fixed; inset: 0; z-index: 40; background: var(--scrim); }
+  .act .trs .tr { grid-template-columns: 76px minmax(0, 1fr); padding: 12px 4px; }
+  .act-h { flex-direction: column; }
 }
 
 @media (prefers-reduced-motion: reduce) {

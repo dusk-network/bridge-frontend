@@ -52,6 +52,10 @@ test("a deposit quote shows the fee as a maximum and its usual cost, in DUSK", (
 test("the bridge fee comes off what arrives, and a send at or under it is refused", () => {
   const quote = buildQuote(routes["service-transfer"], "50", { balance: 100n * DUSK, cfg, gasPrice: 1n });
   assert.equal(rows(quote).bridge, "1 DUSK, from the amount");
+  // More than the balance: the card's button says so.
+  const short = buildQuote(routes["service-transfer"], "5000", { balance: 10_000_000_000n, cfg, gasPrice: 1n });
+  assert.equal(short.insufficient, true);
+  assert.equal(buildQuote(routes["service-transfer"], "5", { balance: 10_000_000_000n, cfg, gasPrice: 1n }).insufficient, undefined);
   assert.equal(rows(quote).receive, "49 DUSK on Ethereum (Sepolia)");
   assert.equal(rows(quote).fee, "up to 0.0025 DUSK | usually about 0.0019 DUSK");
   assert.equal(rows(quote).arrives, "usually within an hour");

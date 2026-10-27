@@ -138,8 +138,10 @@ export function buildQuote(route, amount, ctx) {
     if (!quote.error && lux !== null) {
       if (bridgeFee && lux <= bridgeFee)
         quote.error = `Send more than the ${formatDusk(bridgeFee)} bridge fee. Nothing is paid out otherwise.`;
-      else if (quote.maxLux !== null && lux > quote.maxLux)
+      else if (quote.maxLux !== null && lux > quote.maxLux) {
+        quote.insufficient = true;
         quote.error = `That's more than you have after the network fee. You can send up to ${formatDusk(quote.maxLux)}.`;
+      }
     }
     // One line a row; a fee the route doesn't have isn't listed.
     rows.push(
@@ -167,8 +169,10 @@ export function buildQuote(route, amount, ctx) {
       const balance = BigInt(ctx.balance);
       // The contract moves whole Lux: what's finer stays in the wallet.
       quote.maxLux = balance / WEI_PER_LUX;
-      if (!quote.error && wei !== null && wei > balance)
+      if (!quote.error && wei !== null && wei > balance) {
+        quote.insufficient = true;
         quote.error = `That's more than the ${formatUnitsGrouped(balance, 18, 9)} old DUSK in this wallet.`;
+      }
     }
     const needsApproval = wei === null || BigInt(ctx.allowanceWei ?? 0n) < wei;
     const steps = needsApproval ? 2 : 1;
@@ -198,14 +202,18 @@ export function buildQuote(route, amount, ctx) {
     if (l2Fee === null) {
       // No gas price yet: the fee comes from the same balance, so there's no
       // Max until it's known, and the whole balance is already too much.
-      if (!quote.error && lux !== null && lux * WEI_PER_LUX >= BigInt(ctx.balance))
+      if (!quote.error && lux !== null && lux * WEI_PER_LUX >= BigInt(ctx.balance)) {
+        quote.insufficient = true;
         quote.error = `That's more than you have on ${from}, with its network fee.`;
+      }
     } else {
       // Keep twice the estimated gas aside, so the wallet's own estimate fits.
       const room = BigInt(ctx.balance) - 2n * l2Fee;
       quote.maxLux = room > 0n ? room / WEI_PER_LUX : 0n;
-      if (!quote.error && lux !== null && lux > quote.maxLux)
+      if (!quote.error && lux !== null && lux > quote.maxLux) {
+        quote.insufficient = true;
         quote.error = `That's more than you have on ${from} after its network fee. You can send up to ${formatDusk(quote.maxLux)}.`;
+      }
     }
   }
   rows.push(
