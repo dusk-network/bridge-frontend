@@ -385,6 +385,11 @@ export function activityPanel(vm) {
 // Look up
 // ---------------------------------------------------------------------------
 
+/** A link to a task this network's bridge doesn't have: that, and the way back. */
+export function unavailablePage(vm) {
+  return `<main class="col" id="main" tabindex="-1"><h1>${html(vm.title)}</h1><p class="links-row"><a class="lnk" href="#/">Back to the bridge</a></p></main>`;
+}
+
 export function lookupPage(vm) {
   return `<main class="col" id="main" tabindex="-1">
     <div class="topbar"><a class="bk" href="#/transfers">${icon("back")}My transfers</a><h1 class="ti">Look up a transfer</h1></div>

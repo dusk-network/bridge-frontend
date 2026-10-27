@@ -410,8 +410,8 @@ test("discovery keeps each account's progress per network and asks again only fo
   assert.equal(details, 1);
 });
 
-test("a migration first found by its payout is checked once, to fill in its start", () => {
-  const known = new Set(["old"]);
+test("a migration first found by its payout is checked once a visit, until its start is filled in", () => {
+  const known = new Set(["old", "seen"]);
   const tracked = new Set(["old"]);
   const follow = (entry) => followAfterDiscovery(entry, { known, tracked });
   assert.equal(follow({ id: "new", status: "completed" }), true);
@@ -420,4 +420,7 @@ test("a migration first found by its payout is checked once, to fill in its star
   assert.equal(follow({ id: "new", status: "pending" }), true);
   assert.equal(follow({ id: "old", status: "pending" }), false);
   assert.equal(follow({ id: "new", status: "failed" }), false);
+  // Found on an earlier visit whose check never ran or failed: checked again on this one.
+  assert.equal(follow({ id: "seen", status: "completed" }), true);
+  assert.equal(follow({ id: "seen", sourceAt: 1, status: "completed" }), false);
 });

@@ -113,3 +113,29 @@ test("each network keeps its own transfers, on a site that served the other too"
     useActivityNetwork("");
   }
 });
+
+test("the first version's list goes to the first network that opens, and only to it", () => {
+  const legacy = [{ amount: "0.1", id: "ce".repeat(32), routeId: "ethereum-to-dusk", status: "submitted", transactionHash: "ce".repeat(32) }];
+  try {
+    const store = storage({ "dusk-bridge:activity:v1": JSON.stringify(legacy) });
+    useActivityNetwork("testnet");
+    assert.deepEqual(readActivity(store).map((item) => item.hash), ["ce".repeat(32)]);
+    assert.equal(store.getItem("dusk-bridge:activity:v1"), null);
+    useActivityNetwork("mainnet");
+    assert.deepEqual(readActivity(store), []);
+    useActivityNetwork("testnet");
+    assert.equal(readActivity(store).length, 1);
+
+    // A version-2 list with the first one still beside it: both go to the network that takes it.
+    const both = storage({
+      "dusk-bridge:activity:v1": JSON.stringify(legacy),
+      "dusk-bridge:activity:v2": JSON.stringify([{ hash: HASH, id: entryId("ethereum-to-dusk", HASH), routeId: "ethereum-to-dusk" }]),
+    });
+    useActivityNetwork("mainnet");
+    assert.deepEqual(readActivity(both).map((item) => item.hash), [HASH]);
+    useActivityNetwork("testnet");
+    assert.deepEqual(readActivity(both), []);
+  } finally {
+    useActivityNetwork("");
+  }
+});

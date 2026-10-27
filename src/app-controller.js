@@ -6,7 +6,7 @@
 
 import { entryId, readActivity, recordActivity, saveActivity, updateActivity, useActivityNetwork } from "./activity.js";
 import { bridgeRoutes, getBridgeRoute } from "./bridge-routes.js";
-import { choosePair, defaultPair, flipRoute, fromChoices, primaryButton, routeBetween, toChoices } from "./bridge-card.js";
+import { cardRoute, choosePair, flipRoute, followsWallets, fromChoices, primaryButton, routeBetween, toChoices } from "./bridge-card.js";
 import { claimReminder } from "./calendar.js";
 import { config } from "./config.js";
 import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
@@ -33,7 +33,7 @@ import {
   routeSteps,
   transfersModel,
 } from "./page-models.js";
-import { canonicalHash, parseLocation, receiptUrl, transferHref } from "./permalink.js";
+import { canonicalHash, parseLocation, quotesOn, receiptUrl, transferHref } from "./permalink.js";
 import { buildQuote, parseAmount, withdrawalStepMax } from "./quote.js";
 import { serviceTransferRequest, submitServiceTransfer } from "./service-transfer.js";
 import { createServices, proofSubmitterFor } from "./services.js";
@@ -56,6 +56,7 @@ import {
   receiptPage,
   reviewSheet,
   strip,
+  unavailablePage,
 } from "./views.js";
 import { approveLines, duskCallLines, duskTransferLines, migrateLines, withdrawLines } from "./wallet-lines.js";
 import { withdrawalDetails } from "./withdrawals.js";
@@ -125,18 +126,19 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   }
   const evmAccount = () => state.evmState.account ?? "";
   const tracked = new Set();
-  // Balances and gas for the form; an older answer never overwrites a newer one.
-  const formReads = createFormReads({ onChange: () => refreshFormAndHeader(), services });
+  /** Draws again what quotes a fee or a time: the card's parts, or the page. Look up quotes neither. */
+  function requote() {
+    if (!quotesOn(state.page)) return;
+    if (isCardPage()) refreshForm();
+    else renderMain();
+  }
+  // Balances and gas for the form; an older answer never overwrites a newer
+  // one. A gas price from anywhere, as a review's request, is quoted at once.
+  const formReads = createFormReads({ onChange: () => refreshFormAndHeader(), onPrice: () => requote(), services });
   // One gas price for every "up to" fee on the page: the node's, as last read.
   const duskGasPrice = () => formReads.reads.gasPrice ?? 1n;
-  /** Reads the gas price again, and shows the page again where it moved. */
-  function refreshPrice() {
-    return formReads.price().then((moved) => {
-      if (!moved) return;
-      if (isCardPage()) refreshForm();
-      else renderMain();
-    });
-  }
+  /** Reads the gas price again; the page is drawn again where it moved. */
+  const refreshPrice = () => formReads.price();
   // The review on screen; a request prepared for it fills nothing else.
   const reviews = createReviewSession();
   // How long each route takes on this network: what the chains said, and
@@ -147,9 +149,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     services.times
       ?.refresh()
       .then((moved) => {
-        if (!moved) return;
-        if (isCardPage()) refreshFormAndHeader();
-        else renderMain();
+        if (moved) requote();
       })
       .catch(() => {});
   }
@@ -272,6 +272,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const { page } = state.page;
     if (page === "transfer") return receiptHtml();
     if (page === "lookup") return lookupPage(state.lookup);
+    if (page === "move" && !taskFor(state.page.task)) return unavailablePage({ title: unavailableTitle(state.page.task) });
     // The card: its Bridge tab, or its Activity tab for My transfers.
     return cardHtml(page === "transfers" ? "activity" : "bridge");
   }
@@ -284,15 +285,22 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     return tasks.find((task) => task.id === id) ?? null;
   }
 
+  /** Why a task link opens no card: DuskEVM not on this network yet, or no such task here. */
+  const unavailableTitle = (id) =>
+    ["to-duskevm", "from-duskevm"].includes(id) && !cfg.duskEvm.enabled
+      ? `${names["dusk-evm"]} isn't on ${names.badge} yet`
+      : `This bridge doesn't offer that on ${names.badge}`;
+
   /**
    * The card's state. A link to a task opens it on that task's route; the
    * card otherwise opens on the pair the connected wallets suggest, and keeps
-   * whatever pair was picked.
+   * whatever pair was picked. A link to a task that isn't here opens none.
    */
   function ensureCard(page = state.page) {
     const task = page?.page === "move" ? taskFor(page.task) : null;
     if (!state.form) {
-      const route = task?.routes[0] ?? defaultPair(routes, { dusk: Boolean(duskAccount()), evm: Boolean(evmAccount()) });
+      const route = cardRoute(page, tasks, routes, { dusk: Boolean(duskAccount()), evm: Boolean(evmAccount()) });
+      if (!route) return null;
       state.form = {
         amount: "",
         error: "",
@@ -330,8 +338,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   /** Before anything was picked or typed, the card follows the wallets as they connect. */
   function followWallets() {
     const form = state.form;
-    if (!form || form.pairChosen || form.amount) return;
-    const route = defaultPair(routes, { dusk: Boolean(duskAccount()), evm: Boolean(evmAccount()) });
+    if (!followsWallets(form)) return;
+    const route = cardRoute({ page: "home" }, tasks, routes, { dusk: Boolean(duskAccount()), evm: Boolean(evmAccount()) });
     if (route && route.id !== form.routeId) setPair(route, { chosen: false });
   }
 
@@ -535,8 +543,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   }
 
   function cardHtml(tab) {
-    ensureCard();
+    const form = ensureCard();
     if (tab === "activity") return cardPage({ activity: activityHtml(), needsCount: transfersVm().needs, tab: "activity" });
+    if (!form) return unavailablePage({ title: unavailableTitle("") });
     return cardPage(cardVm());
   }
 
@@ -570,7 +579,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     }
   }
 
-  const isCardPage = () => ["home", "move"].includes(state.page.page);
+  const isCardPage = () => state.page.page === "home" || (state.page.page === "move" && Boolean(taskFor(state.page.task)));
 
   /** Balances and prices for the form's route, from the node and the chains. */
   function loadReads() {
@@ -1292,16 +1301,16 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const next = parseLocation(globalThis.location?.hash);
     if (state.sheet === "review") closeSheet();
     state.page = next;
-    if (next.page === "home" || next.page === "move") {
+    if (isCardPage()) {
       ensureCard(next);
       void loadReads();
     }
     if (next.page === "transfer") void openReceipt(next.hash);
     if (next.page === "transfers") void discover();
     refreshTimes();
-    // Pages that show a fee read the node's gas price again, so they quote
-    // what the form and the wallet will.
-    if (!["home", "move"].includes(next.page)) void refreshPrice();
+    // Pages that quote a fee outside the card read the node's gas price
+    // again, so they quote what the wallet will. Look up quotes none.
+    if (quotesOn(next) && !isCardPage()) void refreshPrice();
     if (next.page === "lookup") {
       lookupFlow.cancel();
       state.lookup = { busy: false, error: "", query: next.query ?? state.lookup.query ?? "" };
@@ -1385,6 +1394,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   root.addEventListener("input", (event) => {
     const { name, value } = event.target;
     if (event.target.classList?.contains("wrap-input")) fitHeight(event.target);
+    // What's typed outside the card is kept too, so drawing the page again keeps it.
+    if (name === "lookup") state.lookup.query = value;
+    if (name === "watch") state.watch.input = value;
     if (!state.form) return;
     if (name === "amount") {
       state.form.amount = value;
@@ -1611,8 +1623,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       globalThis.addEventListener?.("focus", refreshDusk);
       globalThis.document?.addEventListener("visibilitychange", refreshDusk);
       if (isCardPage()) void loadReads();
-      // The gas price every "up to" fee is figured at, on any page.
-      else void refreshPrice();
+      // The gas price every "up to" fee is figured at, on any page that quotes one.
+      else if (quotesOn(state.page)) void refreshPrice();
       refreshTimes();
       void discover();
       render();

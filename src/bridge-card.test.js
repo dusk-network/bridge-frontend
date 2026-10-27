@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { cardNetworks, choosePair, defaultPair, flipRoute, fromChoices, primaryButton, routeBetween, toChoices } from "./bridge-card.js";
+import { cardNetworks, cardRoute, choosePair, defaultPair, flipRoute, followsWallets, fromChoices, primaryButton, routeBetween, toChoices } from "./bridge-card.js";
 import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
-import { networkName } from "./names.js";
+import { bridgeTasks, networkName } from "./names.js";
+import { unavailablePage } from "./views.js";
 
 function profile(name, extra = {}) {
   globalThis.__DUSK_BRIDGE_CONFIG__ = { VITE_BRIDGE_PROFILE: name, ...extra };
@@ -86,4 +87,24 @@ test("the button says what's missing, then Review bridge", () => {
   assert.equal(label({ destination: "" }), "Add a recipient");
   assert.deepEqual(primaryButton(ready), { action: "review", enabled: true, label: "Review bridge" });
   assert.equal(primaryButton({ ...ready, amountLux: null }).enabled, false);
+});
+
+test("a link to a task this network doesn't have opens no route, never another transfer", () => {
+  const routes = buildRoutes(mainnet);
+  const tasks = bridgeTasks(mainnet, routes);
+  // DuskEVM isn't on mainnet: its link doesn't open the Dusk to BSC transfer the card opens on.
+  assert.equal(cardRoute({ page: "move", task: "to-duskevm" }, tasks, routes, { dusk: true }), null);
+  assert.equal(cardRoute({ page: "move", task: "nothing-here" }, tasks, routes, {}), null);
+  assert.equal(cardRoute({ page: "move", task: "migrate" }, tasks, routes, { dusk: true }).id, "ethereum-to-dusk");
+  assert.equal(cardRoute({ page: "home" }, tasks, routes, { dusk: true }).id, "dusk-to-bsc");
+  assert.match(unavailablePage({ title: "DuskEVM isn't on Mainnet yet" }), /<h1>DuskEVM isn&#039;t on Mainnet yet<\/h1><p class="links-row"><a class="lnk" href="#\/">Back to the bridge<\/a>/u);
+});
+
+test("the card stops following the wallets once a recipient is typed, as once an amount or a pair is", () => {
+  const fresh = { amount: "", pairChosen: false, recipientInput: "" };
+  assert.equal(followsWallets(fresh), true);
+  assert.equal(followsWallets({ ...fresh, recipientInput: "0x75685f9d88749b583732b40d56fe007cd404b72d" }), false);
+  assert.equal(followsWallets({ ...fresh, amount: "1" }), false);
+  assert.equal(followsWallets({ ...fresh, pairChosen: true }), false);
+  assert.equal(followsWallets(null), false);
 });

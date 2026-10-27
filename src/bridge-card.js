@@ -54,6 +54,22 @@ export function defaultPair(routes, { dusk = false, evm = false } = {}) {
   return fromDusk ?? routes[0] ?? null;
 }
 
+/**
+ * The route a page opens the card on: a task link's own route, or the pair
+ * the wallets suggest. A link to a task this network's bridge doesn't have
+ * opens none (null), so it says so rather than offering another transfer.
+ */
+export function cardRoute(page, tasks, routes, wallets = {}) {
+  if (page?.page === "move") return tasks.find((task) => task.id === page.task)?.routes[0] ?? null;
+  return defaultPair(routes, wallets);
+}
+
+/**
+ * Whether the card still follows the wallets as they connect: only while
+ * nothing was picked or typed, neither a pair, an amount nor a recipient.
+ */
+export const followsWallets = (form) => Boolean(form) && !form.pairChosen && !form.amount && !form.recipientInput;
+
 /** The way back, when the bridge has one: what the flip button swaps to. */
 export const flipRoute = (routes, route) => (route ? routeBetween(routes, route.to.id, route.from.id) : null);
 

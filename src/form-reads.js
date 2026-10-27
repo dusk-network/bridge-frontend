@@ -5,7 +5,13 @@
 
 const WEI_PER_LUX = 1_000_000_000n;
 
-export function createFormReads({ services, onChange = () => {} }) {
+/**
+ * @param {object} deps
+ * @param {object} deps.services
+ * @param {() => void} [deps.onChange] balances or estimates changed
+ * @param {() => void} [deps.onPrice] the gas price moved, however it was learnt
+ */
+export function createFormReads({ services, onChange = () => {}, onPrice = () => {} }) {
   const reads = { duskBalance: null, gasPrice: 1n, l2: null, migration: null };
   let loads = 0;
   let estimates = 0;
@@ -59,18 +65,23 @@ export function createFormReads({ services, onChange = () => {} }) {
   async function price() {
     try {
       const next = await services.node.gasPrice();
-      if (next === reads.gasPrice) return false;
-      reads.gasPrice = next;
-      return true;
+      const moved = next !== reads.gasPrice;
+      usePrice(next);
+      return moved;
     } catch {
       return false;
     }
   }
 
-  /** A gas price read elsewhere, as a review's request: the latest, for every page. */
-  function usePrice(price) {
-    reads.gasPrice = price;
-    return price;
+  /**
+   * A gas price read elsewhere, as a review's request: the latest, for every
+   * page. Where it moved, what quotes it is drawn again.
+   */
+  function usePrice(next) {
+    const moved = next !== reads.gasPrice;
+    reads.gasPrice = next;
+    if (moved) onPrice();
+    return next;
   }
 
   /** Gas estimates for the amount and recipient as they are now. */

@@ -57,18 +57,20 @@ function load(storage) {
   try {
     const parsed = JSON.parse(storage.getItem(storageKey()) ?? "null");
     if (Array.isArray(parsed)) return parsed.filter(validItem).slice(0, MAX_ITEMS);
-    // The list from before networks were kept apart becomes the first
-    // network's to open here, and only its.
+    // The lists from before networks were kept apart, this version's or the
+    // first one's, become the first network's to open here, and only its:
+    // both are removed once it holds them.
     if (network) {
       const before = JSON.parse(storage.getItem(STORAGE_KEY) ?? "null");
-      if (Array.isArray(before)) {
-        const items = before.filter(validItem).slice(0, MAX_ITEMS);
-        try {
-          storage.setItem(storageKey(), JSON.stringify(items));
-          storage.removeItem(STORAGE_KEY);
-        } catch {}
-        return items;
-      }
+      const first = Array.isArray(before) ? null : JSON.parse(storage.getItem(LEGACY_KEY) ?? "null");
+      if (!Array.isArray(before) && !Array.isArray(first)) return [];
+      const items = (Array.isArray(before) ? before.filter(validItem) : first.map(fromLegacy).filter(Boolean)).slice(0, MAX_ITEMS);
+      try {
+        storage.setItem(storageKey(), JSON.stringify(items));
+        storage.removeItem(STORAGE_KEY);
+        storage.removeItem(LEGACY_KEY);
+      } catch {}
+      return items;
     }
     const legacy = JSON.parse(storage.getItem(LEGACY_KEY) ?? "[]");
     return Array.isArray(legacy)
