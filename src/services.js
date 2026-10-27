@@ -1,6 +1,7 @@
 import { createPublicClient, http } from "viem";
 
 import { config } from "./config.js";
+import { createChainTimes, readDepositLag } from "./chain-times.js";
 import { createContractReader, contractFacade } from "./contract-reader.js";
 import { createDriverLoader, driverJson } from "./data-driver.js";
 import { createDiscovery } from "./discovery.js";
@@ -145,6 +146,16 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
 
   const discovery = createDiscovery({ cfg, node, rpc, rpcBatch });
   const evmReads = createEvmReads({ cfg, rpc, rpcBatch });
+  // How long DuskEVM's routes take, as its chains say, kept per network.
+  const times = withdrawals
+    ? createChainTimes({
+        key: `dusk-bridge:times:v1:${cfg.profile}:${cfg.duskEvm.optimismPortalContractId}`,
+        read: {
+          deposit: () => readDepositLag({ node, rpcBatch }),
+          withdrawal: () => withdrawals.loadTiming(),
+        },
+      })
+    : null;
 
   return Object.freeze({
     discovery,
@@ -157,6 +168,7 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
     resolve: (hash) => resolveTransfer(hash, { cfg, node, rpc }),
     rpc,
     rpcBatch,
+    times,
     tracking,
     withdrawals,
   });

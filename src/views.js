@@ -248,7 +248,6 @@ export function reviewSheet(vm) {
     <dl class="group kvs">${quoteRows({ rows: vm.feeRows })}</dl>
     ${steps}
     <p class="note">${icon("eye")}<span><b>Public.</b> ${html(vm.privacy)}</span></p>
-    ${vm.late ? `<p class="note">${icon("info")}<span>${vm.late}</span></p>` : ""}
   </div>
   <div class="sheet-foot">${vm.error ? `<p class="message error" role="alert">${html(vm.error)}</p>` : ""}<p class="hint">Check each line against ${html(vm.walletCheckName)} before you confirm.</p><div class="btn-pair"><button type="button" class="btn sec" data-action="close-sheet">Cancel</button><button type="button" class="btn pri" data-action="confirm" ${vm.canConfirm ? "" : "disabled"}>${html(vm.confirmLabel)}</button></div>${vm.after ? `<p class="small t2">${html(vm.after)}</p>` : ""}</div>`;
 }

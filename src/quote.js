@@ -13,11 +13,7 @@ import {
   withdrawalStepGas,
 } from "./gas.js";
 import { gasCoin, networkName } from "./names.js";
-import {
-  WITHDRAWAL_REPORT_SECONDS,
-  WITHDRAWAL_WAITING_PERIOD_SECONDS,
-  roughDuration,
-} from "./withdrawal-lifecycle.js";
+import { routeTime, routeTimeText } from "./route-times.js";
 
 const WEI_PER_LUX = 1_000_000_000n;
 const DECIMALS = 9;
@@ -93,14 +89,10 @@ export function withdrawalStepMax({ gasPrice = 1n, withdrawalGas = 0n } = {}) {
 /** "up to 0.051 DUSK a step", as each page writes it. */
 export const stepFeeText = (inputs) => `up to ${formatMaxFee(withdrawalStepMax(inputs))} DUSK a step`;
 
-/** The usual time to arrive, in words. */
-export function arrivalText(route, cfg) {
-  if (route.mode === "duskevm-deposit") return "usually within a minute";
-  if (route.mode === "service-transfer")
-    return `usually within ${roughDuration(cfg.service?.delaySeconds ?? 3_600)}`;
-  if (route.mode === "migration")
-    return `usually within ${roughDuration(cfg.migrationDelaySeconds ?? 3_600)} after step 2`;
-  return `about ${roughDuration(WITHDRAWAL_REPORT_SECONDS + WITHDRAWAL_WAITING_PERIOD_SECONDS)}, in three steps`;
+/** When it arrives, as a quote row: none where this network's time isn't known. */
+function arrivesRow(route, cfg, timing) {
+  const value = routeTimeText(routeTime(route, cfg, timing));
+  return value ? [{ key: "arrives", label: "Arrives", value }] : [];
 }
 
 /**
@@ -115,6 +107,7 @@ export function arrivalText(route, cfg) {
  * @param {{ approve?: bigint, migrate?: bigint, withdraw?: bigint, priceWei?: bigint }} [ctx.evmGas]
  * @param {bigint} [ctx.allowanceWei] the migration contract's allowance
  * @param {bigint | null} [ctx.gasCoinBalance] ETH, BNB or DuskEVM DUSK for EVM gas, in wei
+ * @param {object} [ctx.timing] what `routeTime` reads the route's time from
  */
 export function buildQuote(route, amount, ctx) {
   const { cfg } = ctx;
@@ -154,7 +147,7 @@ export function buildQuote(route, amount, ctx) {
         strong: true,
         value: receive === null || receive <= 0n ? "—" : `${formatDusk(receive)} on ${to}`,
       },
-      { key: "arrives", label: "Arrives", value: arrivalText(route, cfg) },
+      ...arrivesRow(route, cfg, ctx.timing),
     );
     if (lux !== null) quote.leaves = `up to ${formatLux(lux + fee.maxLux)} DUSK`;
     return quote;
@@ -191,7 +184,7 @@ export function buildQuote(route, amount, ctx) {
         value: evmFee === null ? `paid in ${coin}` : aboutFee(evmFee, 18, coin),
       },
       { key: "receive", label: "You receive", strong: true, value: lux === null ? "—" : `${formatDusk(lux)} on ${to}` },
-      { key: "arrives", label: "Arrives", value: arrivalText(route, cfg) },
+      ...arrivesRow(route, cfg, ctx.timing),
     );
     return quote;
   }
@@ -230,7 +223,7 @@ export function buildQuote(route, amount, ctx) {
       value: stepFeeText({ gasPrice: ctx.gasPrice ?? 1n }),
     },
     { key: "receive", label: "You receive", strong: true, value: lux === null ? "—" : `${formatDusk(lux)} on ${to}` },
-    { key: "arrives", label: "Arrives", value: arrivalText(route, cfg) },
+    ...arrivesRow(route, cfg, ctx.timing),
   );
   return quote;
 }

@@ -119,6 +119,27 @@ Several contract reads on one screen go to the node as one Multicall for Dusk
 query (`93de287b…6ce1d4`, mainnet and testnet). A read that fails inside a
 batch fails alone; a batch the node refuses is retried one read at a time.
 
+## Times
+
+Every page takes a route's time from one place (`src/route-times.js`), and
+only this network's:
+
+- **DuskEVM withdrawals**: the Portal's proof maturity and dispute game
+  finality delays, and how often outputs come, from the gaps between the
+  dispute game factory's latest games: two Multicall for Dusk queries.
+- **DuskEVM deposits**: how far DuskEVM trails Dusk, its latest block against
+  Dusk's own time for the Dusk block it last took in (the L1Block predeploy).
+- The chains are asked at most every 10 minutes, and their answers are kept
+  a day per network.
+- **Otherwise**: what this browser's own transfers on the route took (the
+  middle of the last five completed in 30 days, with two at least), or the
+  profile's value in `src/config.js`, which says where each number comes
+  from. `VITE_ETHEREUM_MIGRATION_SECONDS`, `VITE_BSC_MIGRATION_SECONDS`,
+  `VITE_SERVICE_BRIDGE_DELAY_SECONDS` and `VITE_DUSKEVM_DEPOSIT_SECONDS` set a
+  deployment's own; `none` clears one.
+
+A route whose time isn't known on this network shows none.
+
 ## Gas
 
 Dusk contract calls ask the wallet for their own limit at the node's price:
@@ -182,7 +203,8 @@ production dependencies at high severity.
 - Wallet extensions retain keys and display every signing request.
 - The browser talks directly to configured Dusk and EVM RPC endpoints.
 - Data drivers run only when they match their pinned SHA-256.
-- Local storage contains transaction metadata and what was read for My
-  transfers, per network and account; no keys and no balances.
+- Local storage contains transaction metadata, what was read for My
+  transfers and the chains' times, per network and account; no keys and no
+  balances.
 - Contract IDs, RPC endpoints and this site's origin are deployment trust
   inputs. Review them before publishing.

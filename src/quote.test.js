@@ -36,7 +36,8 @@ test("amounts take at most 9 decimals and nothing else", () => {
 test("a deposit quote shows the fee as a maximum and its usual cost, in DUSK", () => {
   const quote = buildQuote(routes["duskevm-deposit"], "25", { balance: 1_483_920_000_000n, cfg, gasPrice: 1n });
   assert.deepEqual(rows(quote), {
-    arrives: "usually within a minute",
+    // DuskEVM testnet's configured time, until the chain's own is read.
+    arrives: "~1 min",
     fee: "up to 0.005 DUSK | usually about 0.002 DUSK",
     receive: "25 DUSK on DuskEVM",
     send: "25 DUSK",
@@ -58,7 +59,8 @@ test("the bridge fee comes off what arrives, and a send at or under it is refuse
   assert.equal(buildQuote(routes["service-transfer"], "5", { balance: 10_000_000_000n, cfg, gasPrice: 1n }).insufficient, undefined);
   assert.equal(rows(quote).receive, "49 DUSK on Ethereum (Sepolia)");
   assert.equal(rows(quote).fee, "up to 0.0025 DUSK | usually about 0.0019 DUSK");
-  assert.equal(rows(quote).arrives, "usually within an hour");
+  // No time is known for this testnet payout, so none is quoted.
+  assert.equal(rows(quote).arrives, undefined);
   assert.match(buildQuote(routes["service-transfer"], "1", { cfg }).error, /^Send more than the 1 DUSK bridge fee/u);
   assert.match(
     buildQuote(routes["service-transfer"], "100", { balance: 100n * DUSK, cfg, gasPrice: 1n }).error,
@@ -94,7 +96,6 @@ test("a withdrawal quotes its DuskEVM step and the two Dusk steps after it", () 
     gasPrice: 1n,
   });
   assert.deepEqual(rows(quote), {
-    arrives: "about 7 days, in three steps",
     fee: "about 0.0014 DUSK",
     "fee-dusk": "up to 0.051 DUSK a step | to prove, then to claim",
     receive: "200 DUSK on Dusk",
@@ -114,4 +115,7 @@ test("a withdrawal quotes its DuskEVM step and the two Dusk steps after it", () 
   assert.equal(buildQuote(routes["duskevm-withdrawal"], "200", unpriced).error, "");
   assert.equal(buildQuote(routes["duskevm-withdrawal"], "312", unpriced).error, "That's more than you have on DuskEVM, with its network fee.");
   assert.ok(quote.maxLux > 311n * 10n ** 9n);
+  // Its time comes from the chain: none until it's read.
+  const read = { chain: { withdrawal: { finalitySeconds: 302_400, maturitySeconds: 604_800, outputSeconds: 1_700 } } };
+  assert.equal(rows(buildQuote(routes["duskevm-withdrawal"], "200", { cfg, gasPrice: 1n, timing: read })).arrives, "~7 days");
 });

@@ -62,6 +62,8 @@ const RELAY_ABI = parseAbi([
  * behind it, so their times give no claim time.
  */
 const DUSK_CLOCK_WINDOW_SECONDS = 31_536_000n;
+/** The latest games read for how often outputs come: five gaps. */
+const OUTPUT_SAMPLE = 6n;
 const NO_CLAIM_TIME = Object.freeze({ readyAt: null, readyAtExact: false });
 
 export const hashWithdrawal = sdkHashWithdrawal;
@@ -807,13 +809,40 @@ export function createWithdrawals(deps) {
     return { ...(await proofStatus(base, snapshot, submitter)), details };
   }
 
-  /** Dusk's proof maturity delay, or `null` when it can't be read. */
-  async function loadWithdrawalWaitingPeriod() {
-    try {
-      return u256ToBigInt(await portal.call.proofMaturityDelaySeconds());
-    } catch {
-      return null;
-    }
+  /**
+   * How long a withdrawal takes on this network, as Dusk says: the Portal's
+   * proof maturity and dispute game finality delays, and how often outputs
+   * come, the middle gap between the latest games of the type the Portal
+   * takes. Two node queries through Multicall for Dusk: the delays with the
+   * game count, then the games.
+   */
+  async function loadTiming() {
+    const [maturity, finality, gameType, count] = await Promise.all([
+      portal.call.proofMaturityDelaySeconds(),
+      portal.call.disputeGameFinalityDelaySeconds(),
+      portal.call.respectedGameType(),
+      dgf.call.gameCount(),
+    ]);
+    const total = u256ToBigInt(count);
+    const games =
+      total > 1n
+        ? await dgf.call.findLatestGames([
+            Number(gameType),
+            bigIntToU256(total - 1n),
+            bigIntToU256(total < OUTPUT_SAMPLE ? total : OUTPUT_SAMPLE),
+          ])
+        : [];
+    const times = games.map((game) => Number(tupleValue(game, "timestamp", 2))).sort((a, b) => b - a);
+    const gaps = times
+      .slice(1)
+      .map((time, index) => times[index] - time)
+      .filter((gap) => gap > 0)
+      .sort((a, b) => a - b);
+    return {
+      finalitySeconds: Number(u256ToBigInt(finality)),
+      maturitySeconds: Number(u256ToBigInt(maturity)),
+      outputSeconds: gaps.length ? gaps[Math.floor(gaps.length / 2)] : null,
+    };
   }
 
   /**
@@ -892,8 +921,8 @@ export function createWithdrawals(deps) {
 
   return Object.freeze({
     finalizeWithdrawal,
+    loadTiming,
     loadWithdrawalStatus,
-    loadWithdrawalWaitingPeriod,
     prepareFinalize,
     prepareProve,
     proveWithdrawal,

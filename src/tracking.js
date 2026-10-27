@@ -352,8 +352,7 @@ export function createTracking(deps) {
             (!payer || event.data?.sender === payer),
         ),
     );
-    if (!payout)
-      return pending(`Paid out on ${name("dusk")}, usually within an hour.`, patch);
+    if (!payout) return pending(`Waiting for the payout on ${name("dusk")}.`, patch);
     const paid = await node.transaction(payout.origin);
     return completed({
       ...patch,
@@ -397,7 +396,7 @@ export function createTracking(deps) {
     const order = orderAmongAlike(
       { hash: entry.hash, sourceAt: sourceAt ?? now() },
       [...(await serviceAlike(entry, to, value)), ...localAlike(entry, others, isAlike)],
-      { horizonMs: Math.max(SERVICE_ORDER_HORIZON_MS, 4 * service.delaySeconds * 1_000), settled: settledHashes(others) },
+      { horizonMs: Math.max(SERVICE_ORDER_HORIZON_MS, 4 * (service.delaySeconds ?? 0) * 1_000), settled: settledHashes(others) },
     );
     // Where an earlier check stopped, if it started from the same transfer.
     const scanBasis = String(order.since);
@@ -423,15 +422,8 @@ export function createTracking(deps) {
       (log) => BigInt(log.data) === expected,
       { skip: order.skip, taken: takenDestinations(entry, others) },
     );
-    if (!match) {
-      const late = sourceAt && now() - sourceAt > service.delaySeconds * 2_000;
-      return pending(
-        late
-          ? "Taking longer than usual."
-          : `Paid out on ${name(network)}, usually within an hour.`,
-        { ...patch, scanBasis, scanFrom: next.toString() },
-      );
-    }
+    if (!match)
+      return pending(`Waiting for the payout on ${name(network)}.`, { ...patch, scanBasis, scanFrom: next.toString() });
     return completed({
       ...patch,
       destinationAt: await blockTime(network, match.blockNumber),
@@ -557,8 +549,7 @@ export function createTracking(deps) {
     if (viaAdapter?.failed) return failed(viaAdapter.failed, patch);
     if (viaAdapter?.hash)
       return completed({ ...patch, destinationAt: viaAdapter.at, destinationHash: viaAdapter.hash });
-    if (viaAdapter === null)
-      return pending(`Waiting for ${name("dusk-evm")}. Usually within a few minutes.`, patch);
+    if (viaAdapter === null) return pending(`Waiting for ${name("dusk-evm")}.`, patch);
     const credit = await eventCredit(
       entry,
       { amountLux: args.amountLux, height: tx.blockHeight, recipient: args.to, sender: tx.json?.sender, sentAt: sourceAt },
@@ -570,7 +561,7 @@ export function createTracking(deps) {
         patch,
       );
     if (!credit.hash)
-      return pending(`Waiting for ${name("dusk-evm")}. Usually within a few minutes.`, {
+      return pending(`Waiting for ${name("dusk-evm")}.`, {
         ...patch,
         scanBasis: credit.scanBasis,
         scanFrom: credit.next.toString(),

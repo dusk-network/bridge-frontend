@@ -7,18 +7,9 @@ import { groupTransfers, shownFor } from "./discovery.js";
 import { aboutFee, formatDateTime, formatDusk, formatFee, formatLux, formatMaxFee, formatUnitsGrouped } from "./format.js";
 import { gasCoin, networkName, networkNames, routeTitle } from "./names.js";
 import { transferHref } from "./permalink.js";
-import { arrivalText, buildQuote, routeDuskFees, stepFeeText, withdrawalStepMax } from "./quote.js";
-import {
-  custodyLine,
-  explorerTxUrl,
-  html,
-  lateAfterSeconds,
-  privacyLine,
-  short,
-  transferSubline,
-  transferView,
-} from "./transfer-view.js";
-import { roughDuration, WITHDRAWAL_REPORT_SECONDS, WITHDRAWAL_WAITING_PERIOD_SECONDS } from "./withdrawal-lifecycle.js";
+import { buildQuote, routeDuskFees, stepFeeText, withdrawalStepMax } from "./quote.js";
+import { aboutTime, routeTime, routeTimeText } from "./route-times.js";
+import { explorerTxUrl, html, privacyLine, short, transferSubline, transferView } from "./transfer-view.js";
 
 export const DUSK_WALLET_URL = "https://docs.dusk.network/use/wallets/#dusk-wallet";
 
@@ -31,27 +22,22 @@ export const evmWalletName = (evm) => evm?.walletName || "your EVM wallet";
 // Start page
 // ---------------------------------------------------------------------------
 
-/** A duration as the card writes it: "1 min", "1 hour", "7 days". */
-export function shortDuration(seconds) {
-  const minutes = Math.max(1, Math.round(seconds / 60));
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 48) return `${hours} hour${hours === 1 ? "" : "s"}`;
-  return `${Math.round(hours / 24)} days`;
-}
-
 /**
  * A route in one line, time then cost: the card's route row and its network
- * list. The fee comes from the same calculation as the quote and the review.
+ * list. The time is this network's (`routeTime`), left out where it isn't
+ * known; the fee comes from the same calculation as the quote and the review.
  */
-export function routeLine(route, cfg, { gasPrice = 1n } = {}) {
-  if (route.mode === "duskevm-deposit")
-    return `≈ 1 min · fee up to ${formatMaxFee(routeDuskFees(route, { gasPrice }).send.maxLux)} DUSK`;
-  if (route.mode === "duskevm-withdrawal")
-    return `≈ ${shortDuration(WITHDRAWAL_REPORT_SECONDS + WITHDRAWAL_WAITING_PERIOD_SECONDS)}, three steps · ${stepFeeText({ gasPrice })} on Dusk`;
-  if (route.mode === "service-transfer")
-    return `≈ ${shortDuration(cfg.service?.delaySeconds ?? 3_600)} · ${formatDusk(cfg.service.feeLux)} bridge fee`;
-  return `≈ ${shortDuration(cfg.migrationDelaySeconds ?? 3_600)} · two wallet steps · fee in ${gasCoin(cfg, route.from.id)}`;
+export function routeLine(route, cfg, { gasPrice = 1n, timing } = {}) {
+  const cost =
+    route.mode === "duskevm-deposit"
+      ? [`fee up to ${formatMaxFee(routeDuskFees(route, { gasPrice }).send.maxLux)} DUSK`]
+      : route.mode === "duskevm-withdrawal"
+        ? ["three steps", `${stepFeeText({ gasPrice })} on Dusk`]
+        : route.mode === "service-transfer"
+          ? [`${formatDusk(cfg.service.feeLux)} bridge fee`]
+          : ["two wallet steps", `fee in ${gasCoin(cfg, route.from.id)}`];
+  const line = [routeTimeText(routeTime(route, cfg, timing)), ...cost].filter(Boolean).join(" · ");
+  return `${line.charAt(0).toUpperCase()}${line.slice(1)}`;
 }
 
 /** Who does what, in one line: the route's steps and the wallets they take. */
@@ -67,7 +53,7 @@ export function routeSteps(route, quote = null) {
 
 /**
  * Facts the review checks before any wallet opens, each true or not:
- * balances, gas, where the payout goes, and when it arrives.
+ * balances, gas, and where the payout goes.
  */
 export function reviewChecks(route, { cfg, destination, duskAccount, evm, quote, reads }) {
   const checks = [];
@@ -90,7 +76,6 @@ export function reviewChecks(route, { cfg, destination, duskAccount, evm, quote,
     });
     if (route.mode === "service-transfer")
       checks.push({ html: `You receive <b class="num">${html(formatDusk(quote.receiveLux ?? 0n))}</b> after the ${html(formatDusk(cfg.service.feeLux))} bridge fee`, ok: true });
-    checks.push({ html: `Arrives on ${html(to)} ${html(arrivalText(route, cfg))}`, ok: true });
     return checks;
   }
   if (route.mode === "migration") {
@@ -110,7 +95,6 @@ export function reviewChecks(route, { cfg, destination, duskAccount, evm, quote,
       html: `The payout goes to Dusk account <code class="mono">${html(short(destination))}</code>${duskAccount && destination === duskAccount ? ", your connected account" : ""}. No bridge fee.`,
       ok: true,
     });
-    checks.push({ html: `Arrives on Dusk ${html(arrivalText(route, cfg))}`, ok: true });
     return checks;
   }
   const l2 = reads.l2 ?? {};
@@ -123,24 +107,15 @@ export function reviewChecks(route, { cfg, destination, duskAccount, evm, quote,
     html: `It pays Dusk account <code class="mono">${html(short(destination))}</code>${duskAccount && destination === duskAccount ? ", your connected account" : ""}`,
     ok: true,
   });
-  checks.push({
-    html: `Then two steps on Dusk with Dusk Wallet: prove after about ${html(roughDuration(WITHDRAWAL_REPORT_SECONDS))}, claim about ${html(roughDuration(WITHDRAWAL_WAITING_PERIOD_SECONDS))} later`,
-    ok: true,
-  });
   return checks;
 }
 
-/** What to do when a transfer is late: when it's late, and who to ask. */
-export function lateLine(route, cfg) {
-  const after = roughDuration(lateAfterSeconds(route, cfg));
-  const usual =
-    route.mode === "duskevm-withdrawal"
-      ? `DuskEVM usually reports a withdrawal to Dusk within ${roughDuration(WITHDRAWAL_REPORT_SECONDS)}`
-      : `${arrivalText(route, cfg).replace(/^usually/u, "Usually")}`;
+/** A late transfer's note: that it is, and who to ask where the deployment names one. */
+export function lateLine(cfg) {
   const ask = cfg.links?.support
-    ? `Contact <a href="${html(cfg.links.support)}" target="_blank" rel="noreferrer">${html(cfg.links.supportLabel || "support")}</a> with the receipt link.`
-    : "Keep the receipt link: it shows where the transfer is on both networks.";
-  return `${html(usual)}. Not there after ${html(after)}? ${ask}`;
+    ? ` Contact <a href="${html(cfg.links.support)}" target="_blank" rel="noreferrer">${html(cfg.links.supportLabel || "support")}</a> with the receipt link.`
+    : "";
+  return `<b>Taking longer than usual.</b>${ask}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -163,8 +138,8 @@ const extIcon =
  * with: the node's price can have risen since the form read it, for a
  * higher fee or a balance that no longer covers it.
  */
-export function pricedReview(route, { amount, cfg, destination, duskAccount, evm, gasPrice, reads }) {
-  const quote = buildQuote(route, amount, { balance: reads.duskBalance, cfg, gasPrice });
+export function pricedReview(route, { amount, cfg, destination, duskAccount, evm, gasPrice, reads, timing }) {
+  const quote = buildQuote(route, amount, { balance: reads.duskBalance, cfg, gasPrice, timing });
   return {
     checks: reviewChecks(route, { cfg, destination, duskAccount, evm, quote, reads }),
     feeRows: quote.rows.filter((row) => !["send", "receive"].includes(row.key)),
@@ -200,9 +175,10 @@ export function actionPrivacy(kind, base, { account = "", name = "" } = {}) {
  * The top of a proof's or a claim's review: what the step costs at most
  * (`maxLux`) and what moves. A proof moves no DUSK; a claim pays the
  * withdrawal's account. When that isn't Dusk Wallet's `account`, it says so,
- * by its .dusk `name` where there is one.
+ * by its .dusk `name` where there is one. `wait` is this network's wait
+ * from the proof to the claim, in seconds, where it's known.
  */
-export function actionLead(kind, entry, { account = "", amountLux = null, maxLux, name = "" }) {
+export function actionLead(kind, entry, { account = "", amountLux = null, maxLux, name = "", wait = null }) {
   const moving = amountLux === null ? "The DUSK" : `The ${formatLux(amountLux)} DUSK`;
   const cost = formatMaxFee(maxLux);
   const pays = entry.destination ?? "";
@@ -216,7 +192,7 @@ export function actionLead(kind, entry, { account = "", amountLux = null, maxLux
     ? {
         amount: cost,
         label: "Proving costs up to",
-        line: `No DUSK moves now. ${moving} stays in the DuskEVM bridge until it's claimed, about 7 days after the proof.`,
+        line: `No DUSK moves now. ${moving} stays in the DuskEVM bridge until it's claimed${wait ? `, ${aboutTime(wait)} after the proof` : ""}.`,
         notYours,
       }
     : {
@@ -229,8 +205,8 @@ export function actionLead(kind, entry, { account = "", amountLux = null, maxLux
 }
 
 /** The receipt of one transfer. No balances: the link may be shared. */
-export function receiptModel(entry, { cfg, gasPrice = 1n, now = Date.now(), own = null, route, submitter = null, timeZone, url }) {
-  const view = transferView(entry, { account: own?.account ?? "", cfg, gasPrice, now, route, submitter, timeZone, year: true });
+export function receiptModel(entry, { cfg, gasPrice = 1n, now = Date.now(), own = null, route, submitter = null, timeZone, timing, url }) {
+  const view = transferView(entry, { account: own?.account ?? "", cfg, gasPrice, now, route, submitter, timeZone, timing, year: true });
   const from = networkName(cfg, route.from.id);
   const to = networkName(cfg, route.to.id);
   // Your own Dusk account by its .dusk name, others by their short code.
@@ -244,8 +220,7 @@ export function receiptModel(entry, { cfg, gasPrice = 1n, now = Date.now(), own 
     const at = entry.destinationAt ?? entry.claimAt;
     caption = at ? `Arrived ${time(at)}.` : "Completed.";
   } else if (view.status === "failed") caption = view.note;
-  else if (route.mode === "duskevm-withdrawal") caption = "Three steps over about 7 days. You can close this page.";
-  else caption = `${arrivalText(route, cfg).replace(/^usually/u, "Usually")}. You can close this page.`;
+  else if (view.time) caption = `Takes ${routeTimeText(view.time)}`;
 
   const sourceNetwork = route.from.kind === "dusk" ? "dusk" : route.from.id;
   const destinationNetwork = route.to.kind === "dusk" ? "dusk" : route.to.id;
@@ -288,11 +263,8 @@ export function receiptModel(entry, { cfg, gasPrice = 1n, now = Date.now(), own 
     });
   if (entry.sourceAt) details.push({ label: "Sent", value: time(entry.sourceAt) });
 
-  const notes = [{ html: html(view.custody), icon: "lock" }];
-  if (route.mode === "duskevm-withdrawal" && entry.stage === "proven_waiting")
-    notes.push({ html: "The 7 days are a safety window in the bridge's design. The countdown is the same on any device." });
-  const early = route.mode !== "duskevm-withdrawal" || ["submitted", "waiting_for_output"].includes(entry.stage ?? "submitted");
-  if (view.status === "pending" && early) notes.push({ html: view.late ? `<b>${html(view.lateText)}</b> ${lateLine(route, cfg)}` : lateLine(route, cfg) });
+  const notes = [];
+  if (view.late) notes.push({ html: lateLine(cfg) });
   if (view.trackingError) notes.push({ html: html(view.trackingError) });
 
   const stepMax = withdrawalStepMax({ gasPrice, withdrawalGas: entry.withdrawalGas ? BigInt(entry.withdrawalGas) : 0n });
@@ -317,12 +289,12 @@ function txHtml(cfg, network, hash, label) {
 // My transfers
 // ---------------------------------------------------------------------------
 
-export function transfersModel(entries, { account = "", accounts, cfg, gasPrice = 1n, now = Date.now(), routeOf, submitter = null, timeZone }) {
+export function transfersModel(entries, { account = "", accounts, cfg, gasPrice = 1n, now = Date.now(), routeOf, submitter = null, timeZone, timing }) {
   const shown = entries.filter((entry) => routeOf(entry.routeId) && shownFor(entry, accounts));
   const groups = groupTransfers(shown, routeOf);
   const row = (entry) => {
     const route = routeOf(entry.routeId);
-    const view = transferView(entry, { account, cfg, gasPrice, now, route, submitter, timeZone });
+    const view = transferView(entry, { account, cfg, gasPrice, now, route, submitter, timeZone, timing });
     return {
       action: view.action,
       amountText: view.amountText,
@@ -343,4 +315,4 @@ export function transfersModel(entries, { account = "", accounts, cfg, gasPrice 
   };
 }
 
-export { short, custodyLine, privacyLine };
+export { short, privacyLine };

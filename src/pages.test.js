@@ -68,12 +68,20 @@ const explorer = { explorer: (network, address) => explorerAddressUrl(testnet, n
 const TIMES = "×";
 
 test("the card's route row gives each route its time and cost in one line", () => {
-  const line = (mode, cfg = testnet) => routeLine(routesOf(cfg)[mode], cfg);
-  assert.equal(line("duskevm-deposit"), "≈ 1 min · fee up to 0.005 DUSK");
-  assert.equal(line("duskevm-withdrawal"), "≈ 7 days, three steps · up to 0.051 DUSK a step on Dusk");
-  assert.equal(line("service-transfer"), "≈ 1 hour · 1 DUSK bridge fee");
-  assert.equal(line("migration"), "≈ 1 hour · two wallet steps · fee in ETH");
-  assert.equal(routeLine(buildRoutes(mainnet).find((route) => route.from.id === "bsc"), mainnet), "≈ 1 hour · two wallet steps · fee in BNB");
+  const line = (mode, cfg = testnet, timing) => routeLine(routesOf(cfg)[mode], cfg, { timing });
+  assert.equal(line("duskevm-deposit"), "~1 min · fee up to 0.005 DUSK");
+  // The withdrawal's time is the chain's: none until it's read.
+  assert.equal(line("duskevm-withdrawal"), "Three steps · up to 0.051 DUSK a step on Dusk");
+  const read = { chain: { withdrawal: { finalitySeconds: 302_400, maturitySeconds: 604_800, outputSeconds: 1_700 } } };
+  assert.equal(line("duskevm-withdrawal", testnet, read), "~7 days · three steps · up to 0.051 DUSK a step on Dusk");
+  // No time is known for the testnet payouts: the cost alone.
+  assert.equal(line("service-transfer"), "1 DUSK bridge fee");
+  assert.equal(line("migration"), "Two wallet steps · fee in ETH");
+  // Mainnet's own times.
+  assert.equal(line("service-transfer", mainnet), "~10 hours · 1 DUSK bridge fee");
+  const from = (id) => buildRoutes(mainnet).find((route) => route.from.id === id);
+  assert.equal(routeLine(from("ethereum"), mainnet), "~70 min · two wallet steps · fee in ETH");
+  assert.equal(routeLine(from("bsc"), mainnet), "~1 hour · two wallet steps · fee in BNB");
 });
 test("the review checks the facts first, then lists the wallet's lines with full addresses", async () => {
   const route = T.migration;
@@ -81,7 +89,7 @@ test("the review checks the facts first, then lists the wallet's lines with full
   const reads = { migration: { allowanceWei: 0n, balanceWei: 2_500n * 10n ** 18n, gasCoinWei: 21_300_000_000_000_000n, gasPriceWei: 2_000_000_000n } };
   const quote = buildQuote(route, "1000", { allowanceWei: 0n, balance: reads.migration.balanceWei, cfg: testnet, evmGas: { approve: 46_000n, migrate: 70_000n, priceWei: 2_000_000_000n } });
   const checks = reviewChecks(route, { cfg: testnet, destination: ACCOUNT, duskAccount: ACCOUNT, evm: { account: EVM, walletName: "MetaMask" }, quote, reads });
-  assert.deepEqual(checks.map((check) => check.ok), [true, true, true, true]);
+  assert.deepEqual(checks.map((check) => check.ok), [true, true, true]);
   assert.match(checks[0].html, /2,500 old DUSK<\/b> at <code class="mono">0xd63b…8df4<\/code> on Ethereum \(Sepolia\)/u);
   assert.match(checks[1].html, /0\.0213 ETH<\/b> for the network fee, about 0\.00023 ETH needed for both steps/u);
   // Not enough ETH is caught before the wallet opens.
@@ -299,11 +307,16 @@ test("a receipt is a record without balances, with both hashes and its own link"
   assert.doesNotMatch(html, /balance|now holds/iu);
   assert.ok(!html.includes(TIMES));
 
-  // While pending: what is usual and what to do when it's late. No contact is named unless configured.
-  const pending = receiptModel({ ...entry, destinationHash: undefined, status: "pending" }, { cfg: testnet, now: entry.sourceAt + 60_000, route: T["duskevm-deposit"], url });
-  assert.match(pending.notes.at(-1).html, /^Usually within a minute\. Not there after 15 minutes\? Keep the receipt link/u);
+  // While pending: how long it takes on this network, and a note only once it's late.
+  const waiting = { ...entry, destinationHash: undefined, status: "pending" };
+  const pending = receiptModel(waiting, { cfg: testnet, now: entry.sourceAt + 60_000, route: T["duskevm-deposit"], url });
+  assert.equal(pending.caption, "Takes ~1 min");
+  assert.deepEqual(pending.notes, []);
+  const late = receiptModel(waiting, { cfg: testnet, now: entry.sourceAt + 3_600_000, route: T["duskevm-deposit"], url });
+  assert.deepEqual(late.notes.map((note) => note.html), ["<b>Taking longer than usual.</b>"]);
+  // A contact only where the deployment names one.
   const supported = profile("testnet", { ...DUSKEVM, VITE_SUPPORT_LABEL: "Dusk support", VITE_SUPPORT_URL: "https://support.example.org" });
-  const withSupport = receiptModel({ ...entry, status: "pending" }, { cfg: supported, route: routesOf(supported)["duskevm-deposit"], url });
+  const withSupport = receiptModel(waiting, { cfg: supported, now: entry.sourceAt + 3_600_000, route: routesOf(supported)["duskevm-deposit"], url });
   assert.match(withSupport.notes.at(-1).html, /Contact <a href="https:\/\/support\.example\.org" target="_blank" rel="noreferrer">Dusk support<\/a> with the receipt link\./u);
 });
 
@@ -386,7 +399,7 @@ test("the card reads as a bridge: From, a flip, To, the route, then one button",
   assert.match(page, /<span>Public balance<\/span><span class="bal"><span class="num">174\.0037 DUSK<\/span><button type="button" class="mini" data-action="max">Max<\/button><\/span>/u);
   assert.match(page, /<p class="recip">to your MetaMask <b class="mono">0xd63b…8df4<\/b> · <button type="button" class="linkish" data-action="recipient-edit">Change<\/button><\/p>/u);
   // The route row, one line until it's opened: steps, fees, what's public.
-  assert.match(page, /<summary>.*<span>≈ 1 min · fee up to 0\.005 DUSK<\/span>/u);
+  assert.match(page, /<summary>.*<span>~1 min · fee up to 0\.005 DUSK<\/span>/u);
   assert.match(page, /<b>Public on both networks, and linked\.<\/b> <span data-region="privacy">Your Dusk account wallet-both\.dusk/u);
   assert.match(page, /Activity<span class="cnt" aria-label="1 need you">1<\/span>/u);
   // No way back: the flip can't be pressed. Dusk Wallet missing: the button is its link.
@@ -425,11 +438,11 @@ test("a proof's review says it moves no DUSK and what it costs; a claim, where t
   const amountLux = 1_008n * 10n ** 9n;
   const other = { destination: testnet.service.account };
   // Paying another account than Dusk Wallet's says so, by the wallet's .dusk name.
-  const prove = actionLead("prove", other, { account: ACCOUNT, amountLux, maxLux: 51_000_000n, name: "alice.dusk" });
+  const prove = actionLead("prove", other, { account: ACCOUNT, amountLux, maxLux: 51_000_000n, name: "alice.dusk", wait: 604_800 });
   assert.deepEqual(prove, {
     amount: "0.051",
     label: "Proving costs up to",
-    line: "No DUSK moves now. The 1,008 DUSK stays in the DuskEVM bridge until it's claimed, about 7 days after the proof.",
+    line: "No DUSK moves now. The 1,008 DUSK stays in the DuskEVM bridge until it's claimed, ~7 days after the proof.",
     notYours: "This withdrawal pays 25z9o6…5Etftt, not your alice.dusk. Proving it doesn't change that.",
   });
   const claim = actionLead("finalize", { destination: ACCOUNT }, { account: ACCOUNT, amountLux, maxLux: 51_000_000n });

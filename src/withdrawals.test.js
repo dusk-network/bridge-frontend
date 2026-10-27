@@ -248,14 +248,45 @@ test("a rejected proof with no replacement output is named as rejected", async (
   assert.equal(status.stage, "proven_waiting");
 });
 
-test("the waiting period is read from the portal, or is unknown", async () => {
-  const { portal, withdrawals } = setup({ proofMaturity: 604_800 });
-  assert.equal(await withdrawals.loadWithdrawalWaitingPeriod(), 604_800n);
+test("a withdrawal's waits come from the Portal, and how often outputs come from the latest games", async () => {
+  const { dgf, withdrawals } = setup({ proofMaturity: 604_800 });
+  dgf.call.gameCount = fn(async () => u256(3_915));
+  // As DuskEVM testnet's: an output every 170 Dusk blocks, one late by as much again.
+  const stamps = [46_986_550, 46_984_850, 46_983_150, 46_979_750, 46_978_050, 46_976_350];
+  dgf.call.findLatestGames = fn(async () => stamps.map((timestamp, index) => ({ index: u256(3_914 - index), timestamp })));
+  assert.deepEqual(await withdrawals.loadTiming(), { finalitySeconds: 302_400, maturitySeconds: 604_800, outputSeconds: 1_700 });
+  // The latest six games of the type the Portal takes.
+  assert.deepEqual(dgf.call.findLatestGames.calls[0][0], [8, u256(3_914), u256(6)]);
+  // No games yet: nothing says how often outputs come.
+  dgf.call.gameCount = fn(async () => u256(0));
+  assert.equal((await withdrawals.loadTiming()).outputSeconds, null);
+});
 
-  portal.call.proofMaturityDelaySeconds = async () => {
-    throw new Error("offline");
+test("a withdrawal's waits are two node queries through Multicall for Dusk", async () => {
+  const queries = [];
+  const node = {
+    async contractCall(_id, fnName, bytes) {
+      queries.push(fnName);
+      const calls = JSON.parse(new TextDecoder().decode(bytes));
+      return new TextEncoder().encode(JSON.stringify({ height: "1", results: calls.map((call) => ({ Ok: Buffer.from(call.fn_name).toString("hex") })) }));
+    },
   };
-  assert.equal(await withdrawals.loadWithdrawalWaitingPeriod(), null);
+  const answers = {
+    disputeGameFinalityDelaySeconds: u256(302_400),
+    findLatestGames: [{ timestamp: 3_400 }, { timestamp: 1_700 }],
+    gameCount: u256(2),
+    proofMaturityDelaySeconds: u256(604_800),
+    respectedGameType: 8,
+  };
+  const driver = {
+    decodeOutputFn: (name, out) => (name === "aggregate" ? JSON.parse(new TextDecoder().decode(out)) : answers[new TextDecoder().decode(out)]),
+    encodeInputFn: (name, json) => new TextEncoder().encode(name === "aggregate" ? json : name),
+  };
+  const contract = (id) => ({ driver: async () => driver, id });
+  const reader = createContractReader({ multicall: contract("93".repeat(32)), node });
+  const timing = createWithdrawals({ dgf: contractFacade(reader, contract("3b".repeat(32))), portal: contractFacade(reader, contract("14".repeat(32))) });
+  assert.deepEqual(await timing.loadTiming(), { finalitySeconds: 302_400, maturitySeconds: 604_800, outputSeconds: 1_700 });
+  assert.deepEqual(queries, ["aggregate", "aggregate"]);
 });
 
 test("a finalized withdrawal isn't claimed again", async () => {

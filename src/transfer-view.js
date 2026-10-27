@@ -1,7 +1,8 @@
 // What a transfer says, on its receipt and in My transfers: the title, both
 // accounts, each step with its time and transaction, the next action, the
-// claim countdown, who holds the DUSK, and what to do when it's late. Built
-// from the stored entry and its route; no balances, no network requests.
+// claim countdown, and when it's late. Built from the stored entry, its route
+// and how long the route takes on this network; no balances, no network
+// requests.
 
 import {
   clockChangeBetween,
@@ -14,14 +15,9 @@ import {
 } from "./format.js";
 import { networkName } from "./names.js";
 import { withdrawalStepMax } from "./quote.js";
+import { aboutTime, lateAfterSeconds, routeTime } from "./route-times.js";
 import { STATUS_WORDS } from "./tracking.js";
-import {
-  WITHDRAWAL_REPORT_SECONDS,
-  WITHDRAWAL_WAITING_PERIOD_SECONDS,
-  roughDuration,
-  withdrawalActionFailure,
-  withdrawalNextAction,
-} from "./withdrawal-lifecycle.js";
+import { withdrawalActionFailure, withdrawalNextAction } from "./withdrawal-lifecycle.js";
 
 export const html = (value) =>
   String(value ?? "")
@@ -93,27 +89,6 @@ export function provenByOtherLine(entry, account = "") {
 const amountOf = (entry) =>
   entry.amountLux !== undefined && entry.amountLux !== null ? BigInt(entry.amountLux) : null;
 
-/** How long after sending a transfer counts as late, per route. */
-export function lateAfterSeconds(route, cfg) {
-  if (route.mode === "duskevm-deposit") return 15 * 60;
-  if (route.mode === "service-transfer") return 2 * (cfg.service?.delaySeconds ?? 3_600);
-  if (route.mode === "migration") return 2 * (cfg.migrationDelaySeconds ?? 3_600);
-  return 3 * WITHDRAWAL_REPORT_SECONDS;
-}
-
-/** Who holds the DUSK while the transfer runs, in one line. */
-export function custodyLine(route, cfg, entry = {}) {
-  const to = networkName(cfg, route.to.id);
-  if (route.mode === "migration")
-    return "The migration contract keeps the old DUSK locked: it has no function to send them out. The bridge then pays the same amount from its own Dusk account.";
-  if (route.mode === "service-transfer")
-    return `The bridge account on Dusk keeps the DUSK you send. The bridge then pays out the amount minus its fee as DUSK on ${to}.`;
-  if (route.mode === "duskevm-deposit")
-    return `The DuskEVM bridge contract on Dusk holds the DUSK while it is on ${to}.`;
-  const recipient = entry.destination ? short(entry.destination) : "the Dusk account in the withdrawal";
-  return `Until it's claimed, the DUSK waits in the DuskEVM bridge contract on Dusk. A claim always pays ${recipient}.`;
-}
-
 /**
  * What becomes public, in one line, naming the accounts themselves: the Dusk
  * one by its .dusk name too, when it has one (`name`), as the wallet shows it.
@@ -136,17 +111,20 @@ function step(key, title, state, extra = {}) {
   return { at: null, detail: "", hash: null, key, network: null, state, title, ...extra };
 }
 
-/** The claim time of a waiting withdrawal, and how sure it is. */
-function claimTiming(entry, now) {
+/**
+ * The claim time of a waiting withdrawal, and how sure it is: Dusk's own once
+ * it gives one, else the proof time and this network's wait after it.
+ */
+function claimTiming(entry, now, time) {
   if (entry.readyAt) return { at: Number(entry.readyAt) * 1_000, exact: Boolean(entry.readyAtExact) };
   const proof = entry.provenAt ?? entry.proveAt;
-  if (proof) return { at: proof + WITHDRAWAL_WAITING_PERIOD_SECONDS * 1_000, exact: false };
+  if (proof && time?.wait) return { at: proof + time.wait * 1_000, exact: false };
   return { at: null, exact: false, from: now };
 }
 
 const REJECTED_PROOF = "The proof was rejected. Prove again once DuskEVM reports a new output.";
 
-function withdrawalSteps(entry, cfg, { account, gasPrice = 1n, now, timeZone, year }) {
+function withdrawalSteps(entry, cfg, { account, gasPrice = 1n, now, time: usual, timeZone, year }) {
   const stage = entry.stage ?? "submitted";
   const time = (ms) => (ms ? formatDateTime(ms, { timeZone, year }) : "");
   // The current stage decides: a proof the Portal rejected leaves the
@@ -184,9 +162,8 @@ function withdrawalSteps(entry, cfg, { account, gasPrice = 1n, now, timeZone, ye
     prove = step("prove", "Prove on Dusk", "now", { detail: "Proof sent, waiting for Dusk", hash: entry.pendingHash ?? null, network: "dusk" });
   else
     prove = step("prove", "Prove on Dusk", entry.sourceAt ? "now" : "todo", {
-      detail: entry.sourceAt
-        ? `DuskEVM usually reports a withdrawal to Dusk within ${roughDuration(WITHDRAWAL_REPORT_SECONDS)}. Then you can prove it.`
-        : "",
+      // From when it can be proved: once DuskEVM reports it to Dusk.
+      detail: entry.sourceAt && usual?.report ? `From about ${time(entry.sourceAt + usual.report * 1_000)}` : "",
     });
 
   let claim;
@@ -209,18 +186,18 @@ function withdrawalSteps(entry, cfg, { account, gasPrice = 1n, now, timeZone, ye
   else if (stage === "proven_waiting" && entry.proofRejected)
     claim = step("claim", "Claim on Dusk", "todo", { detail: REJECTED_PROOF });
   else if (stage === "proven_waiting") {
-    const timing = claimTiming(entry, now);
+    const timing = claimTiming(entry, now, usual);
     claim = step("claim", "Claim on Dusk", "now", {
       detail: timing.at
         ? `${timing.exact ? "From" : "From about"} ${formatDateTime(timing.at, { timeZone, year })}`
-        : `About ${roughDuration(WITHDRAWAL_WAITING_PERIOD_SECONDS)} after the proof`,
+        : afterProof(usual),
     });
-  } else
-    claim = step("claim", "Claim on Dusk", "todo", {
-      detail: `About ${roughDuration(WITHDRAWAL_WAITING_PERIOD_SECONDS)} after the proof`,
-    });
+  } else claim = step("claim", "Claim on Dusk", "todo", { detail: afterProof(usual) });
   return [sent, prove, claim];
 }
+
+/** "~7 days after the proof", or nothing where the wait isn't known. */
+const afterProof = (time) => (time?.wait ? `${aboutTime(time.wait)} after the proof` : "");
 
 function sourceSteps(entry, route, cfg, { timeZone, year }) {
   const time = (ms) => (ms ? formatDateTime(ms, { timeZone, year }) : "");
@@ -252,24 +229,12 @@ function sourceSteps(entry, route, cfg, { timeZone, year }) {
     step("arrived", arrived ? `${verb} ${to}` : route.mode === "duskevm-deposit" ? `Arriving on ${to}` : `Paying out on ${to}`, arrived ? "done" : failed ? "todo" : confirmed ? "now" : "todo", {
       at: entry.destinationAt ?? null,
       atText: time(entry.destinationAt),
-      detail: arrived
-        ? entry.destination
-          ? `To ${short(entry.destination)}`
-          : ""
-        : failed
-          ? ""
-          : `${arrivalWords(route, cfg)}${entry.destination ? `, to ${short(entry.destination)}` : ""}`,
+      detail: entry.destination && !failed ? `To ${short(entry.destination)}` : "",
       hash: entry.destinationHash ?? null,
       network: route.to.kind === "dusk" ? "dusk" : route.to.id,
     }),
   );
   return steps;
-}
-
-function arrivalWords(route, cfg) {
-  if (route.mode === "duskevm-deposit") return "Usually within a minute";
-  if (route.mode === "service-transfer") return `Usually within ${roughDuration(cfg.service?.delaySeconds ?? 3_600)}`;
-  return `Usually within ${roughDuration(cfg.migrationDelaySeconds ?? 3_600)}`;
 }
 
 function titleFor(entry, route, cfg, amount) {
@@ -306,12 +271,15 @@ function titleFor(entry, route, cfg, amount) {
  * @param {string|null} [options.submitter] Dusk Wallet's account, as the Portal knows provers
  * @param {bigint} [options.gasPrice] the node's gas price, for the most a step can cost
  * @param {string} [options.account] the connected Dusk account
+ * @param {object} [options.timing] what `routeTime` reads the route's time from
  */
-export function transferView(entry, { account = "", cfg, gasPrice = 1n, now = Date.now(), route, submitter = null, timeZone, year = false }) {
+export function transferView(entry, { account = "", cfg, gasPrice = 1n, now = Date.now(), route, submitter = null, timeZone, timing, year = false }) {
   const status = entry.status === "completed" || entry.status === "failed" ? entry.status : "pending";
   const amount = amountOf(entry);
   const withdrawal = route.mode === "duskevm-withdrawal";
-  const options = { account, gasPrice, now, timeZone, year };
+  // How long the route takes on this network, as every page says it.
+  const time = routeTime(route, cfg, { ...timing, now });
+  const options = { account, gasPrice, now, time, timeZone, year };
   const steps = (withdrawal ? withdrawalSteps(entry, cfg, options) : sourceSteps({ ...entry, status }, route, cfg, options)).map(
     (item) => ({ ...item, href: item.hash && item.network ? explorerTxUrl(cfg, item.network, item.hash) : null }),
   );
@@ -321,7 +289,7 @@ export function transferView(entry, { account = "", cfg, gasPrice = 1n, now = Da
 
   let countdown = null;
   if (withdrawal && status === "pending" && entry.stage === "proven_waiting" && !entry.proofRejected) {
-    const timing = claimTiming(entry, now);
+    const timing = claimTiming(entry, now, time);
     if (timing.at) {
       const proof = entry.provenAt ?? entry.proveAt ?? null;
       const zone = timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -337,11 +305,13 @@ export function transferView(entry, { account = "", cfg, gasPrice = 1n, now = Da
   }
 
   const sentAt = entry.sourceAt ?? (entry.createdAt ? Date.parse(entry.createdAt) : null);
+  const lateAfter = lateAfterSeconds(route, time);
   const late =
     status === "pending" &&
     sentAt &&
+    lateAfter &&
     (!withdrawal || ["submitted", "waiting_for_output"].includes(entry.stage ?? "submitted")) &&
-    now - sentAt > lateAfterSeconds(route, cfg) * 1_000;
+    now - sentAt > lateAfter * 1_000;
 
   return {
     action: actionKind
@@ -356,41 +326,31 @@ export function transferView(entry, { account = "", cfg, gasPrice = 1n, now = Da
     amount,
     amountText: amount === null ? "" : formatDusk(amount),
     countdown,
-    custody: custodyLine(route, cfg, entry),
     from: { account: entry.sender ?? null, network: fromNetwork },
     late: Boolean(late),
-    lateText: late ? lateText(route, cfg) : "",
     note: status === "failed" ? entry.note ?? "" : "",
     pair: [fromNetwork, toNetwork],
     rowTitle: `${networkName(cfg, fromNetwork)} to ${networkName(cfg, toNetwork)}`,
     status,
     statusWord: STATUS_WORDS[status],
     steps,
+    time,
     title: titleFor({ ...entry, status }, route, cfg, amount),
     to: { account: entry.destination ?? null, network: toNetwork },
     trackingError: entry.trackingError ? "Status unavailable. Trying again." : "",
     tracker: withdrawal
-      ? steps.map((item) => ({ label: trackerLabel(item, entry, now), state: item.state, when: trackerWhen(item, entry, now, timeZone) }))
+      ? steps.map((item) => ({ label: trackerLabel(item, entry, now), state: item.state, when: trackerWhen(item, entry, now, timeZone, time) }))
       : null,
   };
 }
 
-function lateText(route, cfg) {
-  if (route.mode === "duskevm-deposit") return "Taking longer than usual. Deposits usually arrive within a minute.";
-  if (route.mode === "service-transfer")
-    return `Taking longer than usual. Payouts usually come within ${roughDuration(cfg.service?.delaySeconds ?? 3_600)}.`;
-  if (route.mode === "migration")
-    return `Taking longer than usual. Migrations are usually paid out within ${roughDuration(cfg.migrationDelaySeconds ?? 3_600)}.`;
-  return `Taking longer than usual. DuskEVM usually reports a withdrawal to Dusk within ${roughDuration(WITHDRAWAL_REPORT_SECONDS)}.`;
-}
-
 /** The date under a withdrawal's step on its card: when it happened, or from when it can. */
-function trackerWhen(item, entry, now, timeZone) {
+function trackerWhen(item, entry, now, timeZone, time) {
   const day = (ms) => formatShortDay(ms, { timeZone });
   if (item.key === "sent") return entry.sourceAt ? day(entry.sourceAt) : "";
   if (item.state === "done") return item.at ? day(item.at) : "";
   if (item.key !== "claim" || entry.stage !== "proven_waiting" || entry.proofRejected) return "";
-  const timing = claimTiming(entry, now);
+  const timing = claimTiming(entry, now, time);
   return timing.at ? `from ${timing.exact ? "" : "about "}${day(timing.at)}` : "";
 }
 
@@ -429,19 +389,19 @@ export function transferSubline(view, entry, route, cfg, { account = "", now = D
     if (stage === "proven_waiting")
       return view.countdown
         ? `Claim ${view.countdown.exact ? "from" : "from about"} ${view.countdown.atText} · ${view.countdown.left} left`
-        : `Claim about ${roughDuration(WITHDRAWAL_WAITING_PERIOD_SECONDS)} after the proof`;
-    return entry.sourceAt
-      ? `Sent ${time(entry.sourceAt)} · DuskEVM usually reports it to Dusk within ${roughDuration(WITHDRAWAL_REPORT_SECONDS)}`
-      : "Waiting for DuskEVM";
+        : view.time?.wait
+          ? `Claim ${aboutTime(view.time.wait)} after the proof`
+          : "Proven";
+    if (!entry.sourceAt) return "Waiting for DuskEVM";
+    return view.time?.report
+      ? `Prove from about ${time(entry.sourceAt + view.time.report * 1_000)}`
+      : `Sent ${time(entry.sourceAt)}`;
   }
   if (view.status === "completed") {
     const at = entry.destinationAt ?? entry.sourceAt;
     return at ? `${route.mode === "duskevm-deposit" ? "Arrived" : "Paid out"} ${time(at)}` : "Completed";
   }
   const sent = entry.sourceAt ? `Sent ${time(entry.sourceAt)}` : "Sent";
-  const receive =
-    route.mode === "service-transfer" && view.amount !== null && cfg.service
-      ? ` · you receive ${formatDusk(view.amount - BigInt(cfg.service.feeLux))}`
-      : "";
-  return `${sent} · ${arrivalWords(route, cfg).toLowerCase()}${receive}`;
+  const usual = view.late ? "taking longer than usual" : view.time ? `takes ${aboutTime(view.time.seconds)}` : "";
+  return [sent, usual].filter(Boolean).join(" · ");
 }

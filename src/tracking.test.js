@@ -115,7 +115,7 @@ test("a migration is pending until Messina pays it out on Dusk", async () => {
   receipt = { blockNumber: toHex(100n), status: "0x1" };
   const mined = await tracking.refresh(entry, ROUTES.migration);
   assert.equal(mined.status, "pending");
-  assert.match(mined.note, /Paid out on Dusk,/u);
+  assert.equal(mined.note, "Waiting for the payout on Dusk.");
 
   payouts = [
     { events: [{ data: { receiver: "someone else", value: "3000000000" }, reverted: false, topic: "moonlight" }], origin: "00".repeat(32) },
