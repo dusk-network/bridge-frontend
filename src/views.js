@@ -32,6 +32,12 @@ const statusPill = (status, word) =>
 const statusWord = (status, word) =>
   status === "completed" ? "" : `<span class="st ${status}"><span class="dot"></span>${html(word)}</span>`;
 
+/** What's public, its networks in bold: "Public on Dusk and DuskEVM, and linked:" then the parties. */
+export function publicLine(text) {
+  const at = String(text ?? "").indexOf(": ");
+  return at < 0 ? html(text) : `<b>${html(text.slice(0, at + 1))}</b> ${html(text.slice(at + 2))}`;
+}
+
 // ---------------------------------------------------------------------------
 // Header, strip and footer
 // ---------------------------------------------------------------------------
@@ -137,13 +143,13 @@ export function cardRegions(vm) {
     ? `<div class="kv"><dt class="k">Leaves your Dusk account</dt><dd class="v"><span class="num">${html(vm.quote.leaves)}</span></dd></div>`
     : "";
   return {
-    cta: `${vm.error ? `<p class="message error" role="alert">${html(vm.error)}</p>` : ""}${primaryControl(vm.button)}<p class="small t2 hint">${html(vm.hint ?? "")}</p>`,
+    cta: `${vm.error ? `<p class="message error" role="alert">${html(vm.error)}</p>` : ""}${primaryControl(vm.button)}`,
     "from-foot": `<span>${html(vm.from.balanceLabel)}</span><span class="bal">${vm.from.balance ? `<span class="num">${html(vm.from.balance)}</span>` : ""}${vm.canMax ? '<button type="button" class="mini" data-action="max">Max</button>' : ""}</span>`,
     receive: html(vm.receive || "0"),
     "recipient-note": recipientNote(vm.to),
     route: `<summary>${icon("clock")}<span>${html(vm.routeLine)}</span>${icon("chev-d", "chev")}</summary>
-      <dl class="kvs" aria-label="Quote"><div class="kv"><dt class="k">Steps</dt><dd class="v">${html(vm.steps)}</dd></div>${quoteRows({ rows: vm.quote.rows.filter((row) => !["send", "receive"].includes(row.key)) })}${leaves}</dl>
-      <p class="pubnote"><b>Public on both networks, and linked.</b> <span data-region="privacy">${html(vm.privacy)}</span> The bridge works with public balances only. Seeing them doesn't let anyone move your DUSK.</p>`,
+      <dl class="kvs" aria-label="Quote"><div class="kv"><dt class="k">Steps</dt><dd class="v">${html(vm.steps)}</dd></div>${quoteRows({ rows: vm.quote.rows.filter((row) => !["send", "receive", "arrives"].includes(row.key)) })}${leaves}</dl>
+      <p class="pubnote">${publicLine(vm.privacy)}</p>`,
   };
 }
 
@@ -230,7 +236,7 @@ export function reviewSheet(vm) {
     .map(
       (step, index) => `<section class="req${step.current ? "" : " wait"}" aria-labelledby="req-${index}">
       <h3 id="req-${index}"><span class="no">${index + 1}</span>${html(step.title)}<span class="tag">${html(step.when)}</span></h3>
-      <p>${step.what}</p>
+      ${step.what ? `<p>${step.what}</p>` : ""}
       ${step.custody ? `<p class="small t2">${html(step.custody)}</p>` : ""}
       <div class="wlh">${html(step.walletName)} will show</div>
       ${step.lines ? walletLines(step.lines, vm.cfgLinks) : `<p class="small t2">${html(step.linesNote ?? "Preparing…")}</p>`}
@@ -247,9 +253,9 @@ export function reviewSheet(vm) {
     ${checks}
     <dl class="group kvs">${quoteRows({ rows: vm.feeRows })}</dl>
     ${steps}
-    <p class="note">${icon("eye")}<span><b>Public.</b> ${html(vm.privacy)}</span></p>
+    <p class="note">${icon("eye")}<span>${publicLine(vm.privacy)}</span></p>
   </div>
-  <div class="sheet-foot">${vm.error ? `<p class="message error" role="alert">${html(vm.error)}</p>` : ""}<p class="hint">Check each line against ${html(vm.walletCheckName)} before you confirm.</p><div class="btn-pair"><button type="button" class="btn sec" data-action="close-sheet">Cancel</button><button type="button" class="btn pri" data-action="confirm" ${vm.canConfirm ? "" : "disabled"}>${html(vm.confirmLabel)}</button></div>${vm.after ? `<p class="small t2">${html(vm.after)}</p>` : ""}</div>`;
+  <div class="sheet-foot">${vm.error ? `<p class="message error" role="alert">${html(vm.error)}</p>` : ""}<p class="hint">Check each line against ${html(vm.walletCheckName)}.</p><div class="btn-pair"><button type="button" class="btn sec" data-action="close-sheet">Cancel</button><button type="button" class="btn pri" data-action="confirm" ${vm.canConfirm ? "" : "disabled"}>${html(vm.confirmLabel)}</button></div>${vm.after ? `<p class="small t2">${html(vm.after)}</p>` : ""}</div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -309,7 +315,7 @@ export function receiptPage(vm) {
       <section aria-labelledby="progress-h"><h2 class="gh" id="progress-h">Progress</h2><div class="group pad">${stepList(view.steps)}</div>${action}</section>
       ${notes}
       <div class="lk"><span>${icon("link")}Receipt link</span><code class="mono">${html(vm.url)}</code>${copyButton(vm.url, "receipt link")}</div>
-      <p class="small t2">Anyone with this link can see this transfer. It is public on both networks anyway.</p>
+      <p class="small t2">Anyone with the link can see this transfer.</p>
       <div class="bt"><a class="btn ${view.status === "completed" ? "pri" : "sec"}" href="#/">New transfer</a><a class="btn sec" href="#/transfers">My transfers</a></div>
     </div>
     <section class="rc-side" aria-labelledby="details-h"><h2 class="gh" id="details-h">Details</h2><dl class="kvs">${details}</dl></section>
@@ -348,11 +354,10 @@ export function transferRow(row, { canAct = true } = {}) {
  */
 function watchBlock(watch) {
   if (watch.following)
-    return `<p class="small t2 watching">Following ${html(watch.following)} on this device. Nothing can be sent from here. <button type="button" class="linkish" data-action="unwatch">Stop following</button></p>`;
+    return `<p class="small t2 watching">Following ${html(watch.following)}. <button type="button" class="linkish" data-action="unwatch">Stop following</button></p>`;
   return `<form class="group pad watch" data-form="watch">
       <label for="watch" class="l1">Follow a Dusk account</label>
-      <textarea id="watch" name="watch" class="mono-input wrap-input" rows="2" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="A Dusk account or .dusk name" aria-describedby="watch-help watch-error">${html(watch.input ?? "")}</textarea>
-      <p class="small t2" id="watch-help">Lists its bridge transfers here, without a wallet. Nothing can be sent from it.</p>
+      <textarea id="watch" name="watch" class="mono-input wrap-input" rows="2" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="A Dusk account or .dusk name" aria-describedby="watch-error">${html(watch.input ?? "")}</textarea>
       <p class="field-error" id="watch-error" role="alert">${html(watch.error ?? "")}</p>
       <button type="submit" class="btn sec sm" ${watch.busy ? "disabled" : ""}>${watch.busy ? "Looking…" : "Show its transfers"}</button>
     </form>`;
@@ -385,8 +390,7 @@ export function lookupPage(vm) {
     <div class="topbar"><a class="bk" href="#/transfers">${icon("back")}My transfers</a><h1 class="ti">Look up a transfer</h1></div>
     <form class="group pad" data-form="lookup">
       <label for="lookup" class="l1">Transaction hash</label>
-      <input id="lookup" name="lookup" class="mono-input" autocomplete="off" spellcheck="false" placeholder="The hash of the transaction you sent" value="${html(vm.query)}" aria-describedby="lookup-help lookup-error">
-      <p class="small t2" id="lookup-help">From Dusk, DuskEVM or the old-token chain: the transaction that started the transfer. The page finds its route.</p>
+      <input id="lookup" name="lookup" class="mono-input" autocomplete="off" spellcheck="false" placeholder="The hash of the transaction you sent" value="${html(vm.query)}" aria-describedby="lookup-error">
       <p class="field-error" id="lookup-error" role="alert">${html(vm.error ?? "")}</p>
       <button type="submit" class="btn pri full" ${vm.busy ? "disabled" : ""}>${vm.busy ? "Looking…" : "Find the transfer"}</button>
     </form>
@@ -414,7 +418,7 @@ export function contractsSheet(vm) {
     .join("");
   // What the page reads from, then the contracts and accounts of each route.
   const servers = vm.servers ? `<section class="cgroup"><h3 class="gt">Servers</h3><p class="card about-servers">${html(vm.servers)}</p></section>` : "";
-  return `<div class="sheet-head"><div><h2 id="sheet-title">About this page · ${html(vm.badge)}</h2><p class="sub">What it reads from, and the contracts each route uses. Check them against your wallet before you confirm.</p></div><button type="button" class="icon-btn round" data-action="close-sheet" aria-label="Close">${icon("close")}</button></div><div class="sheet-body">${servers}${groups}</div>`;
+  return `<div class="sheet-head"><div><h2 id="sheet-title">About this page · ${html(vm.badge)}</h2><p class="sub">Check these against your wallet before you confirm.</p></div><button type="button" class="icon-btn round" data-action="close-sheet" aria-label="Close">${icon("close")}</button></div><div class="sheet-body">${servers}${groups}</div>`;
 }
 
 export function networkSheet(vm) {
@@ -425,5 +429,5 @@ export function networkSheet(vm) {
     ? `Test DUSK only. ${vm.otherSite ? `Mainnet has its own bridge at ${html(vm.otherSite.replace(/^https?:\/\//u, "").replace(/\/$/u, ""))}.` : "Mainnet has its own bridge."}`
     : `Real DUSK. ${vm.otherSite ? `Testnet has its own bridge at ${html(vm.otherSite.replace(/^https?:\/\//u, "").replace(/\/$/u, ""))}.` : "Testnet has its own bridge."}`;
   return `<div class="sheet-head"><div><h2 id="sheet-title"><span class="net ${vm.isTestnet ? "test" : "main"} static"><span class="dot"></span>${html(vm.badge)}</span></h2><p class="sub">${line}</p></div><button type="button" class="icon-btn round" data-action="close-sheet" aria-label="Close">${icon("close")}</button></div>
-  <div class="sheet-body"><p class="small t2">Your EVM wallet should show these networks when it asks.</p><dl class="group kvs">${vm.networks.map((row) => `<div class="kv"><dt class="k">${html(row.label)}</dt><dd class="v ${row.muted ? "t2" : "mono"}">${html(row.value)}</dd></div>`).join("")}</dl>${other}</div>`;
+  <div class="sheet-body"><dl class="group kvs">${vm.networks.map((row) => `<div class="kv"><dt class="k">${html(row.label)}</dt><dd class="v ${row.muted ? "t2" : "mono"}">${html(row.value)}</dd></div>`).join("")}</dl>${other}</div>`;
 }

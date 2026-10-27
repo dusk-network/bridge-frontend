@@ -127,7 +127,7 @@ test("every page says the same time for the same route", () => {
   assert.deepEqual([withdrawal.card.split(" · ")[0], withdrawal.quote, withdrawal.receipt], ["~7 days", "~7 days", "Takes ~7 days"]);
   const view = transferView({ hash: "0x01", stage: "ready_to_prove", status: "pending" }, { cfg: testnet, route: byId(testnet, "dusk-evm-to-dusk"), timing: { chain: CHAIN } });
   assert.equal(view.steps[2].detail, "~7 days after the proof");
-  assert.match(actionLead("prove", {}, { maxLux: 1n, wait: view.time.wait }).line, /, ~7 days after the proof\.$/u);
+  assert.equal(actionLead("prove", {}, { maxLux: 1n, wait: view.time.wait }).line, "No DUSK moves now. Claim ~7 days after the proof.");
   // Unknown on this network: no time anywhere, and no Arrives line in the review.
   const unknown = pages(testnet, byId(testnet, "dusk-to-ethereum"), {});
   assert.deepEqual(unknown, { activity: "Sent Tue 27 Oct, 08:59 UTC", card: "1 DUSK bridge fee", quote: "", receipt: "" });

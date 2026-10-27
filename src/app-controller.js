@@ -197,7 +197,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   const accounts = () => [listedDusk(), evmAccount()].filter(Boolean);
 
   function transfersVm() {
-    return transfersModel(state.activity, { account: duskAccount(), accounts: accounts(), cfg, gasPrice: duskGasPrice(), routeOf, submitter: proofSubmitterFor(duskAccount()), timing: timing() });
+    return transfersModel(state.activity, { account: duskAccount(), accounts: accounts(), cfg, routeOf, submitter: proofSubmitterFor(duskAccount()), timing: timing() });
   }
 
   function headerVm() {
@@ -486,11 +486,11 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     if (route.signer === "dusk" && phoneOnly)
       notice = {
         actions: `<div class="btn-row"><button type="button" class="btn sec sm" data-copy="${html(globalThis.location?.href ?? "")}" aria-label="Copy this page's link">Copy link</button>${globalThis.navigator?.share ? '<button type="button" class="btn sec sm" data-action="share">Share link</button>' : ""}</div>`,
-        html: "This needs Dusk Wallet, the browser extension for computers. Open this page on your computer to send.",
+        html: "This needs Dusk Wallet on a computer.",
         icon: "laptop",
       };
     else if (route.mode === "duskevm-withdrawal" && phoneOnly)
-      notice = { html: "Step 1 works here. Prove and claim need Dusk Wallet on a computer later.", icon: "phone" };
+      notice = { html: "Step 1 works here. Prove and claim need Dusk Wallet on a computer.", icon: "phone" };
     const button = primaryButton({
       amountError: quote.error,
       amountLux: quote.amountLux,
@@ -513,7 +513,6 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       error: state.form.error,
       from: { balance, balanceLabel: route.signer === "dusk" ? "Public balance" : "Balance", net: netOf(route.from.id) },
       fromChoices: state.form.menu === "from" ? networkChoices("from", route) : [],
-      hint: !transfersVm().count && button.action === "review" ? "First time? Try a small amount first." : "",
       menu: state.form.menu,
       needsCount: transfersVm().needs,
       notice,
@@ -727,24 +726,21 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const more = Object.values(sources).some((source) => source?.covered && topGap(source.covered, source.target ?? 0));
     let syncText = "";
     if (discovery.running) syncText = "Reading the networks…";
-    else if (discovery.errors.length) syncText = "Some of the networks didn't answer just now. Showing what this device knows; it tries again on your next visit.";
-    else if (discovery.at) syncText = "Read from the networks just now.";
+    else if (discovery.errors.length) syncText = "Some networks didn't answer. It tries again on your next visit.";
     const groups = vm.groups;
     const empty = vm.count
       ? ""
       : who.length
         ? discovery.running
           ? "Looking for transfers…"
-          : "No bridge transfers found for these accounts yet."
-        : "Connect a wallet, or follow a Dusk account below, to see its transfers. Transfers you send or look up on this device show here too.";
+          : "No transfers yet."
+        : "Connect a wallet or follow a Dusk account to see its transfers.";
     return activityPanel({
       canAct: duskState().installed,
       empty,
       emptyActions: who.length ? "" : `<div class="btn-row">${duskState().installed ? '<button type="button" class="btn sec sm" data-action="connect-dusk">Connect Dusk Wallet</button>' : ""}<button type="button" class="btn sec sm" data-action="connect-evm">Connect EVM wallet</button></div>`,
       groups,
-      lede: who.length
-        ? `${who.join(" and ")}. Read from the networks, so the list is the same on any device. Transfers you followed here show too.`
-        : "Transfers you send or look up on this device.",
+      lede: who.length ? `${who.join(" and ")}.` : "",
       more: more && !discovery.running,
       syncText,
       // Without a connected Dusk account: follow one by its account or .dusk name.
@@ -928,11 +924,11 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         route.to.kind === "dusk" && duskAccount() && destination !== duskAccount()
           ? `This pays ${typedRecipient(route)?.name ?? short(destination)}${typedRecipient(route)?.name ? ` (${short(destination)})` : ""}, not ${duskName() ? `your ${duskName()}` : "your connected Dusk account"}.`
           : "",
-      privacy: `${privacyLine(route, cfg, {
+      privacy: privacyLine(route, cfg, {
         dusk: route.to.kind === "dusk" ? destination : duskAccount(),
         evm: route.to.kind === "dusk" ? evmAccount() : destination,
         name: duskPartyName(route.to.kind === "dusk" ? destination : duskAccount(), typedRecipient(route)),
-      })} Seeing them doesn't let anyone move your DUSK.`,
+      }),
       receive: {
         amount: formatLux(quote.receiveLux ?? lux),
         chain: route.to.id,
@@ -966,7 +962,6 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       if (needsApproval)
         steps.push({
           confirmLabel: `Approve ${amountText} old DUSK in ${walletName === "your EVM wallet" ? "your wallet" : walletName}`,
-          custody: "Nothing moves yet. The old DUSK stays in your wallet.",
           lines: approveLines({ amountLux: lux, cfg, fee: fee(migration.gas?.approve), network }),
           title: `Approve exactly ${amountText} old DUSK`,
           walletName,
@@ -975,11 +970,10 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         });
       steps.push({
         confirmLabel: `Migrate ${amountText} DUSK`,
-        custody: "The migration contract keeps the old DUSK locked: it has no function to send them out.",
         lines: migrateLines({ amountLux: lux, cfg, duskAccount: destination, fee: fee(migration.gas?.migrate), network }),
         title: "Migrate",
         walletName,
-        what: `Moves the ${html(amountText)} old DUSK into the contract. The bridge then pays <b>${html(amountText)} DUSK</b> to Dusk account <code class="mono">${html(short(destination))}</code> from its own Dusk account.`,
+        what: `Locks the old DUSK in the migration contract. The bridge then pays <b>${html(amountText)} DUSK</b> to <code class="mono">${html(short(destination))}</code> on Dusk.`,
         when: needsApproval ? "After step 1" : "Now",
       });
       reviews.start({
@@ -987,7 +981,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         after: needsApproval ? "Step 2 opens when the approval is confirmed." : "",
         current: 0,
         steps,
-        sub: `Old DUSK on ${from} to Dusk · ${walletName === "your EVM wallet" ? "your wallet" : walletName} asks you ${steps.length === 2 ? "twice" : "once"}`,
+        sub: `Old DUSK on ${from} to Dusk${steps.length === 2 ? ` · ${walletName === "your EVM wallet" ? "your wallet" : walletName} asks you twice` : ""}`,
       });
       openSheet("review", opener);
       return;
@@ -996,16 +990,14 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       const l2 = formReads.reads.l2 ?? {};
       reviews.start({
         ...base,
-        after: "Then prove and claim on Dusk with Dusk Wallet: My transfers says when.",
+        after: "Then prove and claim on Dusk, with Dusk Wallet.",
         current: 0,
         steps: [
           {
             confirmLabel: `Send ${amountText} DUSK in ${walletName === "your EVM wallet" ? "your wallet" : walletName}`,
-            custody: custodyFor(route, destination),
             lines: withdrawLines({ amountLux: lux, cfg, duskAccount: destination, fee: l2.gas && l2.gasPriceWei ? l2.gas * l2.gasPriceWei : null }),
             title: `Send on ${from}`,
             walletName,
-            what: `Starts the withdrawal of <b>${html(amountText)} DUSK</b> to Dusk account <code class="mono">${html(short(destination))}</code>.`,
             when: "Now",
           },
         ],
@@ -1021,19 +1013,19 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       steps: [
         {
           confirmLabel: route.mode === "duskevm-deposit" ? `Send ${amountText} DUSK to ${to}` : `Send ${amountText} DUSK`,
-          custody: custodyFor(route, destination),
           lines: null,
           linesNote: "Preparing the request…",
           title: "Send from Dusk",
           walletName: "Dusk Wallet",
+          // A payout goes through the bridge's own account: the wallet shows it as the recipient.
           what:
-            route.mode === "duskevm-deposit"
-              ? `Sends <b>${html(amountText)} DUSK</b> into the DuskEVM bridge, for <code class="mono">${html(short(destination))}</code> on ${html(to)}.`
-              : `Sends <b>${html(amountText)} DUSK</b> to the bridge account, with your ${html(to)} address as the memo.`,
+            route.mode === "service-transfer"
+              ? `Sends <b>${html(amountText)} DUSK</b> to the bridge account, with your ${html(to)} address as the memo. The bridge pays it out.`
+              : "",
           when: "Now",
         },
       ],
-      sub: `Dusk to ${to} · Dusk Wallet asks you once`,
+      sub: `Dusk to ${to}`,
     });
     openSheet("review", opener);
     await reviews.fill(
@@ -1075,13 +1067,6 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     if (state.sheet === "review" && reviews.current === review) renderSheet();
   }
 
-  function custodyFor(route, destination) {
-    if (route.mode === "duskevm-withdrawal")
-      return `Until it's claimed, the DUSK waits in the DuskEVM bridge contract on Dusk. A claim always pays ${short(destination)}.`;
-    if (route.mode === "duskevm-deposit") return "The DuskEVM bridge contract on Dusk holds the DUSK while it is on DuskEVM.";
-    return `The bridge account on Dusk keeps the DUSK you send, and pays out the amount minus its fee on ${networkName(cfg, route.to.id)}.`;
-  }
-
   async function openActionReview(id, kind, opener) {
     const entry = state.activity.find((item) => item.id === id);
     const route = entry && routeOf(entry.routeId);
@@ -1107,22 +1092,16 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       steps: [
         {
           confirmLabel: label,
-          custody:
-            kind === "prove"
-              ? "Only the account that proves can claim with that proof."
-              : `The claim releases the DUSK from the DuskEVM bridge contract to ${short(entry.destination ?? "the Dusk account in the withdrawal")}.`,
+          // Only the account that proved can claim with that proof.
+          custody: kind === "prove" ? "Only the account that proves can claim with that proof." : "",
           lines: null,
-          linesNote: "Preparing the request. This reads the withdrawal's proof from DuskEVM…",
+          linesNote: "Preparing the request…",
           title: kind === "prove" ? "Prove the withdrawal" : "Claim the DUSK",
           walletName: "Dusk Wallet",
-          what:
-            kind === "prove"
-              ? "Proves on Dusk that DuskEVM recorded this withdrawal."
-              : `Claims <b>${html(view.amountText)}</b> on Dusk. It arrives in <code class="mono">${html(short(entry.destination ?? ""))}</code>.`,
           when: "Now",
         },
       ],
-      sub: `${names["dusk-evm"]} to Dusk · ${kind === "prove" ? "step 2 of 3" : "step 3 of 3"} · Dusk Wallet asks you once`,
+      sub: `${names["dusk-evm"]} to Dusk · ${kind === "prove" ? "step 2 of 3" : "step 3 of 3"}`,
     });
     openSheet("review", opener);
     await reviews.fill(

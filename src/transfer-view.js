@@ -10,11 +10,9 @@ import {
   durationWords,
   formatDateTime,
   formatDusk,
-  formatMaxFee,
   formatShortDay,
 } from "./format.js";
 import { networkName } from "./names.js";
-import { withdrawalStepMax } from "./quote.js";
 import { aboutTime, lateAfterSeconds, routeTime } from "./route-times.js";
 import { STATUS_WORDS } from "./tracking.js";
 import { withdrawalActionFailure, withdrawalNextAction } from "./withdrawal-lifecycle.js";
@@ -72,18 +70,14 @@ export const switchToProver = (entry) =>
     : "Switch Dusk Wallet to the account that proved it. Only that account can claim.";
 
 /**
- * A proof by another account, in the list and on the receipt: whom the DUSK
- * still pays, by name of account, and that proving it yourself lets you
- * claim. `account` is the connected Dusk account, when there is one.
+ * A proof by another account, in the list and on the receipt: that proving it
+ * yourself lets you claim, and whom it pays where that's another account than
+ * the connected one (`account`).
  */
 export function provenByOtherLine(entry, account = "") {
   const pays = entry?.destination ?? "";
-  const payee = !pays
-    ? "the Dusk account in the withdrawal"
-    : pays === account
-      ? "your Dusk account"
-      : `${short(pays)}${account ? ", not your connected Dusk account" : ""}`;
-  return `Someone else proved it. The DUSK still pays ${payee}. Prove it yourself to claim it.`;
+  const payee = pays && pays !== account ? ` It pays ${short(pays)}${account ? ", not your connected Dusk account" : ""}.` : "";
+  return `Another account proved it.${payee} Prove it yourself to claim it.`;
 }
 
 const amountOf = (entry) =>
@@ -98,13 +92,9 @@ export function privacyLine(route, cfg, { dusk, evm, name = "" } = {}) {
   const evmText = evm ? short(evm) : "your EVM address";
   const from = networkName(cfg, route.from.id);
   const to = networkName(cfg, route.to.id);
-  if (route.mode === "migration")
-    return `${evmText}, the amount and the ${duskText} it pays are visible on ${from}, and the payout on Dusk names the ${from} transaction, so anyone can link them.`;
-  if (route.mode === "service-transfer")
-    return `Your ${duskText}, the amount and the ${to} address in the memo are visible on Dusk, and the payout on ${to} links to it.`;
-  if (route.mode === "duskevm-deposit")
-    return `Your ${duskText}, ${evmText} and the amount are visible on Dusk and DuskEVM, and linked to each other.`;
-  return `${evmText}, the ${duskText} it pays and the amount are visible on DuskEVM and Dusk, and linked to each other.`;
+  // From the sending side to the paid one, then the amount.
+  const parties = route.from.kind === "dusk" ? `your ${duskText}, ${evmText}` : `${evmText}, the ${duskText}`;
+  return `Public on ${from} and ${to}, and linked: ${parties} and the amount.`;
 }
 
 function step(key, title, state, extra = {}) {
@@ -124,18 +114,17 @@ function claimTiming(entry, now, time) {
 
 const REJECTED_PROOF = "The proof was rejected. Prove again once DuskEVM reports a new output.";
 
-function withdrawalSteps(entry, cfg, { account, gasPrice = 1n, now, time: usual, timeZone, year }) {
+function withdrawalSteps(entry, cfg, { account, now, time: usual, timeZone, year }) {
   const stage = entry.stage ?? "submitted";
   const time = (ms) => (ms ? formatDateTime(ms, { timeZone, year }) : "");
   // The current stage decides: a proof the Portal rejected leaves the
   // withdrawal ready to prove again, whatever proof times are kept.
   const proved = ["proven_waiting", "ready_to_finalize", "finalize_submitted", "finalized"].includes(stage);
   const claimed = stage === "finalized";
-  const stepMax = withdrawalStepMax({ gasPrice, withdrawalGas: entry.withdrawalGas ?? 0n });
   const sent = step("sent", `Sent on ${networkName(cfg, "dusk-evm")}`, entry.sourceAt ? "done" : "now", {
     at: entry.sourceAt ?? null,
     atText: time(entry.sourceAt),
-    detail: entry.sourceAt ? "" : "Waiting for DuskEVM to include it",
+    detail: entry.sourceAt ? "" : "Waiting for DuskEVM",
     hash: entry.hash,
     network: "dusk-evm",
   });
@@ -154,7 +143,7 @@ function withdrawalSteps(entry, cfg, { account, gasPrice = 1n, now, time: usual,
         ? "Proof sent, waiting for Dusk"
         : entry.provenByOther
           ? provenByOtherLine(entry, account)
-          : `Ready now · network fee up to ${formatMaxFee(stepMax)} DUSK`,
+          : "Ready now",
       hash: entry.pendingHash ?? null,
       network: "dusk",
     });
@@ -171,7 +160,6 @@ function withdrawalSteps(entry, cfg, { account, gasPrice = 1n, now, time: usual,
     claim = step("claim", "Claimed on Dusk", "done", {
       at: entry.claimAt ?? null,
       atText: time(entry.claimAt),
-      detail: entry.destination ? `The DUSK arrived in ${short(entry.destination)}` : "",
       hash: entry.claimHash ?? null,
       network: "dusk",
     });
@@ -209,7 +197,6 @@ function sourceSteps(entry, route, cfg, { timeZone, year }) {
   if (route.mode !== "migration")
     steps.push(
       step("sent", `Sent from ${from}`, "done", {
-        detail: entry.sentHere ? "Signed in Dusk Wallet" : "",
         hash: entry.hash,
         network: "dusk",
       }),
@@ -218,7 +205,7 @@ function sourceSteps(entry, route, cfg, { timeZone, year }) {
     step("confirmed", route.mode === "migration" ? `Migration confirmed on ${from}` : `Confirmed on ${from}`, confirmed ? "done" : failed ? "failed" : "now", {
       at: entry.sourceAt ?? null,
       atText: time(entry.sourceAt),
-      detail: confirmed ? `Confirmed by the ${from} network` : failed ? entry.note ?? "" : `Waiting for ${from}`,
+      detail: confirmed ? "" : failed ? entry.note ?? "" : `Waiting for ${from}`,
       hash: route.mode === "migration" ? entry.hash : null,
       network: route.mode === "migration" ? route.from.id : null,
     }),
@@ -229,7 +216,6 @@ function sourceSteps(entry, route, cfg, { timeZone, year }) {
     step("arrived", arrived ? `${verb} ${to}` : route.mode === "duskevm-deposit" ? `Arriving on ${to}` : `Paying out on ${to}`, arrived ? "done" : failed ? "todo" : confirmed ? "now" : "todo", {
       at: entry.destinationAt ?? null,
       atText: time(entry.destinationAt),
-      detail: entry.destination && !failed ? `To ${short(entry.destination)}` : "",
       hash: entry.destinationHash ?? null,
       network: route.to.kind === "dusk" ? "dusk" : route.to.id,
     }),
@@ -269,17 +255,16 @@ function titleFor(entry, route, cfg, amount) {
  * @param {string} [options.timeZone] for tests; the viewer's own otherwise
  * @param {boolean} [options.year] dates as records: with the year
  * @param {string|null} [options.submitter] Dusk Wallet's account, as the Portal knows provers
- * @param {bigint} [options.gasPrice] the node's gas price, for the most a step can cost
  * @param {string} [options.account] the connected Dusk account
  * @param {object} [options.timing] what `routeTime` reads the route's time from
  */
-export function transferView(entry, { account = "", cfg, gasPrice = 1n, now = Date.now(), route, submitter = null, timeZone, timing, year = false }) {
+export function transferView(entry, { account = "", cfg, now = Date.now(), route, submitter = null, timeZone, timing, year = false }) {
   const status = entry.status === "completed" || entry.status === "failed" ? entry.status : "pending";
   const amount = amountOf(entry);
   const withdrawal = route.mode === "duskevm-withdrawal";
   // How long the route takes on this network, as every page says it.
   const time = routeTime(route, cfg, { ...timing, now });
-  const options = { account, gasPrice, now, time, timeZone, year };
+  const options = { account, now, time, timeZone, year };
   const steps = (withdrawal ? withdrawalSteps(entry, cfg, options) : sourceSteps({ ...entry, status }, route, cfg, options)).map(
     (item) => ({ ...item, href: item.hash && item.network ? explorerTxUrl(cfg, item.network, item.hash) : null }),
   );

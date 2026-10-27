@@ -130,7 +130,7 @@ export function buildQuote(route, amount, ctx) {
     }
     if (!quote.error && lux !== null) {
       if (bridgeFee && lux <= bridgeFee)
-        quote.error = `Send more than the ${formatDusk(bridgeFee)} bridge fee. Nothing is paid out otherwise.`;
+        quote.error = `Send more than the ${formatDusk(bridgeFee)} bridge fee.`;
       else if (quote.maxLux !== null && lux > quote.maxLux) {
         quote.insufficient = true;
         quote.error = `That's more than you have after the network fee. You can send up to ${formatDusk(quote.maxLux)}.`;

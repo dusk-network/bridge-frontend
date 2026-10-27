@@ -163,7 +163,7 @@ test("a withdrawal proven only by another account still needs the user's own pro
   assert.match(PROVED_BY_ANOTHER_ACCOUNT, /^Another account proved this withdrawal\. Your DUSK isn't affected,/u);
   const view = transferView({ hash: TX, provenByOther: true, stage: "ready_to_prove", status: "pending" }, { cfg, route });
   assert.equal(proveStep(view).detail, provenByOtherLine({}));
-  assert.match(proveStep(view).detail, /^Someone else proved it\. The DUSK still pays the Dusk account in the withdrawal\./u);
+  assert.equal(proveStep(view).detail, "Another account proved it. Prove it yourself to claim it.");
   assert.equal(proveStep(view).state, "turn");
   assert.equal(view.action.kind, "prove");
 
@@ -200,7 +200,7 @@ test("another account's rejected or blacklisted proof leaves a plain ready to pr
     assert.equal(status.stage, "ready_to_prove");
     assert.equal(status.provenByOther, false);
     const view = transferView({ hash: TX, provenByOther: false, stage: "ready_to_prove", status: "pending" }, { cfg, route });
-    assert.doesNotMatch(proveStep(view).detail, /Someone else proved it/u);
+    assert.doesNotMatch(proveStep(view).detail, /Another account proved it/u);
   }
 });
 

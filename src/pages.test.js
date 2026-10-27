@@ -48,7 +48,7 @@ function cardVmFor(patch = {}) {
     menu: null,
     needsCount: 1,
     notice: null,
-    privacy: "Your Dusk account wallet-both.dusk (21n5nc…fMMLNz), 0xd63b…8df4 and the amount are visible on Dusk and DuskEVM, and linked to each other.",
+    privacy: "Public on Dusk and DuskEVM, and linked: your Dusk account wallet-both.dusk (21n5nc…fMMLNz), 0xd63b…8df4 and the amount.",
     quote: buildQuote(T["duskevm-deposit"], "25", { balance: 174_003_700_000n, cfg: testnet, gasPrice: 1n }),
     receive: "25",
     receiveUnit: "DUSK",
@@ -400,7 +400,9 @@ test("the card reads as a bridge: From, a flip, To, the route, then one button",
   assert.match(page, /<p class="recip">to your MetaMask <b class="mono">0xd63b…8df4<\/b> · <button type="button" class="linkish" data-action="recipient-edit">Change<\/button><\/p>/u);
   // The route row, one line until it's opened: steps, fees, what's public.
   assert.match(page, /<summary>.*<span>~1 min · fee up to 0\.005 DUSK<\/span>/u);
-  assert.match(page, /<b>Public on both networks, and linked\.<\/b> <span data-region="privacy">Your Dusk account wallet-both\.dusk/u);
+  assert.match(page, /<p class="pubnote"><b>Public on Dusk and DuskEVM, and linked:<\/b> your Dusk account wallet-both\.dusk \(21n5nc…fMMLNz\), 0xd63b…8df4 and the amount\.<\/p>/u);
+  // The time is the route row's, not a second line in it.
+  assert.doesNotMatch(cardRegions(vm).route, />Arrives</u);
   assert.match(page, /Activity<span class="cnt" aria-label="1 need you">1<\/span>/u);
   // No way back: the flip can't be pressed. Dusk Wallet missing: the button is its link.
   assert.match(cardPage(cardVmFor({ canFlip: false })), /data-action="flip" aria-label="Swap From and To" disabled/u);
@@ -442,14 +444,14 @@ test("a proof's review says it moves no DUSK and what it costs; a claim, where t
   assert.deepEqual(prove, {
     amount: "0.051",
     label: "Proving costs up to",
-    line: "No DUSK moves now. The 1,008 DUSK stays in the DuskEVM bridge until it's claimed, ~7 days after the proof.",
-    notYours: "This withdrawal pays 25z9o6…5Etftt, not your alice.dusk. Proving it doesn't change that.",
+    line: "No DUSK moves now. Claim ~7 days after the proof.",
+    notYours: "This withdrawal pays 25z9o6…5Etftt, not your alice.dusk.",
   });
   const claim = actionLead("finalize", { destination: ACCOUNT }, { account: ACCOUNT, amountLux, maxLux: 51_000_000n });
   assert.deepEqual(claim, { amount: "1,008", chain: "dusk", label: "You claim", line: "To 21n5nc…fMMLNz on Dusk · costs up to 0.051 DUSK", notYours: "" });
   assert.equal(
     actionLead("finalize", other, { account: ACCOUNT, amountLux, maxLux: 1n }).notYours,
-    "This withdrawal pays 25z9o6…5Etftt, not your connected Dusk account. The claim sends the DUSK there.",
+    "This withdrawal pays 25z9o6…5Etftt, not your connected Dusk account.",
   );
 
   const sheet = reviewSheet({
@@ -496,10 +498,10 @@ test("the footer names who runs each route only where that's configured", () => 
 test("a proof's review says the account that proves becomes public too", () => {
   assert.equal(
     actionPrivacy("prove", "The amount is public.", { account: ACCOUNT, name: "alice.dusk" }),
-    "The amount is public. Your Dusk account alice.dusk will be visible too, as the account that proved it.",
+    "The amount is public. So is your Dusk account alice.dusk, as the one that proves it.",
   );
-  assert.match(actionPrivacy("finalize", "x", { account: ACCOUNT }), /Your Dusk account 21n5nc…fMMLNz will be visible too, as the account that claimed it\.$/u);
-  assert.match(actionPrivacy("prove", "x"), /Your Dusk account will be visible too/u);
+  assert.match(actionPrivacy("finalize", "x", { account: ACCOUNT }), / So is your Dusk account 21n5nc…fMMLNz, as the one that claims it\.$/u);
+  assert.match(actionPrivacy("prove", "x"), / So is your Dusk account, as the one that proves it\.$/u);
 });
 
 test("a withdrawal claimed outside this browser reads as claimed", () => {
@@ -554,7 +556,7 @@ test("My transfers can follow a Dusk account without a wallet, and stop", () => 
   assert.match(form, /placeholder="A Dusk account or \.dusk name"/u);
   assert.match(page({ busy: false, error: "bob.dusk isn't an active .dusk name.", following: "", input: "bob.dusk" }), /role="alert">bob\.dusk isn&#039;t an active \.dusk name\.<\/p>/u);
   const following = page({ following: "alice.dusk" });
-  assert.match(following, /Following alice\.dusk on this device\. Nothing can be sent from here\. <button type="button" class="linkish" data-action="unwatch">Stop following<\/button>/u);
+  assert.match(following, /Following alice\.dusk\. <button type="button" class="linkish" data-action="unwatch">Stop following<\/button>/u);
   assert.doesNotMatch(following, /data-form="watch"/u);
   // With Dusk Wallet connected, there's nothing to follow.
   assert.doesNotMatch(page(null), /Follow a Dusk account|Following/u);
@@ -576,10 +578,28 @@ test("the card, its quote, the review, the receipt and the transfer quote one fe
   assert.equal(form.rows.find((row) => row.key === "fee-dusk").value, "up to 0.102 DUSK a step");
   // Once it exists, with its own gas: the card, the receipt, and the review's request.
   const entry = { amountLux: "1000000000", hash: `0x${"0c".repeat(32)}`, id: "w", routeId: route.id, sourceAt: Date.UTC(2026, 9, 1), stage: "ready_to_prove", status: "pending", withdrawalGas: withdrawalGas.toString() };
-  assert.equal(transferView(entry, { cfg: testnet, gasPrice, route }).steps[1].detail, "Ready now · network fee up to 0.102 DUSK");
   assert.equal(receiptModel(entry, { cfg: testnet, gasPrice, route, url: "https://bridge.example/#/transfer/w" }).actionFee, "Network fee up to 0.102 DUSK, from your public balance");
   const request = withdrawalGasLimit(withdrawalGas) * gasPrice;
   assert.equal(request, withdrawalStepMax({ gasPrice, withdrawalGas }));
   assert.equal(actionLead("prove", entry, { maxLux: request }).amount, "0.102");
   assert.match(actionLead("finalize", entry, { maxLux: request }).line, /costs up to 0\.102 DUSK$/u);
+});
+
+test("the pages say what's public and what to do, without explaining what they already show", () => {
+  const route = T["duskevm-deposit"];
+  const entry = { amountLux: "25000000000", destination: EVM, hash: "38".repeat(32), id: "x", routeId: route.id, sender: ACCOUNT, sourceAt: Date.UTC(2026, 9, 26, 9, 31), status: "pending" };
+  const receipt = receiptPage({ ...receiptModel(entry, { cfg: testnet, now: entry.sourceAt + 60_000, route, url: "https://bridge.example/#/transfer/x" }), canAct: true });
+  const review = reviewSheet({ canConfirm: true, cfgLinks: explorer, checks: [], confirmLabel: "Send", feeRows: [], privacy: cardVmFor().privacy, receive: { amount: "25", chain: "dusk-evm", unit: "DUSK", where: "DuskEVM" }, send: { amount: "25", chain: "dusk", unit: "DUSK", where: "Dusk" }, steps: [{ current: true, lines: [], title: "Send from Dusk", walletName: "Dusk Wallet", what: "", when: "Now" }], sub: "Dusk to DuskEVM", walletCheckName: "Dusk Wallet" });
+  const card = cardPage(cardVmFor({ routeOpen: true }));
+  const about = contractsSheet({ badge: "Testnet", groups: contractGroups(testnet), servers: serversLine(testnet) });
+  for (const page of [receipt, review, card, about]) {
+    // Reassurance and lines that repeat the page are gone.
+    assert.doesNotMatch(page, /doesn't let anyone move|public balances only|You can close this page|public on both networks anyway|Keep the receipt link|holds the DUSK while|safety window|First time\?|What it reads from/u);
+  }
+  // What's public, what to check, and what sharing shows stay, once each.
+  assert.equal(review.match(/Public on Dusk and DuskEVM, and linked:/gu)?.length, 1);
+  assert.match(review, /Check each line against Dusk Wallet\./u);
+  assert.equal(receipt.match(/Anyone with the link can see this transfer\./gu)?.length, 1);
+  // The deposit's step says nothing the hero, the caption or the details don't.
+  assert.deepEqual(receiptModel(entry, { cfg: testnet, now: entry.sourceAt + 60_000, route, url: "x" }).view.steps.map((step) => step.detail), ["", "", ""]);
 });

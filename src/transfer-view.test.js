@@ -60,7 +60,7 @@ test("a deposit shows Pending with its steps, then Completed with both transacti
   ]);
   assert.equal(pending.steps[0].href, `https://apps.testnet.dusk.network/explorer/transactions/transaction?id=${DUSK_HASH}`);
   assert.equal(pending.steps[1].atText, "Mon 26 Oct, 10:31 CET");
-  assert.equal(pending.steps[2].detail, "To 0x3E5B…a11d");
+  assert.equal(pending.steps[2].detail, "");
   assert.equal(pending.late, false);
 
   const done = transferView(
@@ -105,9 +105,8 @@ test("a withdrawal shows its three steps, their times and the next action", () =
     ["Claim on Dusk", "todo"],
   ]);
   assert.equal(ready.steps[0].atText, "Fri 23 Oct, 16:20 CEST");
-  assert.equal(ready.steps[1].detail, "Ready now · network fee up to 0.051 DUSK");
-  // At the node's price, as the quote and the review figure it.
-  assert.equal(transferView({ ...ready.entry ?? {}, hash: L2_HASH, id: "w", sourceAt: sentAt, stage: "ready_to_prove", status: "pending" }, { cfg, gasPrice: 2n, route: withdrawal }).steps[1].detail, "Ready now · network fee up to 0.102 DUSK");
+  // Its fee is the receipt's, next to the Prove button.
+  assert.equal(ready.steps[1].detail, "Ready now");
   assert.equal(ready.steps[2].detail, "~7 days after the proof");
   // Before it can be proved: from when it can, two outputs after it was sent.
   const sent = transferView({ hash: L2_HASH, sourceAt: sentAt, stage: "waiting_for_output", status: "pending" }, { cfg, route: withdrawal, timeZone: AMS, timing });
@@ -123,14 +122,14 @@ test("a withdrawal shows its three steps, their times and the next action", () =
 
   // Proven only by another account: the user still proves, and is told why.
   const other = transferView({ hash: L2_HASH, provenByOther: true, sourceAt: sentAt, stage: "ready_to_prove", status: "pending" }, { cfg, route: withdrawal });
-  assert.equal(other.steps[1].detail, "Someone else proved it. The DUSK still pays the Dusk account in the withdrawal. Prove it yourself to claim it.");
-  // Whom it still pays, by account: the list and the review say the same.
+  assert.equal(other.steps[1].detail, "Another account proved it. Prove it yourself to claim it.");
+  // Whom it pays where that's another account: the list and the review say the same.
   const paying = (destination, account) =>
     transferView({ destination, hash: L2_HASH, provenByOther: true, sourceAt: sentAt, stage: "ready_to_prove", status: "pending" }, { account, cfg, route: withdrawal }).steps[1].detail;
-  assert.equal(paying(ACCOUNT, ACCOUNT), "Someone else proved it. The DUSK still pays your Dusk account. Prove it yourself to claim it.");
+  assert.equal(paying(ACCOUNT, ACCOUNT), "Another account proved it. Prove it yourself to claim it.");
   const stranger = `25z9o6${"x".repeat(40)}5Etftt`;
-  assert.equal(paying(stranger, ACCOUNT), "Someone else proved it. The DUSK still pays 25z9o6…5Etftt, not your connected Dusk account. Prove it yourself to claim it.");
-  assert.equal(paying(stranger, ""), "Someone else proved it. The DUSK still pays 25z9o6…5Etftt. Prove it yourself to claim it.");
+  assert.equal(paying(stranger, ACCOUNT), "Another account proved it. It pays 25z9o6…5Etftt, not your connected Dusk account. Prove it yourself to claim it.");
+  assert.equal(paying(stranger, ""), "Another account proved it. It pays 25z9o6…5Etftt. Prove it yourself to claim it.");
   assert.equal(other.action.kind, "prove");
   assert.equal(other.tracker[1].label, "Proven by another");
 
@@ -199,13 +198,18 @@ test("what becomes public names the accounts themselves, not a label", () => {
   // By its .dusk name too, as the wallet's window says it.
   assert.equal(
     privacyLine(deposit, cfg, { dusk: ACCOUNT, evm: EVM, name: "alice.dusk" }),
-    "Your Dusk account alice.dusk (21n5nc…fMMLNz), 0x3E5B…a11d and the amount are visible on Dusk and DuskEVM, and linked to each other.",
+    "Public on Dusk and DuskEVM, and linked: your Dusk account alice.dusk (21n5nc…fMMLNz), 0x3E5B…a11d and the amount.",
   );
   assert.equal(
     privacyLine(deposit, cfg, { dusk: ACCOUNT, evm: EVM }),
-    "Your Dusk account 21n5nc…fMMLNz, 0x3E5B…a11d and the amount are visible on Dusk and DuskEVM, and linked to each other.",
+    "Public on Dusk and DuskEVM, and linked: your Dusk account 21n5nc…fMMLNz, 0x3E5B…a11d and the amount.",
   );
-  assert.match(privacyLine(migration, cfg, { dusk: ACCOUNT, evm: EVM }), /^0x3E5B…a11d, the amount and the Dusk account 21n5nc…fMMLNz it pays are visible on Ethereum \(Sepolia\)/u);
+  // From the sending side to the paid one, on both networks.
+  assert.equal(
+    privacyLine(migration, cfg, { dusk: ACCOUNT, evm: EVM }),
+    "Public on Ethereum (Sepolia) and Dusk, and linked: 0x3E5B…a11d, the Dusk account 21n5nc…fMMLNz and the amount.",
+  );
+  assert.equal(privacyLine(service, cfg, {}), "Public on Dusk and Ethereum (Sepolia), and linked: your Dusk account, your EVM address and the amount.");
 });
 
 test("wallet errors say what happened, naming the wallet", () => {
