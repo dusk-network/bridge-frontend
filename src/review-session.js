@@ -47,3 +47,20 @@ export function createReviewSession() {
     },
   });
 }
+
+/**
+ * What a sent proof or claim records: the account its review was for, which
+ * signed it, never whichever account Dusk Wallet shows by the time it's sent.
+ * `submitterOf` turns a Dusk account into the address the Portal knows it by.
+ */
+export function sentActionPatch(review, hash, submitterOf) {
+  const account = review?.signer?.account ?? "";
+  return {
+    actionError: null,
+    pendingAction: review.kind,
+    pendingHash: hash,
+    proofAccount: account || undefined,
+    proofSubmitter: account ? submitterOf(account) : undefined,
+    stage: review.kind === "prove" ? "prove_submitted" : "finalize_submitted",
+  };
+}

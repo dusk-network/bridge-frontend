@@ -4,12 +4,12 @@
 // Chain state comes from the deployment's own node and RPCs; the wallets
 // are asked only for accounts, signatures and sends.
 
-import { entryId, readActivity, recordActivity, saveActivity, updateActivity } from "./activity.js";
+import { entryId, readActivity, recordActivity, saveActivity, updateActivity, useActivityNetwork } from "./activity.js";
 import { bridgeRoutes, getBridgeRoute } from "./bridge-routes.js";
 import { claimReminder } from "./calendar.js";
 import { config } from "./config.js";
 import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
-import { mergeTransfer, mergeTransfers, partyKey } from "./discovery.js";
+import { followAfterDiscovery, mergeTransfer, mergeTransfers, partyKey } from "./discovery.js";
 import { createDiscoveryRuns } from "./discovery-runs.js";
 import { depositRequest, submitDuskEvmDeposit } from "./dusk-deposit.js";
 import { topGap } from "./dusk-history.js";
@@ -41,7 +41,7 @@ import { createLookupFlow } from "./lookup-flow.js";
 import { createReceiptLookups } from "./receipt-lookups.js";
 import { checkDuskRecipient, checkEvmRecipient, isDuskName } from "./recipient.js";
 import { readWatched, saveWatched, watchTarget } from "./watched-account.js";
-import { createReviewSession, sameSigner } from "./review-session.js";
+import { createReviewSession, sameSigner, sentActionPatch } from "./review-session.js";
 import { createScheduler, takenByAnother } from "./tracking.js";
 import { friendlyWalletError, html, privacyLine, proverMismatch, short, switchToProver, transferView } from "./transfer-view.js";
 import {
@@ -79,6 +79,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   const names = networkNames(cfg);
   const tasks = bridgeTasks(cfg, routes);
   const routeOf = (id) => routes.find((route) => route.id === id) ?? getBridgeRoute(id);
+  // This network's transfers only, whatever else this site served before.
+  useActivityNetwork(cfg.profile);
   const state = {
     activity: readActivity(),
     dusk: null,
@@ -652,7 +654,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       // New or unfinished transfers are followed, a little apart.
       let delay = 0;
       for (const entry of state.activity)
-        if (entry.status === "pending" && (!known.has(entry.id) || !tracked.has(entry.id))) {
+        if (followAfterDiscovery(entry, { known, tracked })) {
           track(entry.id, { delay });
           delay += 250;
         }
@@ -1099,22 +1101,29 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     await reviews.fill(
       review,
       async () => {
-        await ensureDuskConnected(cfg.dusk.chainId);
+        const { account } = await ensureDuskConnected(cfg.dusk.chainId);
+        // From here the review is for this account: a switch while it's
+        // prepared leaves it stale, and the request reads this account's proof.
+        review.signer = { account, wallet: "dusk" };
+        const submitter = proofSubmitterFor(account);
         // Only the account that proved can claim with its proof.
-        if (kind === "finalize" && proverMismatch(entry, proofSubmitterFor(duskAccount()))) throw new Error(switchToProver(entry));
-        const prepared = kind === "prove" ? await services.withdrawals.prepareProve(entry.hash) : await services.withdrawals.prepareFinalize(entry.hash);
+        if (kind === "finalize" && proverMismatch(entry, submitter)) throw new Error(switchToProver(entry));
+        const prepared =
+          kind === "prove"
+            ? await services.withdrawals.prepareProve(entry.hash, { proofSubmitter: submitter })
+            : await services.withdrawals.prepareFinalize(entry.hash, { proofSubmitter: submitter });
         const request = await services.portalRequest(prepared);
         // What the call carries, as Dusk Wallet reads it from the call.
         const details = prepared.withdrawal ? withdrawalDetails(prepared.withdrawal) : null;
         const lines = await duskCallLines({
           ...request,
           chainId: cfg.dusk.chainId,
-          from: duskAccount(),
-          fromName: duskName(),
+          from: account,
+          fromName: account === duskAccount() ? duskName() : "",
           note: "The DuskEVM withdrawal portal on Dusk.",
           withdrawal: details && { ...details, value: prepared.withdrawal.value },
         });
-        return { account: duskAccount(), lines, request };
+        return { account, lines, request };
       },
       ({ account, lines, request }) => {
         // Prepared for the account Dusk Wallet had then: only it can confirm,
@@ -1147,16 +1156,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       if (review.kind === "prove" || review.kind === "finalize") {
         const { hash } = await sendDuskContractCall(review.request, { account: review.signer?.account });
         const entry = state.activity.find((item) => item.id === review.entryId);
-        setActivity(
-          updateActivity(review.entryId, {
-            actionError: null,
-            pendingAction: review.kind,
-            pendingHash: hash,
-            proofAccount: duskAccount(),
-            proofSubmitter: proofSubmitterFor(duskAccount()),
-            stage: review.kind === "prove" ? "prove_submitted" : "finalize_submitted",
-          }),
-        );
+        // Recorded for the account the review was for, which signed it.
+        setActivity(updateActivity(review.entryId, sentActionPatch(review, hash, proofSubmitterFor)));
         review.busy = false;
         closeSheet();
         track(review.entryId);

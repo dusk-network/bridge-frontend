@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { entryId, findActivity, readActivity, recordActivity, saveActivity, updateActivity } from "./activity.js";
+import { entryId, findActivity, readActivity, recordActivity, saveActivity, updateActivity, useActivityNetwork } from "./activity.js";
 
 const storage = (initial = {}) => {
   const values = new Map(Object.entries(initial));
@@ -90,4 +90,26 @@ test("a full list keeps the newest transfers, not the first ones it was given", 
   assert.equal(kept[0].id, "dusk-to-dusk-evm:found");
   assert.ok(!kept.some((item) => item.sourceAt === 1_000_000), "the oldest goes");
   assert.deepEqual(readActivity(store).map((item) => item.id), kept.map((item) => item.id));
+});
+
+test("each network keeps its own transfers, on a site that served the other too", () => {
+  const store = storage();
+  try {
+    useActivityNetwork("mainnet");
+    recordActivity({ hash: HASH, routeId: "ethereum-to-dusk" }, store);
+    useActivityNetwork("testnet");
+    assert.deepEqual(readActivity(store), []);
+    recordActivity({ hash: `0x${"cd".repeat(32)}`, routeId: "ethereum-to-dusk" }, store);
+    useActivityNetwork("mainnet");
+    assert.deepEqual(readActivity(store).map((item) => item.hash), [HASH]);
+
+    // The list from before goes to the first network that opens, and only to it.
+    const before = storage({ "dusk-bridge:activity:v2": JSON.stringify([{ hash: HASH, id: entryId("ethereum-to-dusk", HASH), routeId: "ethereum-to-dusk" }]) });
+    useActivityNetwork("testnet");
+    assert.equal(readActivity(before).length, 1);
+    useActivityNetwork("mainnet");
+    assert.equal(readActivity(before).length, 0);
+  } finally {
+    useActivityNetwork("");
+  }
 });

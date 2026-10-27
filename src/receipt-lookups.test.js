@@ -51,3 +51,12 @@ test("a receipt opened again looks again, and a closed one stops trying", async 
   await settle();
   assert.equal(calls.length, 2);
 });
+
+test("a lookup that answers after its receipt closed is dropped", async () => {
+  const { close, found, lookups } = setup([{ hash: "h", routeId: "ethereum-to-dusk" }, { hash: "h", routeId: "ethereum-to-dusk" }]);
+  const running = lookups.open("h");
+  close();
+  await running;
+  assert.deepEqual(found, []);
+  assert.equal(lookups.get("h"), null);
+});

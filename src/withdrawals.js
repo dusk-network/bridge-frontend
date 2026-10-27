@@ -825,10 +825,16 @@ export function createWithdrawals(deps) {
     return { limit: limit.toString(), price: (await deps.gasPrice()).toString() };
   }
 
-  /** The proof call for a withdrawal, ready to review and send, with the withdrawal it carries. */
-  async function prepareProve(txHash) {
+  /**
+   * The proof call for a withdrawal, ready to review and send, with the
+   * withdrawal it carries. `proofSubmitter` is the account the review is
+   * for, read once when it opens; Dusk Wallet's current one otherwise.
+   */
+  async function prepareProve(txHash, { proofSubmitter } = {}) {
     const event = parseWithdrawalReceipt(await fetchL2Receipt(txHash));
-    const submitter = deps.proofSubmitter();
+    // A withdrawal whose claim couldn't be sent isn't proved either.
+    withdrawalGasLimit(event.withdrawal.gasLimit, deps.gasUpper);
+    const submitter = proofSubmitter ?? deps.proofSubmitter();
     const snapshot = await readSnapshot(event.withdrawalHash, submitter);
     // A proof this account already has, or one a claimed withdrawal no longer
     // needs, isn't sent again: it would cost its fee for nothing. Only a
@@ -860,9 +866,9 @@ export function createWithdrawals(deps) {
   }
 
   /** The claim call for a withdrawal that is ready, to review and send, with the withdrawal it carries. */
-  async function prepareFinalize(txHash) {
+  async function prepareFinalize(txHash, { proofSubmitter } = {}) {
     const status = await loadWithdrawalStatus(txHash, {
-      proofSubmitter: deps.proofSubmitter(),
+      proofSubmitter: proofSubmitter ?? deps.proofSubmitter(),
     });
     if (status.stage !== "ready_to_finalize")
       throw new Error(finalizationNotReadyMessage(status));

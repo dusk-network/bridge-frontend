@@ -450,3 +450,21 @@ test("a proof this account already has isn't prepared again", async () => {
   // Not proven yet: it goes on to look for the output to prove against.
   await assert.rejects(setup({ provenAt: 0n }).withdrawals.prepareProve(TX), /No dispute games have been proposed yet/u);
 });
+
+test("a withdrawal whose claim would need more gas than the bound isn't proved", async () => {
+  // Not proven yet: the refusal comes before the proof is looked for.
+  const { sent, withdrawals } = setup({ gasUpper: 50_000_000n, provenAt: 0n });
+  await assert.rejects(withdrawals.prepareProve(TX), { message: WITHDRAWAL_GAS_REFUSAL });
+  assert.deepEqual(sent, []);
+});
+
+test("a proof or claim is prepared for the account its review is for", async () => {
+  const other = `0x${"3d".repeat(20)}`;
+  const asked = (portal) => [...new Set(portal.call.provenWithdrawals.calls.map(([[, who]]) => `0x${Buffer.from(who).toString("hex")}`))];
+  const claim = setup();
+  await claim.withdrawals.prepareFinalize(TX, { proofSubmitter: other }).catch(() => {});
+  assert.deepEqual(asked(claim.portal), [other]);
+  const proof = setup({ provenAt: 0n });
+  await proof.withdrawals.prepareProve(TX, { proofSubmitter: other }).catch(() => {});
+  assert.deepEqual(asked(proof.portal), [other]);
+});

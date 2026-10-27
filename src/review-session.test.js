@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createReviewSession, sameSigner } from "./review-session.js";
+import { createReviewSession, sameSigner, sentActionPatch } from "./review-session.js";
 
 test("a request prepared for a closed review never fills the next one, even on the same route", async () => {
   const reviews = createReviewSession();
@@ -53,4 +53,18 @@ test("a review can be confirmed only by the account it was opened for", () => {
   assert.equal(sameSigner(evm, "0xabc1"), false);
   // Still preparing: no account was shown yet.
   assert.equal(sameSigner({ signer: null }, "0xabc1"), true);
+});
+
+test("a sent proof records the account its review was for, not the one connected by then", () => {
+  const review = { kind: "prove", signer: { account: "A", wallet: "dusk" } };
+  const patch = sentActionPatch(review, "aa".repeat(32), (account) => `submitter of ${account}`);
+  assert.deepEqual(patch, {
+    actionError: null,
+    pendingAction: "prove",
+    pendingHash: "aa".repeat(32),
+    proofAccount: "A",
+    proofSubmitter: "submitter of A",
+    stage: "prove_submitted",
+  });
+  assert.equal(sentActionPatch({ kind: "finalize", signer: { account: "A" } }, "h", () => "x").stage, "finalize_submitted");
 });

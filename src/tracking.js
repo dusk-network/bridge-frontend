@@ -534,7 +534,16 @@ export function createTracking(deps) {
       String(call.contractId).toLowerCase() !== config.duskEvm.l1StandardBridgeContractId
     )
       return failed("This transaction isn't a DuskEVM deposit.", { sourceAt });
-    const args = decodeDepositArgs(call.data);
+    let args;
+    try {
+      args = decodeDepositArgs(call.data);
+    } catch {
+      // Arguments that don't read as a deposit's never put DUSK in the bridge.
+      return failed(
+        tx.error ? "The Dusk transaction failed, so the deposit didn't enter the bridge." : "This transaction isn't a DuskEVM deposit.",
+        { feeLux: duskFeePaid(tx), sender: tx.json?.sender, sourceAt },
+      );
+    }
     const patch = {
       amountLux: args.amountLux.toString(),
       destination: args.to,
@@ -571,10 +580,6 @@ export function createTracking(deps) {
 
   async function settlePendingAction(entry, status) {
     if (!entry.pendingAction || !entry.pendingHash) return { status };
-    const done =
-      entry.pendingAction === "finalize"
-        ? status.stage === "finalized"
-        : !["ready_to_prove", "submitted", "waiting_for_output"].includes(status.stage);
     let tx = null;
     try {
       tx = await node.transaction(entry.pendingHash);
@@ -582,6 +587,19 @@ export function createTracking(deps) {
       tx = null;
     }
     const at = tx?.blockTimestamp ? Number(tx.blockTimestamp) * 1_000 : null;
+    // A proof the Portal took, from this transaction's time or later, and
+    // then rejected with a newer output to prove against: the withdrawal is
+    // ready to prove again, and this proof is settled.
+    const replaceable =
+      entry.pendingAction === "prove" &&
+      status.stage === "ready_to_prove" &&
+      at !== null &&
+      !tx?.error &&
+      Number(status.provenAt ?? 0) * 1_000 >= at;
+    const done =
+      entry.pendingAction === "finalize"
+        ? status.stage === "finalized"
+        : replaceable || !["ready_to_prove", "submitted", "waiting_for_output"].includes(status.stage);
     const sent = entry.pendingAction === "prove"
       ? { proveAt: at, proveFeeLux: duskFeePaid(tx), proveHash: entry.pendingHash }
       : { claimAt: at, claimFeeLux: duskFeePaid(tx), claimHash: entry.pendingHash };

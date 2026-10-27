@@ -30,6 +30,12 @@ export function createReceiptLookups({ isOpen, onChange, onFound, resolve, retri
     } catch {
       answered = false;
     }
+    // Closed meanwhile: what it found isn't acted on, and opening it again looks again.
+    if (!isOpen(hash)) {
+      lookups.delete(hash);
+      onChange(hash);
+      return;
+    }
     if (found?.routeId) {
       lookups.delete(hash);
       onFound(found, hash);

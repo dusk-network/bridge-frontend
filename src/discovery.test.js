@@ -9,6 +9,7 @@ import { MAINNET_BSC_BRIDGE_ACCOUNT, TESTNET_REGGIO_BRIDGE_ACCOUNT } from "./con
 import {
   createDiscovery,
   entryFromHistory,
+  followAfterDiscovery,
   groupTransfers,
   mergeTransfer,
   mergeTransfers,
@@ -407,4 +408,16 @@ test("discovery keeps each account's progress per network and asks again only fo
   assert.equal(again.entries.length, 1);
   // Its time was kept: one details lookup in all.
   assert.equal(details, 1);
+});
+
+test("a migration first found by its payout is checked once, to fill in its start", () => {
+  const known = new Set(["old"]);
+  const tracked = new Set(["old"]);
+  const follow = (entry) => followAfterDiscovery(entry, { known, tracked });
+  assert.equal(follow({ id: "new", status: "completed" }), true);
+  assert.equal(follow({ id: "new", sourceAt: 1, status: "completed" }), false);
+  assert.equal(follow({ id: "old", status: "completed" }), false);
+  assert.equal(follow({ id: "new", status: "pending" }), true);
+  assert.equal(follow({ id: "old", status: "pending" }), false);
+  assert.equal(follow({ id: "new", status: "failed" }), false);
 });
