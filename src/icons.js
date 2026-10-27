@@ -1,7 +1,7 @@
-// Stroke icons on a 24px grid and monochrome chain marks: Dusk is a filled
-// circle with the glyph, DuskEVM the same glyph in an outlined rounded
-// square, Ethereum a diamond, BNB Smart Chain a rotated square. Icons are
-// decoration: every control that shows one also has a text label.
+// Stroke icons on a 24px grid, and monochrome chain marks: Dusk is its glyph
+// on a round tile, DuskEVM the same with an "EVM" tag, Ethereum its two-part
+// diamond and BNB Smart Chain its centre square between two chevrons. Icons
+// are decoration: every control that shows one also has a text label.
 
 const PATHS = {
   back: ['<path d="M19 12H5"/>', '<path d="M11 6l-6 6 6 6"/>'],
@@ -10,6 +10,7 @@ const PATHS = {
   check: ['<path d="M5 12.5l4.5 4.5L19 7.5"/>'],
   "chev-d": ['<path d="M6 9.5l6 6 6-6"/>'],
   "chev-r": ['<path d="M9.5 6l6 6-6 6"/>'],
+  "arrow-r": ['<path d="M5 12h14"/>', '<path d="M13 6l6 6-6 6"/>'],
   close: ['<path d="M6 6l12 12"/>', '<path d="M18 6L6 18"/>'],
   copy: ['<rect x="9" y="9" width="11" height="11" rx="2"/>', '<path d="M9 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v3"/>'],
   doc: ['<path d="M7 3.5h7l4.5 4.5v11.5a1.5 1.5 0 0 1-1.5 1.5H7a1.5 1.5 0 0 1-1.5-1.5V5A1.5 1.5 0 0 1 7 3.5Z"/>', '<path d="M14 3.5V8h4.5"/>', '<path d="M9 13h6"/>', '<path d="M9 16.5h6"/>'],
@@ -27,9 +28,16 @@ const PATHS = {
   wallet: ['<rect x="3.5" y="6" width="17" height="13" rx="2.5"/>', '<path d="M3.5 9.5h17"/>', '<path d="M16 14h1.5"/>', '<path d="M6 6l9-2.5 1 2.5"/>'],
 };
 
-const CHAIN_PATHS = {
-  bsc: ['<path d="M12 3.2 20.8 12 12 20.8 3.2 12Z"/>', '<path d="M12 8.6 15.4 12 12 15.4 8.6 12Z"/>'],
-  ethereum: ['<path d="M12 2.8 5.6 12.4 12 16l6.4-3.6Z"/>', '<path d="M5.6 13.9 12 21.2l6.4-7.3L12 17.5Z"/>'],
+// Filled, in the text colour: the chains' own shapes, without their colours.
+const CHAIN_MARKS = {
+  bsc: [
+    '<path d="M12 9.4 14.6 12 12 14.6 9.4 12Z"/>',
+    '<path d="M12 2.8 17.2 8l-1.6 1.6L12 6 8.4 9.6 6.8 8Z"/>',
+    '<path d="M12 21.2 6.8 16l1.6-1.6L12 18l3.6-3.6 1.6 1.6Z"/>',
+    '<path d="M4.4 10.4 6 12l-1.6 1.6L2.8 12Z"/>',
+    '<path d="M19.6 10.4 21.2 12l-1.6 1.6L18 12Z"/>',
+  ],
+  ethereum: ['<path d="M12 1.8 5.4 12.6 12 16.5l6.6-3.9Z"/>', '<path opacity=".55" d="M5.4 13.9 12 22.2l6.6-8.3L12 17.8Z"/>'],
 };
 
 export const GLYPH =
@@ -42,11 +50,11 @@ export const icon = (name, className = "") =>
 export function chainMark(network, size = "") {
   const inner =
     network === "dusk" || network === "dusk-evm"
-      ? GLYPH
-      : `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${(CHAIN_PATHS[network] ?? []).join("")}</svg>`;
+      ? `${GLYPH}${network === "dusk-evm" ? '<span class="evm-tag">EVM</span>' : ""}`
+      : `<svg class="mk-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${(CHAIN_MARKS[network] ?? []).join("")}</svg>`;
   return `<span class="cm${network === "dusk-evm" ? " evm" : ""}${size ? ` ${size}` : ""}" aria-hidden="true">${inner}</span>`;
 }
 
-/** From and to, side by side. */
+/** A route: where from, an arrow, where to. */
 export const pairMark = (from, to) =>
-  `<span class="pair" aria-hidden="true">${chainMark(from)}${icon("chev-r", "pa")}${chainMark(to)}</span>`;
+  `<span class="pair" aria-hidden="true">${chainMark(from)}${icon("arrow-r", "pa")}${chainMark(to)}</span>`;

@@ -9,6 +9,7 @@ import { actionLead, actionPrivacy, availableLine, landingTasks, pricedReview, r
 import { buildQuote } from "./quote.js";
 import { contractsSheet, footer, formPage, formRegions, header, landing, networkSheet, receiptPage, reviewSheet, transfersPage, walletLines } from "./views.js";
 import { encodeDepositArgs } from "./dusk-deposit.js";
+import { chainMark, pairMark } from "./icons.js";
 import { approveLines, duskCallLines, duskTransferLines, middle, migrateLines, walletFee } from "./wallet-lines.js";
 
 const DUSKEVM = {
@@ -381,8 +382,12 @@ test("the form labels its amount and says what is public", () => {
   });
   assert.match(html, /<label for="amount" class="amount-label">Amount<\/label>/u);
   assert.match(html, /First time\? Try a small amount first\./u);
-  assert.match(html, /Leaves your Dusk account: <span class="num">up to 25\.005 DUSK<\/span>/u);
-  assert.match(html, /<b>Public\.<\/b>/u);
+  // The summary beside the form: its rows, what leaves the account, and the
+  // button in the same card; what's public in one line, the rest folded.
+  assert.match(html, /<dt class="k">Leaves your Dusk account<\/dt><dd class="v"><span class="num">up to 25\.005 DUSK<\/span><\/dd>/u);
+  assert.match(html, /<div class="fp-side">\s*<section class="sum" aria-labelledby="sum-t"><h2 class="sum-t" id="sum-t">Summary<\/h2>/u);
+  assert.match(html, /<details class="pub"><summary>.*<span>Public on both networks, and linked<\/span><\/summary><p><span data-region="privacy">Your Dusk account/u);
+  assert.ok(html.indexOf('data-action="review"') > html.indexOf('class="sum"'));
   assert.ok(!html.includes(TIMES));
 });
 
@@ -539,13 +544,17 @@ test("the wallet cards say which account is connected", () => {
   assert.match(landing({ canShare: false, dusk: { account: ACCOUNT, state: "connected" }, evm: { state: "connect" }, pageUrl: "", phone: false, tasks: [] }), /Connected · <span class="who">21n5nc…fMMLNz<\/span>/u);
 });
 
-test("the footer names, in one line, the servers the page reads from", async () => {
+test("About this page names, in one line, the servers the page reads from", async () => {
   const line = serversLine(testnet);
   assert.equal(
     line,
     "This page reads from testnet.nodes.dusk.network (the Dusk node and its archive), rpc.testnet.evm.dusk.network (DuskEVM), ethereum-sepolia-rpc.publicnode.com (Ethereum (Sepolia)) and testnet.dusk.domains (for .dusk names).",
   );
-  assert.match(footer({ links: {}, officialSite: "", servers: line }), /<p class="small t2 servers">This page reads from testnet\.nodes\.dusk\.network/u);
+  // In the About sheet the footer opens, with the contracts.
+  assert.match(footer({ links: {}, officialSite: "" }), /<button type="button" class="linkish" data-action="open-about" aria-haspopup="dialog">About this page<\/button>/u);
+  const sheet = contractsSheet({ badge: "Testnet", groups: contractGroups(testnet), servers: line });
+  assert.match(sheet, /<h3 class="gt">Servers<\/h3><p class="card about-servers">This page reads from testnet\.nodes\.dusk\.network/u);
+  assert.ok(sheet.indexOf("Servers") < sheet.indexOf("Bridge contract on Dusk"));
   // The names' host is the one each release fetches its lens driver from.
   const { default: releases } = await import("./dusk-domains-releases.js");
   for (const release of Object.values(releases)) assert.ok(serversLine({ ...testnet, dusk: { ...testnet.dusk, chainId: release.chainId } }).includes(`${new URL(release.artifactBaseUrl).host} (for .dusk names)`));
@@ -562,4 +571,10 @@ test("My transfers can follow a Dusk account without a wallet, and stop", () => 
   assert.doesNotMatch(following, /data-form="watch"/u);
   // With Dusk Wallet connected, there's nothing to follow.
   assert.doesNotMatch(page(null), /Follow a Dusk account|Following/u);
+});
+
+test("a route is two marks with an arrow, and DuskEVM is told apart from Dusk", () => {
+  assert.match(pairMark("dusk", "dusk-evm"), /^<span class="pair" aria-hidden="true"><span class="cm" aria-hidden="true">.*<\/span><svg class="ic pa"[^>]*><path d="M5 12h14"\/>.*<span class="cm evm" aria-hidden="true">.*<span class="evm-tag">EVM<\/span><\/span><\/span>$/u);
+  assert.doesNotMatch(chainMark("dusk"), /evm-tag/u);
+  for (const chain of ["ethereum", "bsc"]) assert.match(chainMark(chain), /<svg class="mk-svg" viewBox="0 0 24 24"[^>]*><path /u, chain);
 });

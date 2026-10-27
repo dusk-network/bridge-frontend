@@ -128,14 +128,11 @@ export function buildQuote(route, amount, ctx) {
       else if (quote.maxLux !== null && lux > quote.maxLux)
         quote.error = `That's more than you have after the network fee. You can send up to ${formatDusk(quote.maxLux)}.`;
     }
+    // One line a row; a fee the route doesn't have isn't listed.
     rows.push(
       { key: "send", label: "You send", value: shown(lux) },
-      { key: "fee", label: "Network fee", ...feeText(fee), detail: `${feeText(fee).detail} · on ${from}, paid by you` },
-      {
-        key: "bridge",
-        label: "Bridge fee",
-        value: bridgeFee ? `${formatDusk(bridgeFee)}, taken from the amount` : "None",
-      },
+      { key: "fee", label: "Network fee", ...feeText(fee) },
+      ...(bridgeFee ? [{ key: "bridge", label: "Bridge fee", value: `${formatDusk(bridgeFee)}, from the amount` }] : []),
       {
         key: "receive",
         label: "You receive",
@@ -171,12 +168,11 @@ export function buildQuote(route, amount, ctx) {
     rows.push(
       { key: "send", label: "You send", value: lux === null ? "—" : `${formatLux(lux)} old DUSK` },
       {
-        detail: `${steps === 2 ? "two wallet steps" : "one wallet step"} · on ${from}, paid by you in ${coin}`,
+        detail: steps === 2 ? "two wallet steps" : "one wallet step",
         key: "fee",
         label: "Network fee",
         value: evmFee === null ? `paid in ${coin}` : aboutFee(evmFee, 18, coin),
       },
-      { key: "bridge", label: "Bridge fee", value: "None" },
       { key: "receive", label: "You receive", strong: true, value: lux === null ? "—" : `${formatDusk(lux)} on ${to}` },
       { key: "arrives", label: "Arrives", value: arrivalText(route, cfg) },
     );
@@ -203,18 +199,16 @@ export function buildQuote(route, amount, ctx) {
   rows.push(
     { key: "send", label: "You send", value: lux === null ? "—" : `${formatDusk(lux)} on ${from}` },
     {
-      detail: `step 1 · on ${from}, paid by you`,
       key: "fee",
-      label: "Network fee",
+      label: `Fee on ${from}`,
       value: l2Fee === null ? "paid in DUSK" : aboutFee(l2Fee, 18, "DUSK"),
     },
     {
-      detail: `${feeText(fees.prove).detail} each · prove and claim on ${to}, paid by you`,
+      detail: "to prove, then to claim",
       key: "fee-dusk",
-      label: "Then, on Dusk",
-      value: `up to ${formatMaxFee(fees.claim.maxLux)} DUSK per step`,
+      label: `Then on ${to}`,
+      value: `up to ${formatMaxFee(fees.claim.maxLux)} DUSK a step`,
     },
-    { key: "bridge", label: "Bridge fee", value: "None" },
     { key: "receive", label: "You receive", strong: true, value: lux === null ? "—" : `${formatDusk(lux)} on ${to}` },
     { key: "arrives", label: "Arrives", value: arrivalText(route, cfg) },
   );

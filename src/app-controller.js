@@ -136,7 +136,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   // Layout: slots that render on their own, so typing is never interrupted.
   // -------------------------------------------------------------------------
 
-  root.innerHTML = `<button type="button" class="skip" data-action="skip">Skip to content</button><div data-slot="strip"></div><div data-slot="header"></div><div class="page" data-slot="main"></div><div data-slot="footer"></div><dialog class="sheet" data-slot="sheet" aria-labelledby="sheet-title"></dialog><div class="sr-only" aria-live="polite" data-slot="live"></div>`;
+  root.innerHTML = `<button type="button" class="skip" data-action="skip">Skip to content</button><div data-slot="strip"></div><div data-slot="header"></div><div class="page-slot" data-slot="main"></div><div data-slot="footer"></div><dialog class="sheet" data-slot="sheet" aria-labelledby="sheet-title"></dialog><div class="sr-only" aria-live="polite" data-slot="live"></div>`;
   const slot = (name) => root.querySelector(`[data-slot="${name}"]`);
   const dialog = slot("sheet");
   let sheetOpener = null;
@@ -216,7 +216,6 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         cfg.service && cfg.operators.service ? { name: cfg.operators.service, route: `Dusk to ${networkName(cfg, cfg.service.network)}` } : null,
         cfg.duskEvm.enabled && cfg.operators.duskEvm ? { name: cfg.operators.duskEvm, route: "DuskEVM" } : null,
       ].filter(Boolean),
-      servers: serversLine(cfg),
     });
   }
 
@@ -811,7 +810,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   function renderSheet() {
     if (state.sheet === "contracts") {
       dialog.className = "sheet wide";
-      dialog.innerHTML = contractsSheet({ badge: names.badge, groups: contractGroups(cfg) });
+      dialog.innerHTML = contractsSheet({ badge: names.badge, groups: contractGroups(cfg), servers: serversLine(cfg) });
     } else if (state.sheet === "network") {
       const other = cfg.profile === "testnet" ? "mainnet" : "testnet";
       dialog.className = "sheet narrow";
@@ -1446,6 +1445,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         refreshForm();
         loadGasSoon();
       },
+      "open-about": () => openSheet("contracts", target),
       "open-contracts": () => openSheet("contracts", target),
       "open-network": () => openSheet("network", target),
       "recipient-edit": () => {
