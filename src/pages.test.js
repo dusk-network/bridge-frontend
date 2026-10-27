@@ -6,7 +6,9 @@ import { loadConfig } from "./config.js";
 import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
 import { bridgeTasks } from "./names.js";
 import { actionLead, actionPrivacy, availableLine, landingTasks, pricedReview, receiptModel, reviewChecks, transfersModel } from "./page-models.js";
-import { buildQuote } from "./quote.js";
+import { buildQuote, withdrawalStepMax } from "./quote.js";
+import { withdrawalGasLimit } from "./gas.js";
+import { transferView } from "./transfer-view.js";
 import { contractsSheet, footer, formPage, formRegions, header, landing, networkSheet, receiptPage, reviewSheet, transfersPage, walletLines } from "./views.js";
 import { encodeDepositArgs } from "./dusk-deposit.js";
 import { chainMark, pairMark } from "./icons.js";
@@ -43,7 +45,7 @@ test("the start page gives each task its time and cost, and on phones whether it
       ["Move old DUSK to Dusk", "About an hour · two wallet steps · a network fee in ETH", "Works on this phone"],
       ["Move DUSK to DuskEVM", "Usually arrives within a minute · network fee up to 0.005 DUSK", "Needs a computer"],
       // A claim's limit is 50M plus the withdrawal's own gas, so the most a step costs is above 0.05.
-      ["Move DUSK from DuskEVM to Dusk", "Three steps over about 7 days · up to 0.051 DUSK per step on Dusk", "Step 1 works here. Prove and claim need a computer."],
+      ["Move DUSK from DuskEVM to Dusk", "Three steps over about 7 days · up to 0.051 DUSK a step on Dusk", "Step 1 works here. Prove and claim need a computer."],
       ["Send DUSK to Ethereum (Sepolia)", "Usually within an hour · 1 DUSK bridge fee, taken from the amount", "Needs a computer"],
     ],
   );
@@ -577,4 +579,23 @@ test("a route is two marks with an arrow, and DuskEVM is told apart from Dusk", 
   assert.match(pairMark("dusk", "dusk-evm"), /^<span class="pair" aria-hidden="true"><span class="cm" aria-hidden="true">.*<\/span><svg class="ic pa"[^>]*><path d="M5 12h14"\/>.*<span class="cm evm" aria-hidden="true">.*<span class="evm-tag">EVM<\/span><\/span><\/span>$/u);
   assert.doesNotMatch(chainMark("dusk"), /evm-tag/u);
   for (const chain of ["ethereum", "bsc"]) assert.match(chainMark(chain), /<svg class="mk-svg" viewBox="0 0 24 24"[^>]*><path /u, chain);
+});
+
+test("the start page, the form, the review, the receipt and the card quote one fee a step", () => {
+  const gasPrice = 2n;
+  const route = T["duskevm-withdrawal"];
+  const withdrawalGas = 519_542n;
+  // Before the withdrawal exists: the start page and the form.
+  const start = landingTasks(testnet, bridgeTasks(testnet, buildRoutes(testnet)), { gasPrice }).find((task) => task.id === "from-duskevm");
+  assert.match(start.meta, /· up to 0\.102 DUSK a step on Dusk$/u);
+  const form = buildQuote(route, "1", { balance: null, cfg: testnet, gasPrice });
+  assert.equal(form.rows.find((row) => row.key === "fee-dusk").value, "up to 0.102 DUSK a step");
+  // Once it exists, with its own gas: the card, the receipt, and the review's request.
+  const entry = { amountLux: "1000000000", hash: `0x${"0c".repeat(32)}`, id: "w", routeId: route.id, sourceAt: Date.UTC(2026, 9, 1), stage: "ready_to_prove", status: "pending", withdrawalGas: withdrawalGas.toString() };
+  assert.equal(transferView(entry, { cfg: testnet, gasPrice, route }).steps[1].detail, "Ready now · network fee up to 0.102 DUSK");
+  assert.equal(receiptModel(entry, { cfg: testnet, gasPrice, route, url: "https://bridge.example/#/transfer/w" }).actionFee, "Network fee up to 0.102 DUSK, from your public balance");
+  const request = withdrawalGasLimit(withdrawalGas) * gasPrice;
+  assert.equal(request, withdrawalStepMax({ gasPrice, withdrawalGas }));
+  assert.equal(actionLead("prove", entry, { maxLux: request }).amount, "0.102");
+  assert.match(actionLead("finalize", entry, { maxLux: request }).line, /costs up to 0\.102 DUSK$/u);
 });

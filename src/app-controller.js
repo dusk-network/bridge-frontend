@@ -34,7 +34,7 @@ import {
   transfersModel,
 } from "./page-models.js";
 import { canonicalHash, parseLocation, receiptUrl, transferHref } from "./permalink.js";
-import { buildQuote, parseAmount, routeDuskFees } from "./quote.js";
+import { buildQuote, parseAmount, withdrawalStepMax } from "./quote.js";
 import { serviceTransferRequest, submitServiceTransfer } from "./service-transfer.js";
 import { createServices, proofSubmitterFor } from "./services.js";
 import { createLookupFlow } from "./lookup-flow.js";
@@ -131,6 +131,12 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   const formReads = createFormReads({ onChange: () => refreshFormAndHeader(), services });
   // One gas price for every "up to" fee on the page: the node's, as last read.
   const duskGasPrice = () => formReads.reads.gasPrice ?? 1n;
+  /** Reads the gas price again, and shows the page again where it moved. */
+  function refreshPrice() {
+    return formReads.price().then((moved) => {
+      if (moved && state.page.page !== "move") renderMain();
+    });
+  }
   // The review on screen; a request prepared for it fills nothing else.
   const reviews = createReviewSession();
 
@@ -1035,7 +1041,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
             destination,
             duskAccount: duskAccount(),
             evm: state.evmState,
-            gasPrice: BigInt(request.gas.price),
+            gasPrice: formReads.usePrice(BigInt(request.gas.price)),
             reads: formReads.reads,
           }),
         );
@@ -1061,7 +1067,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const view = transferView(entry, { cfg, route });
     const label = kind === "prove" ? "Prove on Dusk" : "Claim on Dusk";
     // What this step costs at most: an estimate until the request is ready.
-    const fees = routeDuskFees(route, { gasPrice: duskGasPrice(), withdrawalGas: entry.withdrawalGas ? BigInt(entry.withdrawalGas) : 0n });
+    const stepMax = withdrawalStepMax({ gasPrice: duskGasPrice(), withdrawalGas: entry.withdrawalGas ? BigInt(entry.withdrawalGas) : 0n });
     const lead = (maxLux) => actionLead(kind, entry, { account: duskAccount(), amountLux: view.amount, maxLux, name: duskName() });
     const review = reviews.start({
       amountLux: entry.amountLux,
@@ -1072,7 +1078,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       feeRows: [],
       kind,
       late: "",
-      lead: lead((kind === "prove" ? fees.prove : fees.claim).maxLux),
+      lead: lead(stepMax),
       privacy: actionPrivacy(kind, privacyLine(route, cfg, { dusk: entry.destination, evm: entry.sender, name: duskPartyName(entry.destination) }), { account: duskAccount(), name: duskName() }),
       receive: { amount: view.amount === null ? "" : formatLux(view.amount), chain: "dusk", unit: "DUSK", where: `Dusk · ${short(entry.destination ?? "")}` },
       routeId: route.id,
@@ -1132,6 +1138,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         review.privacy = actionPrivacy(kind, privacyLine(route, cfg, { dusk: entry.destination, evm: entry.sender, name: duskPartyName(entry.destination) }), { account, name: duskName() });
         review.request = request;
         review.lead = lead(BigInt(request.gas.limit) * BigInt(request.gas.price));
+        formReads.usePrice(BigInt(request.gas.price));
         review.steps[0] = { ...review.steps[0], lines };
       },
       (error) => {
@@ -1292,6 +1299,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     }
     if (next.page === "transfer") void openReceipt(next.hash);
     if (next.page === "transfers") void discover();
+    // Pages that show a fee read the node's gas price again, so they quote
+    // what the form and the wallet will.
+    if (next.page !== "move") void refreshPrice();
     if (next.page === "lookup") {
       lookupFlow.cancel();
       state.lookup = { busy: false, error: "", query: next.query ?? state.lookup.query ?? "" };
@@ -1555,7 +1565,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       globalThis.document?.addEventListener("visibilitychange", refreshDusk);
       if (state.page.page === "move") void loadReads();
       // The gas price every "up to" fee is figured at, on any page.
-      else void formReads.price().then((moved) => moved && state.page.page !== "move" && renderMain());
+      else void refreshPrice();
       void discover();
       render();
     },

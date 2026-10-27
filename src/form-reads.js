@@ -67,6 +67,12 @@ export function createFormReads({ services, onChange = () => {} }) {
     }
   }
 
+  /** A gas price read elsewhere, as a review's request: the latest, for every page. */
+  function usePrice(price) {
+    reads.gasPrice = price;
+    return price;
+  }
+
   /** Gas estimates for the amount and recipient as they are now. */
   async function estimate({ evm, gas = {}, route }) {
     if (!evm) return;
@@ -102,5 +108,5 @@ export function createFormReads({ services, onChange = () => {} }) {
     for (const key of keys) reads[key] = null;
   }
 
-  return Object.freeze({ estimate, load, price, reads, reset });
+  return Object.freeze({ estimate, load, price, reads, reset, usePrice });
 }

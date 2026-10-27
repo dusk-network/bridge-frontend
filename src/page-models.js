@@ -7,7 +7,7 @@ import { groupTransfers, shownFor } from "./discovery.js";
 import { aboutFee, formatDateTime, formatDusk, formatFee, formatLux, formatMaxFee, formatUnitsGrouped } from "./format.js";
 import { gasCoin, networkName, networkNames, routeTitle } from "./names.js";
 import { transferHref } from "./permalink.js";
-import { arrivalText, buildQuote, routeDuskFees } from "./quote.js";
+import { arrivalText, buildQuote, routeDuskFees, stepFeeText, withdrawalStepMax } from "./quote.js";
 import {
   custodyLine,
   explorerTxUrl,
@@ -48,7 +48,7 @@ export function landingTasks(cfg, tasks, { duskInstalled = false, gasPrice = 1n,
       meta = `Usually arrives within a minute · network fee up to ${formatMaxFee(fees("duskevm-deposit").send.maxLux)} DUSK`;
       phoneTag = { ok: false, text: "Needs a computer" };
     } else if (route.mode === "duskevm-withdrawal") {
-      meta = `Three steps over about ${roughDuration(WITHDRAWAL_REPORT_SECONDS + WITHDRAWAL_WAITING_PERIOD_SECONDS)} · up to ${formatMaxFee(fees("duskevm-withdrawal").claim.maxLux)} DUSK per step on Dusk`;
+      meta = `Three steps over about ${roughDuration(WITHDRAWAL_REPORT_SECONDS + WITHDRAWAL_WAITING_PERIOD_SECONDS)} · ${stepFeeText({ gasPrice })} on Dusk`;
       phoneTag = { ok: true, text: "Step 1 works here. Prove and claim need a computer." };
     } else {
       meta = `Usually within ${roughDuration(cfg.service?.delaySeconds ?? 3_600)} · ${formatDusk(cfg.service.feeLux)} bridge fee, taken from the amount`;
@@ -307,12 +307,9 @@ export function receiptModel(entry, { cfg, gasPrice = 1n, now = Date.now(), own 
   if (view.status === "pending" && early) notes.push({ html: view.late ? `<b>${html(view.lateText)}</b> ${lateLine(route, cfg)}` : lateLine(route, cfg) });
   if (view.trackingError) notes.push({ html: html(view.trackingError) });
 
-  const fees =
-    route.mode === "duskevm-withdrawal"
-      ? routeDuskFees(route, { gasPrice, withdrawalGas: entry.withdrawalGas ? BigInt(entry.withdrawalGas) : 0n })
-      : null;
+  const stepMax = withdrawalStepMax({ gasPrice, withdrawalGas: entry.withdrawalGas ? BigInt(entry.withdrawalGas) : 0n });
   return {
-    actionFee: view.action ? `Network fee up to ${formatMaxFee((view.action.kind === "prove" ? fees.prove : fees.claim).maxLux)} DUSK, from your public balance` : "",
+    actionFee: view.action ? `Network fee up to ${formatMaxFee(stepMax)} DUSK, from your public balance` : "",
     caption,
     details,
     fromTo: `From ${fromAccount} to ${toAccount}`,

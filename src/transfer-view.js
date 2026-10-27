@@ -13,7 +13,7 @@ import {
   formatShortDay,
 } from "./format.js";
 import { networkName } from "./names.js";
-import { routeDuskFees } from "./quote.js";
+import { withdrawalStepMax } from "./quote.js";
 import { STATUS_WORDS } from "./tracking.js";
 import {
   WITHDRAWAL_REPORT_SECONDS,
@@ -153,7 +153,7 @@ function withdrawalSteps(entry, cfg, { account, gasPrice = 1n, now, timeZone, ye
   // withdrawal ready to prove again, whatever proof times are kept.
   const proved = ["proven_waiting", "ready_to_finalize", "finalize_submitted", "finalized"].includes(stage);
   const claimed = stage === "finalized";
-  const fees = routeDuskFees({ mode: "duskevm-withdrawal" }, { gasPrice, withdrawalGas: entry.withdrawalGas ?? 0n });
+  const stepMax = withdrawalStepMax({ gasPrice, withdrawalGas: entry.withdrawalGas ?? 0n });
   const sent = step("sent", `Sent on ${networkName(cfg, "dusk-evm")}`, entry.sourceAt ? "done" : "now", {
     at: entry.sourceAt ?? null,
     atText: time(entry.sourceAt),
@@ -176,7 +176,7 @@ function withdrawalSteps(entry, cfg, { account, gasPrice = 1n, now, timeZone, ye
         ? "Proof sent, waiting for Dusk"
         : entry.provenByOther
           ? provenByOtherLine(entry, account)
-          : `Ready now · network fee up to ${formatMaxFee(fees.prove.maxLux)} DUSK`,
+          : `Ready now · network fee up to ${formatMaxFee(stepMax)} DUSK`,
       hash: entry.pendingHash ?? null,
       network: "dusk",
     });

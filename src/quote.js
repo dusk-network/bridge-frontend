@@ -80,6 +80,19 @@ export function routeDuskFees(route, { gasPrice = 1n, withdrawalGas = 0n } = {})
   return {};
 }
 
+/**
+ * The most one Dusk step of a withdrawal can cost, its proof or its claim:
+ * the one figure the start page, the quote, the review, the receipt and the
+ * card all show. The inputs are the node's gas price and, once known, the
+ * withdrawal's own gas.
+ */
+export function withdrawalStepMax({ gasPrice = 1n, withdrawalGas = 0n } = {}) {
+  return routeDuskFees({ mode: "duskevm-withdrawal" }, { gasPrice, withdrawalGas }).claim.maxLux;
+}
+
+/** "up to 0.051 DUSK a step", as each page writes it. */
+export const stepFeeText = (inputs) => `up to ${formatMaxFee(withdrawalStepMax(inputs))} DUSK a step`;
+
 /** The usual time to arrive, in words. */
 export function arrivalText(route, cfg) {
   if (route.mode === "duskevm-deposit") return "usually within a minute";
@@ -195,7 +208,6 @@ export function buildQuote(route, amount, ctx) {
         quote.error = `That's more than you have on ${from} after its network fee. You can send up to ${formatDusk(quote.maxLux)}.`;
     }
   }
-  const fees = routeDuskFees(route, ctx);
   rows.push(
     { key: "send", label: "You send", value: lux === null ? "—" : `${formatDusk(lux)} on ${from}` },
     {
@@ -207,7 +219,7 @@ export function buildQuote(route, amount, ctx) {
       detail: "to prove, then to claim",
       key: "fee-dusk",
       label: `Then on ${to}`,
-      value: `up to ${formatMaxFee(fees.claim.maxLux)} DUSK a step`,
+      value: stepFeeText({ gasPrice: ctx.gasPrice ?? 1n }),
     },
     { key: "receive", label: "You receive", strong: true, value: lux === null ? "—" : `${formatDusk(lux)} on ${to}` },
     { key: "arrives", label: "Arrives", value: arrivalText(route, cfg) },
