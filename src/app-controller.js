@@ -1098,7 +1098,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const label = kind === "prove" ? "Prove on Dusk" : "Claim on Dusk";
     // What this step costs at most: an estimate until the request is ready.
     const stepMax = withdrawalStepMax({ gasPrice: duskGasPrice(), withdrawalGas: entry.withdrawalGas ? BigInt(entry.withdrawalGas) : 0n });
-    const lead = (maxLux) => actionLead(kind, entry, { account: duskAccount(), amountLux: view.amount, maxLux, name: duskName(), wait: view.time?.wait ?? null });
+    // A proof says when it can be claimed: by the Portal's wait until the request says the date.
+    const lead = (maxLux, claim = null) =>
+      actionLead(kind, entry, { account: duskAccount(), amountLux: view.amount, claim, maturity: view.time?.maturity ?? null, maxLux, name: duskName() });
     const review = reviews.start({
       amountLux: entry.amountLux,
       checks: [],
@@ -1152,15 +1154,15 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
           note: "The DuskEVM withdrawal portal on Dusk.",
           withdrawal: details && { ...details, value: prepared.withdrawal.value },
         });
-        return { account, lines, request };
+        return { account, claim: prepared.claim ?? null, lines, request };
       },
-      ({ account, lines, request }) => {
+      ({ account, claim, lines, request }) => {
         // Prepared for the account Dusk Wallet had then: only it can confirm,
         // and it's the one the proof or claim makes public.
         review.signer = { account, wallet: "dusk" };
         review.privacy = actionPrivacy(kind, privacyLine(route, cfg, { dusk: entry.destination, evm: entry.sender, name: duskPartyName(entry.destination) }), { account, name: duskName() });
         review.request = request;
-        review.lead = lead(BigInt(request.gas.limit) * BigInt(request.gas.price));
+        review.lead = lead(BigInt(request.gas.limit) * BigInt(request.gas.price), claim);
         formReads.usePrice(BigInt(request.gas.price));
         review.steps[0] = { ...review.steps[0], lines };
       },

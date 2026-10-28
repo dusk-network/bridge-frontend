@@ -38,8 +38,10 @@ const configured = (value) => (value ? { seconds: value, source: "config" } : nu
 
 /**
  * How long `route` usually takes on this network, or null when nothing says.
- * A withdrawal also gives its parts: `report`, until it can be proved, and
- * `wait`, from the proof to the claim.
+ * A withdrawal also gives its parts: `prove`, about when it can be proved
+ * (one output after it's sent), `report`, when it's late to be provable (two
+ * outputs), `maturity`, the Portal's wait from a proof to its claim, and
+ * `wait`, the longer of that and the game's finality.
  *
  * @param {object} route
  * @param {object} cfg the deployment config
@@ -48,7 +50,7 @@ const configured = (value) => (value ? { seconds: value, source: "config" } : nu
  *   what the chains said, as `createChainTimes` keeps it
  * @param {object[]} [timing.transfers] the transfers this browser knows
  * @param {number} [timing.now]
- * @returns {{ seconds: number, source: string, report?: number, wait?: number } | null}
+ * @returns {{ seconds: number, source: string, maturity?: number, prove?: number, report?: number, wait?: number } | null}
  */
 export function routeTime(route, cfg, { chain = null, now = Date.now(), transfers = [] } = {}) {
   if (route.mode === "duskevm-withdrawal") {
@@ -59,7 +61,7 @@ export function routeTime(route, cfg, { chain = null, now = Date.now(), transfer
     // waits at most about two outputs to be reported.
     const report = 2 * read.outputSeconds;
     const wait = Math.max(read.maturitySeconds, read.finalitySeconds ?? 0);
-    return { report, seconds: report + wait, source: "chain", wait };
+    return { maturity: read.maturitySeconds, prove: read.outputSeconds, report, seconds: report + wait, source: "chain", wait };
   }
   if (route.mode === "duskevm-deposit" && chain?.deposit)
     return { seconds: chain.deposit.lagSeconds + DUSK_BLOCK_SECONDS, source: "chain" };
@@ -83,6 +85,14 @@ export function aboutTime(seconds) {
   if (minutes <= 90) return `~${minutes} min`;
   const hours = Math.round(minutes / 60);
   return hours < 48 ? `~${hours} hours` : `~${Math.round(minutes / 1_440)} days`;
+}
+
+/** The same in words: "about 30 minutes", "about 1 hour", "about 7 days". */
+export function aboutWords(seconds) {
+  const text = aboutTime(seconds);
+  const minutes = /^~(\d+) min$/u.exec(text);
+  if (minutes) return `about ${minutes[1]} minute${minutes[1] === "1" ? "" : "s"}`;
+  return text.replace(/^~/u, "about ");
 }
 
 /** The route's time as every page writes it, or "" when it isn't known. */

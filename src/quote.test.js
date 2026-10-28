@@ -116,7 +116,10 @@ test("a withdrawal quotes its DuskEVM step and the two Dusk steps after it", () 
   assert.equal(buildQuote(routes["duskevm-withdrawal"], "200", unpriced).error, "");
   assert.equal(buildQuote(routes["duskevm-withdrawal"], "312", unpriced).error, "That's more than you have on DuskEVM, with its network fee.");
   assert.ok(quote.maxLux > 311n * 10n ** 9n);
-  // Its time comes from the chain: none until it's read.
+  // Nothing arrives without the two Dusk steps: it says when they can be
+  // taken, from what the chain said, and nothing until it has.
   const read = { chain: { withdrawal: { finalitySeconds: 302_400, maturitySeconds: 604_800, outputSeconds: 1_700 } } };
-  assert.equal(rows(buildQuote(routes["duskevm-withdrawal"], "200", { cfg, gasPrice: 1n, timing: read })).arrives, "~7 days");
+  const timed = rows(buildQuote(routes["duskevm-withdrawal"], "200", { cfg, gasPrice: 1n, timing: read }));
+  assert.equal(timed.when, "Claim 7 days after you prove. | You can prove about 30 minutes after sending.");
+  assert.equal(timed.arrives, undefined);
 });

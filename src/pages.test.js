@@ -11,6 +11,7 @@ import { withdrawalGasLimit } from "./gas.js";
 import { transferView } from "./transfer-view.js";
 import { activityPanel, cardPage, cardRegions, contractsSheet, footer, header, networkSheet, receiptPage, reviewSheet, walletLines } from "./views.js";
 import { encodeDepositArgs } from "./dusk-deposit.js";
+import { formatDateTime } from "./format.js";
 import { chainMark, pairMark } from "./icons.js";
 import { approveLines, duskCallLines, duskTransferLines, middle, migrateLines, walletFee } from "./wallet-lines.js";
 
@@ -461,13 +462,18 @@ test("a proof's review says it moves no DUSK and what it costs; a claim, where t
   const amountLux = 1_008n * 10n ** 9n;
   const other = { destination: testnet.service.account };
   // Paying another account than Dusk Wallet's says so, by the wallet's .dusk name.
-  const prove = actionLead("prove", other, { account: ACCOUNT, amountLux, maxLux: 51_000_000n, name: "alice.dusk", wait: 604_800 });
+  const prove = actionLead("prove", other, { account: ACCOUNT, amountLux, maturity: 604_800, maxLux: 51_000_000n, name: "alice.dusk" });
   assert.deepEqual(prove, {
     amount: "0.051",
     label: "Proving costs up to",
-    line: "No DUSK moves now. Claim ~7 days after the proof.",
+    line: "No DUSK moves now. Claim 7 days after you prove.",
     notYours: "This withdrawal pays 25z9o6…5Etftt, not your alice.dusk.",
   });
+  // Once the request is ready, the date a proof made now can be claimed from: exact against a resolved game.
+  const when = (ms) => formatDateTime(ms, { timeZone: "Europe/Amsterdam" });
+  const at = Date.UTC(2026, 10, 9, 2, 20);
+  assert.equal(actionLead("prove", other, { claim: { at, exact: true }, maturity: 604_800, maxLux: 1n, when }).line, "No DUSK moves now. If you prove now, you can claim from Mon 9 Nov, 03:20 CET.");
+  assert.equal(actionLead("prove", other, { claim: { at, exact: false }, maturity: 604_800, maxLux: 1n, when }).line, "No DUSK moves now. If you prove now, you can claim from about Mon 9 Nov, 03:20 CET.");
   const claim = actionLead("finalize", { destination: ACCOUNT }, { account: ACCOUNT, amountLux, maxLux: 51_000_000n });
   assert.deepEqual(claim, { amount: "1,008", chain: "dusk", label: "You claim", line: "To 21n5nc…fMMLNz on Dusk · costs up to 0.051 DUSK", notYours: "" });
   assert.equal(

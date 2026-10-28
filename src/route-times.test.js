@@ -73,7 +73,7 @@ test("what the chain says replaces the configured time, and a withdrawal has non
   assert.equal(text(testnet, "dusk-to-dusk-evm", { chain: { deposit: { lagSeconds: 290 } } }), "~5 min");
   const withdrawal = byId(testnet, "dusk-evm-to-dusk");
   assert.equal(routeTime(withdrawal, testnet), null);
-  assert.deepEqual(routeTime(withdrawal, testnet, { chain: CHAIN }), { report: 3_400, seconds: 608_200, source: "chain", wait: 604_800 });
+  assert.deepEqual(routeTime(withdrawal, testnet, { chain: CHAIN }), { maturity: 604_800, prove: 1_700, report: 3_400, seconds: 608_200, source: "chain", wait: 604_800 });
   // A dispute game finality delay longer than the proof's maturity is the wait.
   assert.equal(routeTime(withdrawal, testnet, { chain: { withdrawal: { ...CHAIN.withdrawal, finalitySeconds: 1_209_600 } } }).wait, 1_209_600);
 });
@@ -122,12 +122,16 @@ test("every page says the same time for the same route", () => {
     assert.equal(shown.receipt, `Takes ${expected}`, id);
     assert.match(shown.activity, new RegExp(` · takes ${expected}$`, "u"), id);
   }
-  // A withdrawal: the whole on the card, the quote and the receipt; its proof's wait in the review.
+  // A withdrawal: the whole on the card and the receipt; the Portal's 7 days
+  // from the proof to the claim in the quote, the claim step and the review.
   const withdrawal = pages(testnet, byId(testnet, "dusk-evm-to-dusk"), { chain: CHAIN });
-  assert.deepEqual([withdrawal.card.split(" · ")[0], withdrawal.quote, withdrawal.receipt], ["~7 days", "~7 days", "Takes ~7 days"]);
-  const view = transferView({ hash: "0x01", stage: "ready_to_prove", status: "pending" }, { cfg: testnet, route: byId(testnet, "dusk-evm-to-dusk"), timing: { chain: CHAIN } });
-  assert.equal(view.steps[2].detail, "~7 days after the proof");
-  assert.equal(actionLead("prove", {}, { maxLux: 1n, wait: view.time.wait }).line, "No DUSK moves now. Claim ~7 days after the proof.");
+  assert.deepEqual([withdrawal.card.split(" · ")[0], withdrawal.receipt], ["~7 days", "Takes ~7 days"]);
+  const route = byId(testnet, "dusk-evm-to-dusk");
+  const when = buildQuote(route, "10", { balance: null, cfg: testnet, gasPrice: 1n, timing: { chain: CHAIN } }).rows.find((row) => row.key === "when");
+  assert.deepEqual([when.value, when.detail], ["Claim 7 days after you prove.", "You can prove about 30 minutes after sending."]);
+  const view = transferView({ hash: "0x01", stage: "ready_to_prove", status: "pending" }, { cfg: testnet, route, timing: { chain: CHAIN } });
+  assert.equal(view.steps[2].detail, "7 days after you prove");
+  assert.equal(actionLead("prove", {}, { maturity: view.time.maturity, maxLux: 1n }).line, "No DUSK moves now. Claim 7 days after you prove.");
   // Unknown on this network: no time anywhere, and no Arrives line in the review.
   const unknown = pages(testnet, byId(testnet, "dusk-to-ethereum"), {});
   assert.deepEqual(unknown, { activity: "Sent Tue 27 Oct, 08:59 UTC", card: "1 DUSK bridge fee", quote: "", receipt: "" });

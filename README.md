@@ -129,9 +129,26 @@ receipt link or a looked-up hash opens the same transfer on any device.
 - A payout or credit belongs to one transfer: two equal transfers to the same
   address each need their own, and take them in the order they were sent.
 - **Withdrawals** show their three steps, sent, proved and claimed, with
-  times, the claim time from the Portal and dispute game, and the next action.
-  Readiness is read from the Portal and dispute-game state, never inferred
-  from elapsed time.
+  times, the claim date, and the next action. Readiness is read from the
+  Portal and dispute-game state, never inferred from elapsed time.
+
+The claim date is when the Portal takes the claim: the later of the proof
+plus the Portal's proof maturity delay, and the proof's dispute game's
+resolution plus its finality delay. Both are read on Dusk, from the Portal and
+the game's hub, in one Multicall for Dusk query (once a check knows the
+proof's game). The times are the contracts' own: testnet's deployed contracts
+count Dusk block height × 10, which the latest block converts to a date; the
+others count block time, a second later for their strict comparisons.
+
+- Before the proof: "Claim 7 days after you prove. You can prove about 30
+  minutes after sending.", with the chain's figures.
+- After it: "Claim from Mon 2 Nov, 04:20 CET" once the game has resolved, and
+  "Claim from about …", the earliest it can be, before that. A game left
+  unresolved more than an hour past its clock is late: "Waiting for DuskEVM
+  to settle this proof. Claim from … at the soonest."
+- A proof goes against a game that covers the withdrawal and has already
+  resolved where there is one, so its date is exact when it's made ("If you
+  prove now, you can claim from …"); otherwise against the newest.
 
 Several contract reads on one screen go to the node as one Multicall for Dusk
 query (`93de287b…6ce1d4`, mainnet and testnet). A read that fails inside a

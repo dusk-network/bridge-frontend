@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { encodeDuskExternalAssetRecipient } from "@dusk/evm-sdk";
-import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, encodeFunctionData, parseAbi } from "viem";
+import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, encodeFunctionData, keccak256, parseAbi, toHex, toRlp } from "viem";
 
 import { WITHDRAWAL_GAS_REFUSAL, gasAtNodePrice, withdrawalGasLimit } from "./gas.js";
 import {
   NOT_A_DUSK_WITHDRAWAL,
   createWithdrawals,
+  hashOutputRootProof,
   hashWithdrawal,
   parseGameSearchDepth,
   parseWithdrawalReceipt,
@@ -44,6 +45,15 @@ const messagePassedLog = {
 };
 const TX = messagePassedLog.transactionHash;
 const SUBMITTER = `0x${"2c".repeat(20)}`;
+// Testnet's contracts count Dusk block height × 10. The tip, as read on
+// 28 Oct 2026, and wallet-both.dusk's 1 DUSK withdrawal, the worked
+// example: proved at block 4,687,744, its game created at 4,687,605.
+const TIP = Object.freeze({ height: 4_704_959n, timestamp: 1_793_156_989n });
+const PROVEN_AT = 46_877_440n;
+const GAME_CREATED = 46_876_050n;
+/** A contract time on the wall clock, in seconds, counted from the tip. */
+const wall = (seconds, tip = TIP) => tip.timestamp + seconds - 10n * tip.height;
+const HUB_ID = "d5".repeat(32);
 
 function u256(value) {
   let remaining = BigInt(value);
@@ -70,12 +80,14 @@ function setup({
   finalized = false,
   preflight = async () => undefined,
   gameStatus = 0,
+  createdAt = GAME_CREATED,
   resolvedAt = 0n,
-  provenAt = 100n,
-  proofMaturity = 0,
-  latest = 200n,
+  provenAt = PROVEN_AT,
+  proofMaturity = 604_800,
+  tip = TIP,
   gasUpper = 1_000_000_000n,
   submitterCount = 1,
+  l2 = null,
 } = {}) {
   const portal = {
     call: {
@@ -89,18 +101,32 @@ function setup({
       respectedGameType: fn(async () => 8),
     },
   };
-  const dgf = { call: { gameCount: fn(async () => u256(0)) } };
+  // The factory names one hub, for the Portal's game type and for each game.
+  const dgf = { call: { gameContractId: fn(async () => Array(32).fill(0xd5)), gameCount: fn(async () => u256(0)), virtualGameHubId: fn(async () => Array(32).fill(0xd5)) } };
+  // The game's hub on Dusk: its times are the contracts' own.
+  const hub = {
+    call: {
+      createdAtForGame: fn(async () => createdAt),
+      maxClockDuration: fn(async () => 302_400n),
+      resolvedAtForGame: fn(async () => resolvedAt),
+      statusForGame: fn(async () => gameStatus),
+    },
+  };
+  const hubIds = [];
   const sent = [];
   const withdrawals = createWithdrawals({
     dgf,
     gasPrice: async () => 2n,
     gasUpper,
-    l1Rpc: async (_method, [{ data }]) => {
-      // The dispute game's `resolvedAt()` and `status()`.
-      const answer = data === "0x19effeb4" ? resolvedAt : BigInt(gameStatus);
-      return `0x${answer.toString(16).padStart(64, "0")}`;
+    hub: (id) => {
+      hubIds.push(id);
+      return hub;
     },
-    l2Rpc: async (method) => {
+    // Nothing is asked of the DuskEVM adapter's L1 view any more.
+    l1Rpc: () => assert.fail("the game is read on Dusk, not through an L1 RPC"),
+    l2Rpc: async (method, params) => {
+      // DuskEVM's blocks and storage proofs, where a test gives them.
+      if (l2 && method !== "eth_getTransactionReceipt") return l2(method, params);
       assert.equal(method, "eth_getTransactionReceipt");
       return {
         blockHash: messagePassedLog.blockHash,
@@ -110,7 +136,7 @@ function setup({
         transactionHash: TX,
       };
     },
-    latestTimestamp: async () => latest,
+    latestBlock: async () => tip,
     portal,
     proofSubmitter: () => SUBMITTER,
     sendPortalCall: async (fnName, args, gas) => {
@@ -118,8 +144,12 @@ function setup({
       return { hash: "finalize-hash" };
     },
   });
-  return { dgf, portal, sent, withdrawals };
+  return { dgf, hub, hubIds, portal, sent, withdrawals };
 }
+
+const invalidGame = async () => {
+  throw new Error("OptimismPortal2: invalid dispute game");
+};
 
 test("proofs and claims get a large gas limit, within the bound, at the node's price", async () => {
   assert.equal(withdrawalGasLimit(), 51_000_000n);
@@ -156,11 +186,7 @@ test("a withdrawal's amount and Dusk recipient come from its relayed call", asyn
 });
 
 test("a proven withdrawal waits when the finalize preflight refuses", async () => {
-  const { portal, withdrawals } = setup({
-    preflight: async () => {
-      throw new Error("OptimismPortal2: invalid dispute game");
-    },
-  });
+  const { portal, withdrawals } = setup({ preflight: invalidGame });
 
   const status = await withdrawals.loadWithdrawalStatus(TX);
 
@@ -171,31 +197,40 @@ test("a proven withdrawal waits when the finalize preflight refuses", async () =
   assert.deepEqual(submitter, Array(20).fill(0x2c));
 });
 
-test("the claim time is estimated from the proof while its game is in progress", async () => {
-  const { portal, withdrawals } = setup({ proofMaturity: 604_800 });
+test("the claim date of wallet-both.dusk's withdrawal: the earliest its proof and game allow, as an estimate", async () => {
+  // wallet-both.dusk's 1 DUSK withdrawal, its game in progress on 28 Oct.
+  const { hub, hubIds, withdrawals } = setup({ preflight: invalidGame });
 
-  // Proven at 100, so the proof matures at 604_900.
   const status = await withdrawals.loadWithdrawalStatus(TX);
 
   assert.equal(status.stage, "proven_waiting");
-  assert.equal(status.readyAt, 604_900n);
+  // Mon 2 Nov, 03:20:39 UTC: the proof's maturity, if the game resolves on time.
+  assert.equal(status.readyAt, 1_793_589_639n);
+  assert.equal(new Date(Number(status.readyAt) * 1_000).toISOString(), "2026-11-02T03:20:39.000Z");
   assert.equal(status.readyAtExact, false);
+  assert.equal(status.claimOverdue, false);
+  // The proof time is converted from block height × 10, not dropped: 26 Oct, 03:20:39 UTC.
+  assert.equal(status.provenAt, wall(PROVEN_AT));
+  assert.equal(new Date(Number(status.provenAt) * 1_000).toISOString(), "2026-10-26T03:20:39.000Z");
   assert.equal(status.proofRejected, false);
-  assert.equal(portal.call.checkWithdrawal.calls.length, 0);
+  // The game is read on Dusk, from the hub the factory names for the Portal's game type.
+  assert.deepEqual(hubIds, [HUB_ID]);
+  assert.equal(hub.call.createdAtForGame.calls.length, 1);
 });
 
-test("the claim time is exact once the proven game has resolved", async () => {
-  const { withdrawals } = setup({ gameStatus: 2, proofMaturity: 604_800, resolvedAt: 400_000n });
+test("the claim date is exact once the proven game has resolved", async () => {
+  // Resolved 161 blocks after its earliest time, the resolver's median.
+  const { withdrawals } = setup({ gameStatus: 2, preflight: invalidGame, resolvedAt: 47_180_060n });
 
-  // The game is final at 400_000 + 302_400, after the proof matures.
   const status = await withdrawals.loadWithdrawalStatus(TX);
 
-  assert.equal(status.readyAt, 702_400n);
+  // The game's finality comes after the proof's maturity: Mon 2 Nov, 03:24:19 UTC.
+  assert.equal(new Date(Number(status.readyAt) * 1_000).toISOString(), "2026-11-02T03:24:19.000Z");
   assert.equal(status.readyAtExact, true);
 });
 
 test("a proof whose game the challenger won is named as rejected", async () => {
-  const { withdrawals } = setup({ gameStatus: 1, proofMaturity: 604_800, resolvedAt: 400_000n });
+  const { withdrawals } = setup({ gameStatus: 1, preflight: invalidGame, resolvedAt: 47_180_060n });
 
   const status = await withdrawals.loadWithdrawalStatus(TX);
 
@@ -204,42 +239,36 @@ test("a proof whose game the challenger won is named as rejected", async () => {
   assert.equal(status.stage, "proven_waiting");
 });
 
-test("after the proof matures, the claim time follows the game's finality delay", async () => {
-  const { withdrawals } = setup({
-    preflight: async () => {
-      throw new Error("OptimismPortal2: invalid dispute game");
-    },
-  });
+test("a game left unresolved an hour past its clock is overdue, and the claim is the earliest still possible", async () => {
+  // 400 blocks past the game's earliest resolution, still in progress.
+  const tip = { height: 4_718_245n, timestamp: 1_793_289_849n };
+  const { withdrawals } = setup({ preflight: invalidGame, tip });
 
-  // The latest block is at 200; the game can't be final before 200 + 302_400.
   const status = await withdrawals.loadWithdrawalStatus(TX);
 
-  assert.equal(status.readyAt, 302_600n);
+  assert.equal(status.claimOverdue, true);
   assert.equal(status.readyAtExact, false);
+  // It could resolve now: final 3.5 days from now, after the proof's maturity.
+  assert.equal(status.readyAt, wall(10n * tip.height + 302_400n, tip));
 });
 
-test("a proof time off Dusk's clock gives no claim time", async () => {
-  const { withdrawals } = setup({
-    latest: 1_792_950_989n,
-    preflight: async () => {
-      throw new Error("OptimismPortal2: invalid dispute game");
-    },
-    proofMaturity: 604_800,
-    provenAt: 45_252_320n,
-  });
+test("a proof on the height clock is converted from the tip, not dropped", async () => {
+  // The 1,008 DUSK withdrawal another account proved at block 4,525,232,
+  // its game resolved at 4,555,501: claimable for it since block 4,585,741.
+  const { withdrawals } = setup({ createdAt: 45_250_000n, gameStatus: 2, provenAt: 45_252_320n, resolvedAt: 45_555_010n });
 
   const status = await withdrawals.loadWithdrawalStatus(TX);
 
-  assert.equal(status.readyAt, null);
-  assert.equal(status.readyAtExact, false);
+  assert.equal(status.stage, "ready_to_finalize");
+  assert.equal(status.readyAt, wall(45_857_410n));
+  assert.equal(new Date(Number(status.readyAt) * 1_000).toISOString(), "2026-10-14T08:00:09.000Z");
+  assert.equal(status.provenAt, wall(45_252_320n));
 });
 
 test("a rejected proof with no replacement output is named as rejected", async () => {
   const { withdrawals } = setup({
     gameStatus: 1,
-    preflight: async () => {
-      throw new Error("OptimismPortal2: invalid dispute game");
-    },
+    preflight: invalidGame,
   });
 
   const status = await withdrawals.loadWithdrawalStatus(TX);
@@ -468,7 +497,7 @@ test("a proof this account already has isn't prepared again", async () => {
   };
   const cases = [
     [{}, "This account already proved this withdrawal. You can claim it now."],
-    [{ proofMaturity: 604_800 }, "This account already proved this withdrawal. Claim it once the waiting period ends."],
+    [{ preflight: rejected }, "This account already proved this withdrawal. Claim it once the waiting period ends."],
     [{ gameStatus: 1, preflight: rejected }, "The existing proof was rejected, but no replacement output proposal is available yet."],
     [{ finalized: true }, "This withdrawal is already claimed."],
   ];
@@ -498,4 +527,213 @@ test("a proof or claim is prepared for the account its review is for", async () 
   const proof = setup({ provenAt: 0n });
   await proof.withdrawals.prepareProve(TX, { proofSubmitter: other }).catch(() => {});
   assert.deepEqual(asked(proof.portal), [other]);
+});
+
+// ---------------------------------------------------------------------------
+// Proving against a game that has already resolved, and one query a check
+// ---------------------------------------------------------------------------
+
+const GAMES = 200;
+const OUTPUT_GAP = 1_800n;
+const NOW = 10n * TIP.height;
+// Game i: created every 30 minutes up to 10 minutes ago, each covering 100 L2
+// blocks more; resolved 15 minutes after its clock ran out, if that's passed.
+const createdAtOf = (i) => NOW - 600n - BigInt(GAMES - 1 - i) * OUTPUT_GAP;
+const proxyOf = (i) => [...Array(18).fill(0x9a), Math.floor(i / 256), i % 256];
+const resolvedOf = (i) => (createdAtOf(i) + 302_400n + 900n <= NOW ? createdAtOf(i) + 302_400n + 900n : 0n);
+const blockOf = (l2) => ({ hash: keccak256(toHex(`block ${l2}`)), stateRoot: keccak256(toHex(`state ${l2}`)) });
+const STORAGE = keccak256(toHex("message passer"));
+const rootOf = (l2) =>
+  hashOutputRootProof({ latestBlockhash: blockOf(l2).hash, messagePasserStorageRoot: STORAGE, stateRoot: blockOf(l2).stateRoot, version: `0x${"00".repeat(32)}` });
+
+/**
+ * A not yet proven withdrawal at L2 block 13,668, with games whose L2 blocks
+ * start at `firstL2`. Game i sits at factory index i × `stride`: other game
+ * types take the indexes between. `blacklisted` lists games the Portal refuses.
+ */
+function provingSetup({ blacklisted = [], firstL2, stride = 1 }) {
+  const l2Of = (i) => firstL2 + i * 100;
+  const searched = (i) => ({
+    extra_data: u256(l2Of(i)),
+    index: u256(i * stride),
+    metadata: [0, 0, 0, 8, ...u256(createdAtOf(i)).slice(24), ...proxyOf(i)],
+    root_claim: Array.from(Buffer.from(rootOf(l2Of(i)).slice(2), "hex")),
+    timestamp: Number(createdAtOf(i)),
+  });
+  const indexOf = (address) => address[18] * 256 + address[19];
+  const gameAt = (index) => Math.floor(index / stride);
+  // DuskEVM: each block, and the withdrawal's storage proof at it.
+  const proofsAt = [];
+  const l2 = async (method, params) => {
+    if (method === "eth_getBlockByNumber") return blockOf(Number(BigInt(params[0])));
+    proofsAt.push(Number(BigInt(params[2])));
+    return { storageHash: STORAGE, storageProof: [{ proof: [toRlp(["0x20", "0x01"])] }] };
+  };
+  const proved = setup({ l2, provenAt: 0n });
+  const { dgf, hub, portal, withdrawals } = proved;
+  dgf.call.gameCount = fn(async () => u256((GAMES - 1) * stride + 1));
+  // The games of the Portal's type at or below a factory index, newest first.
+  dgf.call.findLatestGames = fn(async ([, start, n]) => {
+    const from = gameAt(Number(BigInt(`0x${Buffer.from(start).toString("hex")}`)));
+    const count = Number(BigInt(`0x${Buffer.from(n).toString("hex")}`));
+    return Array.from({ length: Math.max(0, Math.min(count, from + 1)) }, (_, k) => searched(from - k));
+  });
+  dgf.call.gameMetadataAtIndex = fn(async (index) => {
+    const i = gameAt(Number(BigInt(`0x${Buffer.from(index).toString("hex")}`)));
+    return { extraData: [], l2SequenceNumber: u256(l2Of(i)), rootClaim: searched(i).root_claim };
+  });
+  dgf.call.gameAtIndex = fn(async (index) => ({ gameProxy: proxyOf(gameAt(Number(BigInt(`0x${Buffer.from(index).toString("hex")}`)))) }));
+  portal.call.disputeGameBlacklist = fn(async (address) => blacklisted.includes(indexOf(address)));
+  hub.call.createdAtForGame = fn(async (address) => createdAtOf(indexOf(address)));
+  hub.call.resolvedAtForGame = fn(async (address) => resolvedOf(indexOf(address)));
+  hub.call.statusForGame = fn(async (address) => (resolvedOf(indexOf(address)) ? 2 : 0));
+  portal.call.provenWithdrawals = fn(async () => [Array(20).fill(0), 0n]);
+  portal.call.numProofSubmitters = fn(async () => u256(0));
+  return { ...proved, l2Of, proofsAt, withdrawals };
+}
+
+test("a proof goes against a covering game that has already resolved, so its claim date is exact", async () => {
+  // An older withdrawal: games from 7 on cover it, and those up to 29 have resolved.
+  const { proofsAt, withdrawals } = provingSetup({ firstL2: 13_000 });
+
+  const prepared = await withdrawals.prepareProve(TX);
+
+  assert.deepEqual(prepared.args[1], u256(29));
+  assert.deepEqual(proofsAt, [13_000 + 29 * 100]);
+  // Exactly the proof's maturity from now: Wed 4 Nov, 03:09:49 UTC.
+  assert.deepEqual(prepared.claim, { at: Number(TIP.timestamp + 604_800n) * 1_000, exact: true, overdue: false });
+});
+
+test("without a resolved covering game, a proof goes against the newest, and its date is an estimate", async () => {
+  // A fresh withdrawal: only the newest games cover it, none resolved yet.
+  const { proofsAt, withdrawals } = provingSetup({ firstL2: 1_000 });
+
+  const prepared = await withdrawals.prepareProve(TX);
+
+  assert.deepEqual(prepared.args[1], u256(GAMES - 1));
+  assert.equal(proofsAt.at(-1), 1_000 + (GAMES - 1) * 100);
+  // The newest game, created 10 minutes ago, can be final before the proof
+  // matures 7 days from now: that date, as an estimate until it resolves.
+  assert.deepEqual(prepared.claim, { at: Number(TIP.timestamp + 604_800n) * 1_000, exact: false, overdue: false });
+});
+
+test("a waiting withdrawal's check is one Multicall query once its game is known", async () => {
+  const queries = [];
+  const answers = {
+    checkWithdrawal: { Err: { Panic: "OptimismPortal2: invalid dispute game" } },
+    createdAtForGame: 46_876_050,
+    disputeGameBlacklist: false,
+    disputeGameFinalityDelaySeconds: u256(302_400),
+    finalizedWithdrawals: false,
+    gameCount: u256(3_948),
+    maxClockDuration: 302_400,
+    numProofSubmitters: u256(1),
+    proofMaturityDelaySeconds: u256(604_800),
+    provenWithdrawals: [Array(20).fill(0x6f), 46_877_440],
+    resolvedAtForGame: 0,
+    respectedGameType: 8,
+    statusForGame: 0,
+    gameContractId: Array(32).fill(0xd5),
+    virtualGameHubId: Array(32).fill(0xd5),
+  };
+  const node = {
+    async contractCall(_id, fnName, bytes) {
+      const calls = JSON.parse(new TextDecoder().decode(bytes));
+      queries.push(calls.map((call) => Buffer.from(call.fn_args, "hex").toString()));
+      return new TextEncoder().encode(
+        JSON.stringify({
+          height: "4704959",
+          results: calls.map((call) => {
+            const answer = answers[Buffer.from(call.fn_args, "hex").toString()];
+            return answer?.Err ? answer : { Ok: Buffer.from(call.fn_args, "hex").toString("hex") };
+          }),
+        }),
+      );
+    },
+  };
+  const driver = {
+    decodeOutputFn: (name, out) => (name === "aggregate" ? JSON.parse(new TextDecoder().decode(out)) : answers[new TextDecoder().decode(out)]),
+    encodeInputFn: (name, json) => new TextEncoder().encode(name === "aggregate" ? json : name),
+  };
+  const contract = (id) => ({ driver: async () => driver, id });
+  const reader = createContractReader({ multicall: contract("93".repeat(32)), node });
+  let tips = 0;
+  const withdrawals = createWithdrawals({
+    dgf: contractFacade(reader, contract("3b".repeat(32))),
+    gasPrice: async () => 1n,
+    gasUpper: 1_000_000_000n,
+    hub: (id) => contractFacade(reader, contract(id)),
+    l2Rpc: async () => ({ blockHash: messagePassedLog.blockHash, blockNumber: messagePassedLog.blockNumber, logs: [messagePassedLog], status: "0x1", transactionHash: TX }),
+    latestBlock: async () => {
+      tips += 1;
+      return TIP;
+    },
+    portal: contractFacade(reader, contract("14".repeat(32))),
+    proofSubmitter: () => SUBMITTER,
+    sendPortalCall: async () => ({ hash: "" }),
+  });
+
+  // The first check: the Portal's values; the game's hub (once a session) with the Portal's check; then the game.
+  const first = await withdrawals.loadWithdrawalStatus(TX);
+  assert.equal(first.stage, "proven_waiting");
+  assert.equal(new Date(Number(first.readyAt) * 1_000).toISOString(), "2026-11-02T03:20:39.000Z");
+  assert.deepEqual(queries.map((names) => names.length), [7, 3, 4]);
+  assert.deepEqual(queries[1].sort(), ["checkWithdrawal", "disputeGameBlacklist", "gameContractId"]);
+  assert.deepEqual(queries[2].sort(), ["createdAtForGame", "maxClockDuration", "resolvedAtForGame", "statusForGame"]);
+
+  // Every check after: the Portal's values, the game and the Portal's check in one query.
+  queries.length = 0;
+  const again = await withdrawals.loadWithdrawalStatus(TX, { proofGame: first.disputeGameProxy });
+  assert.equal(again.readyAt, first.readyAt);
+  assert.deepEqual(queries.map((names) => names.length), [12]);
+  assert.ok(["createdAtForGame", "resolvedAtForGame", "statusForGame", "provenWithdrawals", "proofMaturityDelaySeconds"].every((name) => queries[0].includes(name)));
+  assert.equal(tips, 2);
+});
+
+test("a blacklisted resolved game is passed over for the next resolved one", async () => {
+  const { withdrawals } = provingSetup({ blacklisted: [29], firstL2: 13_000 });
+  const prepared = await withdrawals.prepareProve(TX);
+  assert.deepEqual(prepared.args[1], u256(28));
+  assert.equal(prepared.claim.exact, true);
+});
+
+test("the search for a resolved game counts the factory's index, which other game types share", async () => {
+  // Three games of other types between each of the Portal's type.
+  const { withdrawals } = provingSetup({ firstL2: 13_000, stride: 4 });
+  const prepared = await withdrawals.prepareProve(TX);
+  assert.deepEqual(prepared.args[1], u256(29 * 4));
+  assert.equal(prepared.claim.exact, true);
+});
+
+test("the Portal's own check decides even when the game's hub can't be read", async () => {
+  const unreadable = setup();
+  unreadable.dgf.call.gameContractId = fn(async () => {
+    throw new Error("Contract call failed.");
+  });
+  // Claimable: the Portal says so; the date known so far stands (none given).
+  const ready = await unreadable.withdrawals.loadWithdrawalStatus(TX);
+  assert.equal(ready.stage, "ready_to_finalize");
+  assert.equal("readyAt" in ready, false);
+  // Not yet: still proven, waiting, with no date given.
+  const waiting = setup({ preflight: invalidGame });
+  waiting.dgf.call.gameContractId = unreadable.dgf.call.gameContractId;
+  const status = await waiting.withdrawals.loadWithdrawalStatus(TX);
+  assert.deepEqual([status.stage, "readyAt" in status], ["proven_waiting", false]);
+  assert.match(status.statusMessage, /can't be read right now/u);
+});
+
+test("a date that has passed while the Portal still refuses the claim isn't shown", async () => {
+  // Resolved long ago, matured, and refused for another reason than the game.
+  const { withdrawals } = setup({
+    createdAt: 45_250_000n,
+    gameStatus: 2,
+    preflight: async () => {
+      throw new Error("OptimismPortal2: paused");
+    },
+    provenAt: 45_252_320n,
+    resolvedAt: 45_555_010n,
+  });
+  const status = await withdrawals.loadWithdrawalStatus(TX);
+  assert.deepEqual([status.stage, status.readyAt, status.readyAtExact], ["proven_waiting", null, false]);
+  assert.equal(status.statusMessage, "The Portal doesn't take the claim yet.");
 });

@@ -11,7 +11,7 @@ import { getDuskWallet, sendDuskContractCall } from "./dusk-wallet.js";
 import { createEvmReads } from "./evm-reads.js";
 import { resolveTransfer } from "./resolve.js";
 import { createTracking, duskAccountEvmAddress } from "./tracking.js";
-import { createWithdrawals, parseGameSearchDepth } from "./withdrawals.js";
+import { GAME_HUB_DRIVER, createWithdrawals, parseGameSearchDepth } from "./withdrawals.js";
 
 /** JSON-RPC over fetch, for the EVM chains and the DuskEVM adapter. */
 export function createRpc(urls, fetch = globalThis.fetch) {
@@ -83,6 +83,8 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
   });
   const urls = {
     "dusk-evm": cfg.duskEvm.rpcUrl,
+    // The adapter's L1 view, asked only which DuskEVM deposit a Dusk
+    // transaction made. Dispute games are read on Dusk itself.
     "dusk-evm-l1": cfg.duskEvm.l1BridgeRpcUrl,
     ...Object.fromEntries(
       Object.values(cfg.evmNetworks)
@@ -116,9 +118,10 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
       gameSearchDepth: parseGameSearchDepth(cfg.duskEvm.bridgeGameSearchDepth),
       gasPrice: () => node.gasPrice(),
       gasUpper: cfg.gasLimitUpper,
-      l1Rpc: (method, params) => rpc("dusk-evm-l1", method, params),
+      // Each game's hub, read raw through the same Multicall batches.
+      hub: (id) => contractFacade(reader, { driver: async () => GAME_HUB_DRIVER, id }),
       l2Rpc: (method, params) => rpc("dusk-evm", method, params),
-      latestTimestamp: () => node.latestBlockTimestamp(),
+      latestBlock: () => node.latestBlock(),
       portal: contractFacade(reader, portal),
       proofSubmitter: () => {
         try {

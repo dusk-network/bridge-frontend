@@ -3,6 +3,7 @@
 // balances, prices and gas estimates come in, so it's the same before and
 // after the wallet opens.
 
+import { claimAfterProving, provingAfterSending } from "./claim-date.js";
 import { aboutFee, formatDusk, formatFee, formatLux, formatMaxFee, formatUnitsGrouped } from "./format.js";
 import {
   DEPOSIT_GAS_LIMIT,
@@ -89,9 +90,19 @@ export function withdrawalStepMax({ gasPrice = 1n, withdrawalGas = 0n } = {}) {
 /** "up to 0.051 DUSK a step", as each page writes it. */
 export const stepFeeText = (inputs) => `up to ${formatMaxFee(withdrawalStepMax(inputs))} DUSK a step`;
 
-/** When it arrives, as a quote row: none where this network's time isn't known. */
+/**
+ * When it arrives, as a quote row: none where this network's time isn't
+ * known. Nothing arrives from DuskEVM without the two steps on Dusk, so a
+ * withdrawal says when they can be taken: "Claim 7 days after you prove. You
+ * can prove about 30 minutes after sending."
+ */
 function arrivesRow(route, cfg, timing) {
-  const value = routeTimeText(routeTime(route, cfg, timing));
+  const time = routeTime(route, cfg, timing);
+  if (route.mode === "duskevm-withdrawal")
+    return time?.maturity
+      ? [{ detail: time.prove ? provingAfterSending(time.prove) : "", key: "when", label: "When", value: claimAfterProving(time.maturity) }]
+      : [];
+  const value = routeTimeText(time);
   return value ? [{ key: "arrives", label: "Arrives", value }] : [];
 }
 

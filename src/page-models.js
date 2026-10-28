@@ -4,11 +4,12 @@
 
 import { explorerAddressUrl } from "./contracts.js";
 import { groupTransfers, shownFor } from "./discovery.js";
+import { claimAfterProving, proveNowText } from "./claim-date.js";
 import { aboutFee, formatDateTime, formatDusk, formatFee, formatLux, formatMaxFee, formatUnitsGrouped } from "./format.js";
 import { gasCoin, networkName, networkNames, routeTitle, tokenName } from "./names.js";
 import { transferHref } from "./permalink.js";
 import { buildQuote, routeDuskFees, stepFeeText, withdrawalStepMax } from "./quote.js";
-import { aboutTime, routeTime, routeTimeText } from "./route-times.js";
+import { routeTime, routeTimeText } from "./route-times.js";
 import { explorerTxUrl, html, privacyLine, short, transferSubline, transferView } from "./transfer-view.js";
 
 export const DUSK_WALLET_URL = "https://docs.dusk.network/use/wallets/#dusk-wallet";
@@ -173,10 +174,12 @@ export function actionPrivacy(kind, base, { account = "", name = "" } = {}) {
  * The top of a proof's or a claim's review: what the step costs at most
  * (`maxLux`) and what moves. A proof moves no DUSK; a claim pays the
  * withdrawal's account. When that isn't Dusk Wallet's `account`, it says so,
- * by its .dusk `name` where there is one. `wait` is this network's wait
- * from the proof to the claim, in seconds, where it's known.
+ * by its .dusk `name` where there is one. A proof says when it can be
+ * claimed: from `claim`, the date for a proof made now, once the request is
+ * ready (`when` writes it); until then from `maturity`, the Portal's wait in
+ * seconds, where it's known.
  */
-export function actionLead(kind, entry, { account = "", amountLux = null, maxLux, name = "", wait = null }) {
+export function actionLead(kind, entry, { account = "", amountLux = null, claim = null, maturity = null, maxLux, name = "", when = (ms) => formatDateTime(ms) }) {
   const cost = formatMaxFee(maxLux);
   const pays = entry.destination ?? "";
   const payee = !pays ? "the withdrawal's Dusk account" : /^[0-9a-f]{64}$/u.test(pays) ? `the Dusk contract ${short(pays)}` : short(pays);
@@ -187,7 +190,7 @@ export function actionLead(kind, entry, { account = "", amountLux = null, maxLux
     ? {
         amount: cost,
         label: "Proving costs up to",
-        line: `No DUSK moves now.${wait ? ` Claim ${aboutTime(wait)} after the proof.` : ""}`,
+        line: `No DUSK moves now.${claim?.at ? ` ${proveNowText(claim, when)}.` : maturity ? ` ${claimAfterProving(maturity)}` : ""}`,
         notYours,
       }
     : {

@@ -49,10 +49,14 @@ const u256 = (value) => {
 };
 const hexOf = (array) => `0x${Buffer.from(array).toString("hex")}`;
 
+// Testnet's clock, Dusk block height × 10, at the tip of 28 Oct 2026.
+const TIP = { height: 4_704_959n, timestamp: 1_793_156_989n };
+
 /**
- * Proofs by account: `own` and `others` are `{ game, timestamp }`; games
- * carry their status (0 in progress, 1 challenger won, 2 defender won) and
- * blacklisting.
+ * Proofs by account: `own` and `others` are `{ game, timestamp }`, in the
+ * contracts' time; games carry their status (0 in progress, 1 challenger
+ * won, 2 defender won) and blacklisting, and an unreadable one fails on its
+ * hub.
  */
 function setup({ own = null, others = [], games = {} }) {
   const submitters = [...(own ? [OWN] : []), ...others.map(({ address }) => address)];
@@ -100,6 +104,22 @@ function setup({ own = null, others = [], games = {} }) {
         l2SequenceNumber: u256(13_678),
         rootClaim: bytes(ROOT_CLAIM),
       }),
+      gameContractId: async () => Array(32).fill(0xd5),
+      virtualGameHubId: async () => Array(32).fill(0xd5),
+    },
+  };
+  // The games' hub on Dusk: created a little before the proofs, unresolved.
+  const game = (address) => {
+    const known = games[hexOf(address)];
+    if (known?.unreadable) throw new Error("Panic: unknown game");
+    return known ?? {};
+  };
+  const hub = {
+    call: {
+      createdAtForGame: async (address) => (game(address), 46_876_050n),
+      maxClockDuration: async () => 302_400n,
+      resolvedAtForGame: async (address) => (game(address), 0n),
+      statusForGame: spy("statusForGame", async (address) => game(address).status ?? 0),
     },
   };
   const sent = [];
@@ -107,13 +127,7 @@ function setup({ own = null, others = [], games = {} }) {
     dgf,
     gasPrice: async () => 1n,
     gasUpper: 1_000_000_000n,
-    l1Rpc: async (_method, [{ data, to }]) => {
-      // Older games answer nothing through the adapter's L1 view.
-      if (games[to.toLowerCase()]?.unreadable) return "0x";
-      // A game's `resolvedAt()` (0: unresolved) or `status()`.
-      const answer = data === "0x19effeb4" ? 0n : BigInt(games[to.toLowerCase()]?.status ?? 0);
-      return `0x${answer.toString(16).padStart(64, "0")}`;
-    },
+    hub: () => hub,
     l2Rpc: async (method) => {
       if (method === "eth_getTransactionReceipt")
         return {
@@ -128,7 +142,7 @@ function setup({ own = null, others = [], games = {} }) {
         return { storageHash: STORAGE_ROOT, storageProof: [{ proof: [toRlp(["0x20", "0x01"])] }] };
       throw new Error(`unexpected ${method}`);
     },
-    latestTimestamp: async () => 200n,
+    latestBlock: async () => TIP,
     portal,
     proofSubmitter: () => OWN,
     sendPortalCall: async (fnName, args, gas) => {
@@ -151,7 +165,7 @@ const proveStep = (view) => view.steps.find((step) => step.key === "prove");
 test("a withdrawal proven only by another account still needs the user's own proof", async () => {
   const { sent, withdrawals } = setup({
     games: { [OTHER_GAME]: { status: 0 } },
-    others: [{ address: OTHER, game: OTHER_GAME, timestamp: 100 }],
+    others: [{ address: OTHER, game: OTHER_GAME, timestamp: 46_877_440 }],
   });
 
   const status = await withdrawals.loadWithdrawalStatus(TX);
@@ -176,14 +190,15 @@ test("a withdrawal proven only by another account still needs the user's own pro
 test("the user's own proof decides the stage when both have proven", async () => {
   const { calls, withdrawals } = setup({
     games: { [OTHER_GAME]: { status: 0 }, [OWN_GAME]: { status: 0 } },
-    others: [{ address: OTHER, game: OTHER_GAME, timestamp: 50 }],
-    own: { game: OWN_GAME, timestamp: 100 },
+    others: [{ address: OTHER, game: OTHER_GAME, timestamp: 46_877_000 }],
+    own: { game: OWN_GAME, timestamp: 46_877_440 },
   });
 
   const status = await withdrawals.loadWithdrawalStatus(TX);
 
   assert.equal(status.stage, "proven_waiting");
-  assert.equal(status.readyAt, 604_900n);
+  // The own proof's: matured Mon 2 Nov, 03:20:39 UTC, as an estimate.
+  assert.equal(new Date(Number(status.readyAt) * 1_000).toISOString(), "2026-11-02T03:20:39.000Z");
   assert.equal(status.provenByOther, undefined);
   assert.equal(calls.includes("proofSubmitters"), false);
 });
@@ -192,7 +207,7 @@ test("another account's rejected or blacklisted proof leaves a plain ready to pr
   for (const game of [{ status: 1 }, { blacklisted: true, status: 0 }]) {
     const { withdrawals } = setup({
       games: { [OTHER_GAME]: game },
-      others: [{ address: OTHER, game: OTHER_GAME, timestamp: 100 }],
+      others: [{ address: OTHER, game: OTHER_GAME, timestamp: 46_877_440 }],
     });
 
     const status = await withdrawals.loadWithdrawalStatus(TX);
@@ -207,9 +222,9 @@ test("another account's rejected or blacklisted proof leaves a plain ready to pr
 test("another account's proof the Portal accepts counts, even when its game can't be read", async () => {
   for (const check of ["ready", "OptimismPortal2: proof maturity delay not met"]) {
     const { withdrawals } = setup({
-      // As on testnet: an older game the adapter's L1 view can't read.
+      // A game its hub can't read.
       games: { [OTHER_GAME]: { unreadable: true } },
-      others: [{ address: OTHER, check, game: OTHER_GAME, timestamp: 100 }],
+      others: [{ address: OTHER, check, game: OTHER_GAME, timestamp: 46_877_440 }],
     });
 
     const status = await withdrawals.loadWithdrawalStatus(TX);
@@ -222,7 +237,7 @@ test("another account's proof the Portal accepts counts, even when its game can'
 test("an unreadable game without the Portal's acceptance doesn't count", async () => {
   const { withdrawals } = setup({
     games: { [OTHER_GAME]: { unreadable: true } },
-    others: [{ address: OTHER, game: OTHER_GAME, timestamp: 100 }],
+    others: [{ address: OTHER, game: OTHER_GAME, timestamp: 46_877_440 }],
   });
 
   assert.equal((await withdrawals.loadWithdrawalStatus(TX)).provenByOther, false);

@@ -144,12 +144,13 @@ export function createDuskNode({ url, fetch = globalThis.fetch }) {
     }
   }
 
-  async function latestBlockTimestamp() {
-    const data = await query("block(height: -1) { header { timestamp } }");
-    const timestamp = data?.block?.header?.timestamp;
-    if (timestamp === undefined || timestamp === null)
+  /** The latest block's height and time: what contract times are counted from. */
+  async function latestBlock() {
+    const data = await query("block(height: -1) { header { height timestamp } }");
+    const header = data?.block?.header;
+    if (header?.timestamp === undefined || header?.timestamp === null || header?.height === undefined || header?.height === null)
       throw new Error("Latest Dusk block timestamp is unavailable.");
-    return BigInt(timestamp);
+    return Object.freeze({ height: BigInt(header.height), timestamp: BigInt(header.timestamp) });
   }
 
   /** A public account's balance in Lux. */
@@ -177,7 +178,7 @@ export function createDuskNode({ url, fetch = globalThis.fetch }) {
     accountBalance,
     contractCall,
     gasPrice,
-    latestBlockTimestamp,
+    latestBlock,
     query,
     transaction,
     transfersByMemo,
