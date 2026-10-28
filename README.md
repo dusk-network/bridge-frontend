@@ -92,6 +92,13 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   with copy buttons and explorer links, and an operator only where the
   deployment names one.
 
+A link can open the card on a route: `#/move/<route>`, by its ID
+(`bsc-to-dusk`), by one of the three routes (`bsc`, `ethereum`, `duskevm`), or
+as earlier links named it (`migrate`, `to-duskevm`, `from-duskevm`). For a
+route into Dusk, `?to=<account>` hands over the Dusk account it pays, as the
+web wallet's Migrate can: the card shows "Paying <account>" until it's
+changed.
+
 ## My transfers
 
 The list is the same on any device: it comes from the networks, a bounded

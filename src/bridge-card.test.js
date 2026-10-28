@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { cardNetworks, cardRoute, choosePair, defaultPair, entryRoutes, flipRoute, followsWallets, fromChoices, primaryButton, routeBetween, toChoices } from "./bridge-card.js";
+import { cardNetworks, cardRoute, choosePair, defaultPair, entryRoutes, flipRoute, followsWallets, fromChoices, handedOverRecipient, primaryButton, routeBetween, toChoices } from "./bridge-card.js";
 import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 import { bridgeTasks, networkName, notRunning } from "./names.js";
@@ -161,4 +161,17 @@ test("under the card, DUSK on Ethereum or BNB Smart Chain is one link from movin
   // Each link sets From: it opens that route.
   assert.equal(cardRoute(parseLocation("#/move/bsc-to-dusk"), bridgeTasks(mainnet, routes), routes).id, "bsc-to-dusk");
   assert.equal(entryLine([]), "");
+});
+
+test("a recipient handed over in the link is taken only by a route that pays a Dusk account", () => {
+  const routes = buildRoutes(testnet);
+  const page = parseLocation("#/move/from-duskevm?to=21n5nc");
+  const takes = (from, to) => handedOverRecipient(page, routeBetween(routes, from, to));
+  assert.equal(takes("dusk-evm", "dusk"), "21n5nc");
+  assert.equal(takes("ethereum", "dusk"), "21n5nc");
+  // An EVM address is paid on the other routes: a Dusk account there is no recipient.
+  assert.equal(takes("dusk", "dusk-evm"), "");
+  assert.equal(takes("dusk", "ethereum"), "");
+  assert.equal(handedOverRecipient(parseLocation("#/move/from-duskevm"), routeBetween(routes, "dusk-evm", "dusk")), "");
+  assert.equal(handedOverRecipient({ page: "home", to: "21n5nc" }, routeBetween(routes, "dusk-evm", "dusk")), "");
 });

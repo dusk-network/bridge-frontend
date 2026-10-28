@@ -6,7 +6,7 @@
 
 import { entryId, readActivity, recordActivity, saveActivity, updateActivity, useActivityNetwork } from "./activity.js";
 import { bridgeRoutes, getBridgeRoute } from "./bridge-routes.js";
-import { cardRoute, choosePair, entryRoutes, flipRoute, followsWallets, fromChoices, primaryButton, routeBetween, toChoices } from "./bridge-card.js";
+import { cardRoute, choosePair, entryRoutes, flipRoute, followsWallets, fromChoices, handedOverRecipient, primaryButton, routeBetween, toChoices } from "./bridge-card.js";
 import { claimReminder } from "./calendar.js";
 import { config } from "./config.js";
 import { bridgeOperator, contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
@@ -25,6 +25,7 @@ import {
   actionLead,
   actionPrivacy,
   pricedReview,
+  recipientLine,
   DUSK_WALLET_URL,
   evmWalletName,
   receiptModel,
@@ -33,7 +34,7 @@ import {
   routeSteps,
   transfersModel,
 } from "./page-models.js";
-import { canonicalHash, parseLocation, quotesOn, receiptUrl, transferHref } from "./permalink.js";
+import { canonicalHash, moveHref, parseLocation, quotesOn, receiptUrl, transferHref } from "./permalink.js";
 import { buildQuote, parseAmount, withdrawalStepMax } from "./quote.js";
 import { serviceTransferRequest, submitServiceTransfer } from "./service-transfer.js";
 import { createServices, proofSubmitterFor } from "./services.js";
@@ -295,11 +296,13 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       : `This bridge doesn't offer that on ${names.badge}`;
 
   /**
-   * The card's state. A link to a task opens it on that task's route; the
-   * card otherwise opens on the pair the connected wallets suggest, and keeps
-   * whatever pair was picked. A link to a task that isn't here opens none.
+   * The card's state. A link to a route opens it on that route, with the
+   * Dusk recipient the link hands over, once, as the page opens (`follow`):
+   * after that the card keeps whatever is picked. The card otherwise opens
+   * on the pair the connected wallets suggest. A link to a route that isn't
+   * here opens none.
    */
-  function ensureCard(page = state.page) {
+  function ensureCard(page = state.page, { follow = false } = {}) {
     const linked = page?.page === "move" ? linkFor(page.task) : null;
     if (!state.form) {
       const route = cardRoute(page, tasks, routes, { dusk: Boolean(duskAccount()), evm: Boolean(evmAccount()) });
@@ -307,6 +310,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       state.form = {
         amount: "",
         error: "",
+        // A recipient handed over in the link, while it's the one shown.
+        handedOver: "",
         // What each .dusk name typed as the recipient pointed to when looked up.
         lookups: {},
         menu: null,
@@ -316,8 +321,24 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         routeId: route.id,
         routeOpen: false,
       };
-    } else if (linked) setPair(linked);
+      handOver(page, route);
+    } else if (follow && linked) {
+      setPair(linked);
+      handOver(page, linked);
+    }
     return state.form;
+  }
+
+  /**
+   * The Dusk recipient a link hands over: filled in and shown as "Paying …"
+   * until it's changed. Connecting Dusk Wallet doesn't replace it.
+   */
+  function handOver(page, route) {
+    const to = handedOverRecipient(page, route);
+    if (!to || !state.form) return;
+    state.form.recipientInput = to;
+    state.form.recipientEditing = false;
+    state.form.handedOver = to;
   }
 
   /** Moves the card to `route`: its reads start again, and a typed recipient of the other kind goes. */
@@ -470,18 +491,16 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const resolved = typed?.name && typed.address ? { address: typed.address, name: typed.name } : null;
     const destinationIsOwn =
       route.to.kind === "dusk" ? destination && destination === duskAccount() : destination && destination.toLowerCase() === evmAccount().toLowerCase();
-    const who = resolved
-      ? `<b>${html(resolved.name)}</b> (${html(short(destination))})`
-      : destinationIsOwn && route.to.kind === "dusk" && duskName()
-        ? `<b>${html(duskName())}</b>`
-        : `<b class="mono">${html(short(destination))}</b>`;
-    const line = !destination
-      ? route.to.kind === "dusk"
-        ? "Connect Dusk Wallet, or add a Dusk account"
-        : "Connect an EVM wallet, or add a 0x address"
-      : destinationIsOwn
-        ? `to your ${route.to.kind === "dusk" ? "account" : walletName} ${who}`
-        : `to ${who}`;
+    const line = recipientLine(route, {
+      connected: Boolean(duskAccount()),
+      destination,
+      duskName: duskName(),
+      // A recipient the link handed over, as long as it's the one typed.
+      handedOver: Boolean(state.form.handedOver) && state.form.recipientInput === state.form.handedOver,
+      own: Boolean(destinationIsOwn),
+      resolved,
+      walletName,
+    });
     const toVm = {
       canReset: Boolean(state.form.recipientInput) && Boolean(route.to.kind === "dusk" ? duskAccount() : evmAccount()),
       editing: state.form.recipientEditing || (!destination && Boolean(state.form.recipientInput)),
@@ -525,7 +544,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       canFlip: Boolean(flipRoute(routes, route)),
       canMax: quote.maxLux !== null && quote.maxLux !== undefined && quote.maxLux > 0n,
       // DUSK on Ethereum or BNB Smart Chain, for whoever doesn't know to pick it as From.
-      entry: entryRoutes(routes, route).map((item) => ({ href: `#/move/${item.id}`, name: networkName(cfg, item.from.id) })),
+      entry: entryRoutes(routes, route).map((item) => ({ href: moveHref(item.id), name: networkName(cfg, item.from.id) })),
       error: state.form.error,
       from: { balance, balanceLabel: route.signer === "dusk" ? "Public balance" : "Balance", net: netOf(route.from.id) },
       fromChoices: state.form.menu === "from" ? networkChoices("from", route) : [],
@@ -1318,7 +1337,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     if (state.sheet === "review") closeSheet();
     state.page = next;
     if (isCardPage()) {
-      ensureCard(next);
+      ensureCard(next, { follow: true });
       void loadReads();
     }
     if (next.page === "transfer") void openReceipt(next.hash);
@@ -1464,6 +1483,13 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       state.form.menu = null;
       renderMain();
       if (!event.target.closest("[data-action]")) return;
+    }
+    // A link to the route already open opens it again: no hash change says so.
+    const move = event.target.closest('a[href^="#/move/"]');
+    if (move && move.getAttribute("href") === globalThis.location?.hash) {
+      event.preventDefault();
+      navigate();
+      return;
     }
     const copyTarget = event.target.closest("[data-copy]");
     if (copyTarget) {

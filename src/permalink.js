@@ -11,6 +11,13 @@ export function canonicalHash(input) {
 
 export const transferHref = (hash) => `#/transfer/${canonicalHash(hash) ?? ""}`;
 
+/**
+ * A link that opens the card on a route (`#/move/<route>`), with a Dusk
+ * recipient handed over where one is given: `#/move/<route>?to=<account>`,
+ * as the web wallet's Migrate can link here.
+ */
+export const moveHref = (route, { to = "" } = {}) => `#/move/${route}${to ? `?to=${encodeURIComponent(to)}` : ""}`;
+
 /** The full receipt link for `hash`, from the page's own address. */
 export function receiptUrl(hash, location = globalThis.location) {
   const base = location ? `${location.origin}${location.pathname}` : "";
@@ -20,7 +27,7 @@ export function receiptUrl(hash, location = globalThis.location) {
 /**
  * The page a hash names:
  * - `{ page: "home" }`
- * - `{ page: "move", task }`
+ * - `{ page: "move", task }`, and `to`, a recipient handed over in `?to=`
  * - `{ page: "transfer", hash }`
  * - `{ page: "transfers" }`
  * - `{ page: "lookup" }`
@@ -41,9 +48,14 @@ function decodePart(part) {
 export const quotesOn = (page) => ["home", "move", "transfer", "transfers"].includes(page?.page);
 
 export function parseLocation(hash) {
-  const path = String(hash ?? "").replace(/^#\/?/u, "").replace(/\/+$/u, "");
+  const raw = String(hash ?? "").replace(/^#\/?/u, "");
+  const at = raw.indexOf("?");
+  const path = (at < 0 ? raw : raw.slice(0, at)).replace(/\/+$/u, "");
   const [head, ...rest] = path.split("/").map(decodePart);
-  if (head === "move" && /^[a-z-]+$/u.test(rest[0] ?? "")) return { page: "move", task: rest[0] };
+  if (head === "move" && /^[a-z-]+$/u.test(rest[0] ?? "")) {
+    const to = at < 0 ? "" : (new URLSearchParams(raw.slice(at + 1)).get("to") ?? "").replace(/\s+/gu, "");
+    return to ? { page: "move", task: rest[0], to } : { page: "move", task: rest[0] };
+  }
   if (head === "transfer") {
     const value = canonicalHash(rest[0]);
     return value ? { hash: value, page: "transfer" } : { page: "lookup", query: rest[0] ?? "" };

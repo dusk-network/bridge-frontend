@@ -109,6 +109,25 @@ export function reviewChecks(route, { cfg, destination, duskAccount, evm, quote,
   return checks;
 }
 
+/**
+ * The line under To that says who's paid: the recipient by its .dusk name
+ * or short form, "to your account …" when it's the connected one, "Paying …"
+ * for a Dusk recipient a link handed over (`handedOver`), saying so when
+ * Dusk Wallet is `connected` with another account, or what's missing. HTML,
+ * its values escaped.
+ */
+export function recipientLine(route, { connected = false, destination = "", duskName = "", handedOver = false, own = false, resolved = null, walletName = "your EVM wallet" } = {}) {
+  const dusk = route.to.kind === "dusk";
+  if (!destination) return dusk ? "Connect Dusk Wallet, or add a Dusk account" : "Connect an EVM wallet, or add a 0x address";
+  if (handedOver && dusk) return `Paying <b class="mono">${html(short(destination))}</b>${connected && !own ? ", not your connected account" : ""}`;
+  const who = resolved
+    ? `<b>${html(resolved.name)}</b> (${html(short(destination))})`
+    : own && dusk && duskName
+      ? `<b>${html(duskName)}</b>`
+      : `<b class="mono">${html(short(destination))}</b>`;
+  return own ? `to your ${dusk ? "account" : walletName} ${who}` : `to ${who}`;
+}
+
 /** A late transfer's note: that it is, and who to ask where the deployment names one. */
 export function lateLine(cfg) {
   const ask = cfg.links?.support

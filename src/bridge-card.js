@@ -94,6 +94,14 @@ export const followsWallets = (form) => Boolean(form) && !form.pairChosen && !fo
 export const entryRoutes = (routes, current) =>
   current?.mode === "migration" ? [] : routes.filter((route) => route.mode === "migration" && !route.paused);
 
+/**
+ * The Dusk recipient a link hands over (`#/move/<route>?to=<account>`), as
+ * the web wallet's Migrate can link here with its own account: only for a
+ * route that pays a Dusk account, else none.
+ */
+export const handedOverRecipient = (page, route) =>
+  page?.page === "move" && page.to && route?.to.kind === "dusk" ? page.to : "";
+
 /** The way back, when the bridge runs one: what the flip button swaps to. */
 export function flipRoute(routes, route) {
   const back = route ? routeBetween(routes, route.to.id, route.from.id) : null;

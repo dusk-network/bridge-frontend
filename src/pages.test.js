@@ -5,7 +5,7 @@ import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
 import { bridgeTasks } from "./names.js";
-import { actionLead, actionPrivacy, availableLine, pricedReview, receiptModel, reviewChecks, routeLine, transfersModel } from "./page-models.js";
+import { actionLead, actionPrivacy, availableLine, pricedReview, receiptModel, recipientLine, reviewChecks, routeLine, transfersModel } from "./page-models.js";
 import { buildQuote, withdrawalStepMax } from "./quote.js";
 import { withdrawalGasLimit } from "./gas.js";
 import { transferView } from "./transfer-view.js";
@@ -640,4 +640,21 @@ test("the pages say what's public and what to do, without explaining what they a
   assert.equal(receipt.match(/Anyone with the link can see this transfer\./gu)?.length, 1);
   // The deposit's step says nothing the hero, the caption or the details don't.
   assert.deepEqual(receiptModel(entry, { cfg: testnet, now: entry.sourceAt + 60_000, route, url: "x" }).view.steps.map((step) => step.detail), ["", "", ""]);
+});
+
+test("a Dusk recipient handed over in the link reads as Paying, with a way to change it", () => {
+  const line = (route, options) => recipientLine(route, { destination: ACCOUNT, ...options });
+  assert.equal(line(T.migration, { handedOver: true }), 'Paying <b class="mono">21n5nc…fMMLNz</b>');
+  // Even when it's the connected account; another one is said.
+  assert.equal(line(T["duskevm-withdrawal"], { connected: true, duskName: "alice.dusk", handedOver: true, own: true }), 'Paying <b class="mono">21n5nc…fMMLNz</b>');
+  assert.equal(line(T.migration, { connected: true, handedOver: true }), 'Paying <b class="mono">21n5nc…fMMLNz</b>, not your connected account');
+  // Otherwise as before.
+  assert.equal(line(T.migration, {}), 'to <b class="mono">21n5nc…fMMLNz</b>');
+  assert.equal(line(T.migration, { duskName: "alice.dusk", own: true }), "to your account <b>alice.dusk</b>");
+  assert.equal(line(T.migration, { resolved: { address: ACCOUNT, name: "bob.dusk" } }), 'to <b>bob.dusk</b> (21n5nc…fMMLNz)');
+  assert.equal(recipientLine(T.migration, {}), "Connect Dusk Wallet, or add a Dusk account");
+  assert.equal(recipientLine(T["duskevm-deposit"], { destination: EVM, own: true, walletName: "MetaMask" }), 'to your MetaMask <b class="mono">0xd63b…8df4</b>');
+  // The card: the line, then Change.
+  const page = cardPage(cardVmFor({ to: { ...cardVmFor().to, label: "Recipient on Dusk", line: line(T.migration, { handedOver: true }), net: { id: "dusk", name: "Dusk" } } }));
+  assert.match(page, /<p class="recip">Paying <b class="mono">21n5nc…fMMLNz<\/b> · <button type="button" class="linkish" data-action="recipient-edit">Change<\/button><\/p>/u);
 });
