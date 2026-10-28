@@ -95,12 +95,6 @@ function parts(ms, options) {
 export const formatDateTime = (ms, { locale, now, seconds = false, timeZone, year = false } = {}) =>
   formatTime(ms, { date: year ? "full" : "auto", locale, now, seconds, timeZone });
 
-/** "Sat 31 Oct", without the time. */
-export function formatDay(ms, { timeZone } = {}) {
-  const p = parts(ms, { day: "numeric", month: "short", timeZone, weekday: "short" });
-  return `${p.weekday} ${p.day} ${p.month}`;
-}
-
 /** "25 Oct". */
 export function formatShortDay(ms, { timeZone } = {}) {
   const p = parts(ms, { day: "numeric", month: "short", timeZone });

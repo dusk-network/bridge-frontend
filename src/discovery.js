@@ -6,13 +6,14 @@
 // per visit and kept here per network and account; a transfer found twice, or
 // found and also sent from this browser, is one entry.
 
-import { decodeFunctionData, parseAbi } from "viem";
+import { decodeFunctionData } from "viem";
 
 import { syncDuskHistory } from "./dusk-history.js";
 import { syncWithdrawals } from "./l2-withdrawals.js";
 import { entryId } from "./activity.js";
 import { decodeDepositArgs, DEPOSIT_FN_NAME } from "./dusk-deposit.js";
-import { withdrawalNextAction } from "./withdrawal-lifecycle.js";
+import { MIGRATION_ABI } from "./legacy-migration.js";
+import { withdrawalNextAction } from "./transfer-view.js";
 
 const WEI_PER_LUX = 1_000_000_000n;
 const TERMINAL = new Set(["completed", "failed"]);
@@ -160,8 +161,6 @@ export function entryFromWithdrawal(record, address) {
   };
 }
 
-const MIGRATE_ABI = parseAbi(["function migrate(uint256 amount, string mainnetDuskAddress)"]);
-
 /**
  * Whether a migration call pays `account` exactly this payout's amount: the
  * memo is public, so a transfer naming someone else's migration, or carrying
@@ -170,7 +169,7 @@ const MIGRATE_ABI = parseAbi(["function migrate(uint256 amount, string mainnetDu
  */
 function paysAsMigrated(record, tx, account, payer) {
   try {
-    const { args } = decodeFunctionData({ abi: MIGRATE_ABI, data: tx.input });
+    const { args } = decodeFunctionData({ abi: MIGRATION_ABI, data: tx.input });
     return (
       args[1] === account &&
       (args[0] / WEI_PER_LUX).toString() === String(record.amountLux) &&
@@ -264,8 +263,6 @@ async function addDetails(records, node) {
  * @param {Storage} [deps.storage]
  */
 export function createDiscovery({ cfg, node, rpc, rpcBatch, storage = defaultStorage() }) {
-  const running = new Map();
-
   async function duskAccount(account, maxRequests) {
     const key = stateKey(cfg, "dusk", account);
     const { state } = await syncDuskHistory({
@@ -295,22 +292,16 @@ export function createDiscovery({ cfg, node, rpc, rpcBatch, storage = defaultSto
     return { entries: Object.values(state.entries).map((record) => entryFromWithdrawal(record, address)), state };
   }
 
-  /** Each source once at a time; a second call waits for the running one. */
-  function once(key, run) {
-    if (!running.has(key)) running.set(key, run().finally(() => running.delete(key)));
-    return running.get(key);
-  }
-
   return Object.freeze({
     /**
      * Reads what is new for the accounts given, and older heights within the
      * request budgets. Returns the entries found and the sources' coverage.
+     * One run at a time: discovery-runs.js runs it.
      */
     async discover({ dusk, duskRequests, evm, evmRequests }) {
       const jobs = [];
-      if (dusk) jobs.push(once(`dusk:${dusk}`, () => duskAccount(dusk, duskRequests)).then((r) => ({ ...r, source: "dusk" })));
-      if (evm && cfg.duskEvm.enabled)
-        jobs.push(once(`l2:${partyKey(evm)}`, () => evmAddress(evm, evmRequests)).then((r) => ({ ...r, source: "l2" })));
+      if (dusk) jobs.push(duskAccount(dusk, duskRequests).then((r) => ({ ...r, source: "dusk" })));
+      if (evm && cfg.duskEvm.enabled) jobs.push(evmAddress(evm, evmRequests).then((r) => ({ ...r, source: "l2" })));
       const results = await Promise.allSettled(jobs);
       return {
         entries: results.flatMap((result) => (result.status === "fulfilled" ? result.value.entries : [])),

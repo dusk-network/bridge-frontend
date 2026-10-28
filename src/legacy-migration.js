@@ -1,50 +1,11 @@
-import { formatUnits, parseUnits } from "viem";
+import { erc20Abi } from "@dusk/evm-sdk";
+import { formatUnits, parseAbi, parseUnits } from "viem";
 
 import { ensureEvmChain, getEvmClients } from "./evm-wallet.js";
 import { normalizeDuskAddress, normalizeEvmAddress } from "./validation.js";
 
-const erc20Abi = [
-  {
-    type: "function",
-    name: "allowance",
-    stateMutability: "view",
-    inputs: [
-      { name: "owner", type: "address" },
-      { name: "spender", type: "address" },
-    ],
-    outputs: [{ type: "uint256" }],
-  },
-  {
-    type: "function",
-    name: "approve",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "spender", type: "address" },
-      { name: "amount", type: "uint256" },
-    ],
-    outputs: [{ type: "bool" }],
-  },
-  {
-    type: "function",
-    name: "balanceOf",
-    stateMutability: "view",
-    inputs: [{ name: "account", type: "address" }],
-    outputs: [{ type: "uint256" }],
-  },
-];
-
-const migrationAbi = [
-  {
-    type: "function",
-    name: "migrate",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "amount", type: "uint256" },
-      { name: "mainnetDuskAddress", type: "string" },
-    ],
-    outputs: [],
-  },
-];
+/** The migration contracts' one function, the same on Ethereum and BNB Smart Chain. */
+export const MIGRATION_ABI = parseAbi(["function migrate(uint256 amount, string mainnetDuskAddress)"]);
 
 export function parseMigrationAmount(amount) {
   const value = parseUnits(String(amount).trim(), 18);
@@ -65,28 +26,6 @@ export function assertMigrationBalance(balance, amount) {
       `Insufficient DUSK token balance: ${formatUnits(balance, 18)} available, ${formatUnits(value, 18)} required.`,
     );
   return value;
-}
-
-export async function migrationSnapshot(network) {
-  await ensureEvmChain(network);
-  const { account, publicClient } = getEvmClients(network);
-  const [balance, allowance] = await Promise.all([
-    publicClient.readContract({
-      account,
-      abi: erc20Abi,
-      address: network.tokenContract,
-      functionName: "balanceOf",
-      args: [account],
-    }),
-    publicClient.readContract({
-      account,
-      abi: erc20Abi,
-      address: network.tokenContract,
-      functionName: "allowance",
-      args: [account, network.migrationContract],
-    }),
-  ]);
-  return { allowance, balance, formattedBalance: formatUnits(balance, 18) };
 }
 
 export async function approveMigration(network, amount) {
@@ -114,7 +53,7 @@ export async function submitMigration(network, amount, duskAccount) {
   const recipient = normalizeDuskAddress(duskAccount);
   const { request } = await publicClient.simulateContract({
     account,
-    abi: migrationAbi,
+    abi: MIGRATION_ABI,
     address: normalizeEvmAddress(network.migrationContract),
     functionName: "migrate",
     args: [value, recipient],

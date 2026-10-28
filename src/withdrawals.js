@@ -377,7 +377,6 @@ function finalizationNotReadyMessage(status) {
  * @param {() => Promise<bigint>} deps.gasPrice the node's gas price
  * @param {bigint} deps.gasUpper the bridge's gas limit bound
  * @param {bigint} [deps.gameSearchDepth]
- * @param {(fnName: string, args: unknown, gas: object) => Promise<{ hash: string }>} deps.sendPortalCall
  */
 export function createWithdrawals(deps) {
   const searchDepth = deps.gameSearchDepth ?? 64n;
@@ -1103,23 +1102,10 @@ export function createWithdrawals(deps) {
     };
   }
 
-  async function proveWithdrawal(txHash) {
-    const { args, fnName, gas } = await prepareProve(txHash);
-    return (await deps.sendPortalCall(fnName, args, gas)).hash;
-  }
-
-  async function finalizeWithdrawal(txHash) {
-    const { args, fnName, gas } = await prepareFinalize(txHash);
-    return (await deps.sendPortalCall(fnName, args, gas)).hash;
-  }
-
   return Object.freeze({
-    finalizeWithdrawal,
     loadTiming,
     loadWithdrawalStatus,
     prepareFinalize,
     prepareProve,
-    proveWithdrawal,
-    withdrawalGas,
   });
 }

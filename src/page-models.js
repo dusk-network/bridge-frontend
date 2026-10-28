@@ -8,11 +8,11 @@ import { explorerAddressUrl } from "./contracts.js";
 import { groupTransfers, shownFor } from "./discovery.js";
 import { claimAfterProving, proveNowText } from "./claim-date.js";
 import { aboutFee, formatDateTime, formatDusk, formatExactFee, formatLux, formatMaxFee, formatUnitsGrouped } from "./format.js";
-import { gasCoin, networkName, networkNames, routeTitle, tokenName } from "./names.js";
+import { gasCoin, networkName, routeTitle, tokenName } from "./names.js";
 import { transferHref } from "./permalink.js";
 import { buildQuote, routeDuskFees, stepFeeText, withdrawalStepMax } from "./quote.js";
 import { routeTime, routeTimeText } from "./route-times.js";
-import { explorerTxUrl, html, privacyLine, short, transferSubline, transferView } from "./transfer-view.js";
+import { explorerTxUrl, html, short, transferSubline, transferView } from "./transfer-view.js";
 
 export const DUSK_WALLET_URL = "https://docs.dusk.network/use/wallets/#dusk-wallet";
 
@@ -342,5 +342,3 @@ export function transfersModel(entries, { account = "", accounts, cfg, locale, n
     needs: groups.needs.length,
   };
 }
-
-export { short, privacyLine };

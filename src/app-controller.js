@@ -12,9 +12,9 @@ import { config } from "./config.js";
 import { bridgeOperator, contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
 import { followAfterDiscovery, mergeTransfer, mergeTransfers, partyKey } from "./discovery.js";
 import { createDiscoveryRuns } from "./discovery-runs.js";
-import { depositRequest, submitDuskEvmDeposit } from "./dusk-deposit.js";
+import { depositRequest } from "./dusk-deposit.js";
 import { topGap } from "./dusk-history.js";
-import { createDuskConnection, ensureDuskConnected, sendDuskContractCall } from "./dusk-wallet.js";
+import { createDuskConnection, ensureDuskConnected, sendDuskContractCall, sendDuskTransfer } from "./dusk-wallet.js";
 import { submitDuskEvmWithdrawal } from "./duskevm-withdrawal.js";
 import { connectEvmWallet, getEvmState, initializeEvmWallet, subscribeEvmWallet } from "./evm-wallet.js";
 import { createFormReads } from "./form-reads.js";
@@ -36,7 +36,7 @@ import {
 } from "./page-models.js";
 import { canonicalHash, moveHref, parseLocation, quotesOn, receiptUrl, transferHref } from "./permalink.js";
 import { buildQuote, parseAmount, withdrawalStepMax } from "./quote.js";
-import { serviceTransferRequest, submitServiceTransfer } from "./service-transfer.js";
+import { serviceTransferRequest } from "./service-transfer.js";
 import { createServices, proofSubmitterFor } from "./services.js";
 import { createLookupFlow } from "./lookup-flow.js";
 import { createReceiptLookups } from "./receipt-lookups.js";
@@ -61,8 +61,6 @@ import {
 } from "./views.js";
 import { approveLines, duskCallLines, duskTransferLines, migrateLines, withdrawLines } from "./wallet-lines.js";
 import { withdrawalDetails } from "./withdrawals.js";
-
-export { friendlyWalletError };
 
 const WEI_PER_LUX = 1_000_000_000n;
 // Per visit: about two months of a sparse Dusk history, and about 25 days of
@@ -1254,10 +1252,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         });
       }
       const scanFrom = await headBlock(route.mode === "duskevm-deposit" ? "dusk-evm" : route.to.id);
-      const { hash } =
-        route.mode === "duskevm-deposit"
-          ? await submitDuskEvmDeposit({ account: review.signer?.account, request: review.request })
-          : await submitServiceTransfer({ account: review.signer?.account, request: review.request });
+      // The reviewed request, as the account it was reviewed for.
+      const send = route.mode === "duskevm-deposit" ? sendDuskContractCall : sendDuskTransfer;
+      const { hash } = await send(review.request, { account: review.signer?.account });
       return sent({
         amountLux: review.amountLux.toString(),
         destination: review.destination,

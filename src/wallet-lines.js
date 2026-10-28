@@ -10,7 +10,7 @@ import { networkFor, networks, routes } from "@dusk-network/networks";
 import { formatContractId, formatEvmAddress } from "@dusk-network/networks/format";
 
 import { decodeDepositArgs } from "./dusk-deposit.js";
-import { sha256Hex, toHex } from "./data-driver.js";
+import { sha256Hex } from "./data-driver.js";
 import { aboutFee, formatDusk, formatLux, formatMaxFee } from "./format.js";
 import { networkName, tokenName } from "./names.js";
 import { normalizeEvmAddress } from "./validation.js";
@@ -362,5 +362,3 @@ export async function duskCallLines({ chainId, contractId, depositLux = 0n, disp
     ...siteLine(display),
   ];
 }
-
-export const bytesHex = (bytes) => `0x${toHex(bytes)}`;

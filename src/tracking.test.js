@@ -438,7 +438,6 @@ test("a deposit is followed to its DuskEVM credit through the bridge event when 
   assert.equal(waiting.status, "pending");
   assert.equal(waiting.destination, RECIPIENT);
   assert.equal(waiting.amountLux, "100000000");
-  assert.equal(tracking.adapterLookup(), "missing");
 
   credited = true;
   const done = await tracking.refresh(entry, ROUTES.deposit);
@@ -461,7 +460,9 @@ test("a deposit waits while the adapter hasn't seen it, and fails with its Dusk 
   const entry = { hash: DUSK_HASH, routeId: ROUTES.deposit.id };
 
   assert.equal((await tracking.refresh(entry, ROUTES.deposit)).status, "pending");
-  assert.equal(tracking.adapterLookup(), "available");
+  // This adapter maps Dusk hashes: it's asked again on the next check.
+  assert.equal((await tracking.refresh(entry, ROUTES.deposit)).status, "pending");
+  assert.equal(rpc.calls.filter(({ method }) => method === "duskevm_getTransactionHashByDuskHash").length, 2);
 
   tx = duskTx({ callData: call, error: "Panic: out of gas" });
   assert.equal((await tracking.refresh(entry, ROUTES.deposit)).status, "failed");

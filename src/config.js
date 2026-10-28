@@ -237,5 +237,3 @@ export function loadConfig() {
 }
 
 export const config = loadConfig();
-
-export const duskEvmDepositConfigured = () => config.duskEvm.enabled;

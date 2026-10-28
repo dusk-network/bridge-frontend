@@ -11,10 +11,14 @@ globalThis.__DUSK_BRIDGE_CONFIG__ = {
 };
 const { config } = await import("./config.js");
 const { networks } = await import("@dusk-network/networks");
-const { useDuskWallet } = await import("./dusk-wallet.js");
-const { submitServiceTransfer } = await import("./service-transfer.js");
-const { decodeDepositArgs, submitDuskEvmDeposit } = await import("./dusk-deposit.js");
+const { sendDuskContractCall, sendDuskTransfer, useDuskWallet } = await import("./dusk-wallet.js");
+const { serviceTransferRequest } = await import("./service-transfer.js");
+const { decodeDepositArgs, depositRequest } = await import("./dusk-deposit.js");
 const { fromHex } = await import("./data-driver.js");
+
+// What the review prepares and then sends, as the account it was reviewed for.
+const submitServiceTransfer = async ({ account, ...options }) => sendDuskTransfer(await serviceTransferRequest(options), { account });
+const submitDuskEvmDeposit = async ({ account, ...options }) => sendDuskContractCall(await depositRequest(options), { account });
 
 /** A Dusk Connect wallet stand-in that records what the bridge sends. */
 function fakeWallet() {
@@ -48,7 +52,7 @@ test("a Dusk → Sepolia transfer memos the typed destination to the bridge acco
   const wallet = fakeWallet();
   useDuskWallet(wallet);
 
-  const { to } = await submitServiceTransfer({
+  await submitServiceTransfer({
     amountLux: 2_000_000_000n,
     destination: `  ${TYPED} `,
   });
@@ -57,7 +61,6 @@ test("a Dusk → Sepolia transfer memos the typed destination to the bridge acco
   const [{ kind, params }] = wallet.sent;
   assert.equal(kind, "transfer");
   assert.equal(params.memo, getAddress(TYPED));
-  assert.equal(to, params.memo);
   assert.equal(params.to, config.service.account);
   // The Sepolia bridge account, as the network's file names it.
   assert.equal(params.to, networks.testnet.routes.services[0].account);

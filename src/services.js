@@ -7,7 +7,7 @@ import { createDriverLoader, driverJson } from "./data-driver.js";
 import { createDiscovery } from "./discovery.js";
 import { createDuskNames } from "./dusk-names.js";
 import { createDuskNode } from "./dusk-node.js";
-import { getDuskWallet, sendDuskContractCall } from "./dusk-wallet.js";
+import { getDuskWallet } from "./dusk-wallet.js";
 import { createEvmReads } from "./evm-reads.js";
 import { resolveTransfer } from "./resolve.js";
 import { createTracking, duskAccountEvmAddress } from "./tracking.js";
@@ -134,7 +134,6 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
       registry: cfg.duskEvm.anchorStateRegistryContractId
         ? contractFacade(reader, { driver: async () => GAME_REGISTRY_DRIVER, id: cfg.duskEvm.anchorStateRegistryContractId })
         : null,
-      sendPortalCall: async (fnName, args, gas) => sendDuskContractCall(await portalRequest({ args, fnName, gas })),
     });
   }
 

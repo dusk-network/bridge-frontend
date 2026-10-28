@@ -18,7 +18,7 @@ import {
 import { networkName, tokenName } from "./names.js";
 import { aboutTime, lateAfterSeconds, routeTime } from "./route-times.js";
 import { STATUS_WORDS } from "./tracking.js";
-import { withdrawalActionFailure, withdrawalNextAction } from "./withdrawal-lifecycle.js";
+import { WITHDRAWAL_GAS_REFUSAL } from "./gas.js";
 
 export const html = (value) =>
   String(value ?? "")
@@ -48,6 +48,15 @@ export function short(value) {
   const text = String(value ?? "");
   return /^0x[0-9a-f]{40}$/iu.test(text) ? formatEvmAddress(text, { short: true }) : shortAccount(text);
 }
+
+/** The action a withdrawal's stage waits for, if the user can take it now. */
+export const withdrawalNextAction = (stage) => (stage === "ready_to_prove" ? "prove" : stage === "ready_to_finalize" ? "finalize" : null);
+
+/** What a proof or claim that couldn't be sent says, at the stage that offers to send it again. */
+const ACTION_FAILURE = Object.freeze({
+  ready_to_finalize: "The claim wasn't sent. Try again.",
+  ready_to_prove: "The proof wasn't sent. Try again.",
+});
 
 /** What every page says when you reject a request in your wallet: never in red, it's your choice. */
 export const WALLET_CANCELLED = "You cancelled in your wallet, so nothing was sent.";
@@ -327,13 +336,13 @@ export function transferView(entry, { account = "", cfg, locale, name = "", now 
       ? {
           // A claim waits for the account that proved it.
           blocked: actionKind === "finalize" && proverMismatch(entry, submitter) ? switchToProver(entry) : "",
-          // Rejected in the wallet: that, as the deposit says it, not a failure to try again.
-          failure:
-            entry.actionError === WALLET_CANCELLED
-              ? WALLET_CANCELLED
-              : entry.actionError
-                ? withdrawalActionFailure(entry.stage, entry.actionError)
-                : "",
+          // Rejected in the wallet: that, as the deposit says it. Refused for
+          // its gas: that, since trying again would be refused too.
+          failure: !entry.actionError
+            ? ""
+            : entry.actionError === WALLET_CANCELLED || entry.actionError === WITHDRAWAL_GAS_REFUSAL
+              ? entry.actionError
+              : ACTION_FAILURE[entry.stage],
           kind: actionKind,
           label: actionKind === "prove" ? "Prove on Dusk" : "Claim on Dusk",
         }

@@ -19,14 +19,5 @@ export function parseUnitsExact(input, decimals) {
   return units;
 }
 
-export function formatUnits(value, decimals, maximumFractionDigits = decimals) {
-  const units = BigInt(value);
-  const scale = 10n ** BigInt(decimals);
-  const whole = units / scale;
-  const fraction = (units % scale).toString().padStart(decimals, "0");
-  const shown = fraction.slice(0, maximumFractionDigits).replace(/0+$/u, "");
-  return shown ? `${whole}.${shown}` : whole.toString();
-}
-
 export const duskToLux = (input) => parseUnitsExact(input, 9);
 export const duskToWei = (input) => parseUnitsExact(input, 18);

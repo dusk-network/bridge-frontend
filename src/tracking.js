@@ -15,6 +15,7 @@ import {
 
 import { decodeBase58 } from "./base58.js";
 import { decodeDepositArgs, DEPOSIT_FN_NAME } from "./dusk-deposit.js";
+import { MIGRATION_ABI } from "./legacy-migration.js";
 import { networkName } from "./names.js";
 import { normalizeEvmAddress } from "./validation.js";
 import { NOT_A_DUSK_WITHDRAWAL } from "./withdrawals.js";
@@ -33,9 +34,6 @@ const ETH_BRIDGE_FINALIZED = parseAbi([
   "event ETHBridgeFinalized(address indexed from, address indexed to, uint256 amount, bytes extraData)",
 ]);
 const ETH_BRIDGE_FINALIZED_TOPIC = toEventSelector(ETH_BRIDGE_FINALIZED[0]);
-const MIGRATE_ABI = parseAbi([
-  "function migrate(uint256 amount, string mainnetDuskAddress)",
-]);
 
 /** What a Dusk transaction paid: the gas it spent at its price, in Lux. */
 export function duskFeePaid(tx) {
@@ -312,7 +310,7 @@ export function createTracking(deps) {
       const tx = await rpc(network, "eth_getTransactionByHash", [entry.hash]);
       if (tx?.input) {
         try {
-          const { args } = decodeFunctionData({ abi: MIGRATE_ABI, data: tx.input });
+          const { args } = decodeFunctionData({ abi: MIGRATION_ABI, data: tx.input });
           patch.amountLux = (args[0] / WEI_PER_LUX).toString();
           patch.destination = args[1];
           patch.sender = tx.from;
@@ -691,10 +689,7 @@ export function createTracking(deps) {
     }
   }
 
-  return Object.freeze({
-    adapterLookup: () => adapterLookup,
-    refresh,
-  });
+  return Object.freeze({ refresh });
 }
 
 /**

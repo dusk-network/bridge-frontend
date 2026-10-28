@@ -19,37 +19,17 @@ import {
 import { contractFacade, createContractReader } from "./contract-reader.js";
 import { DUSK_WALLET_BRIDGE_CONTRACTS, duskCallLines } from "./wallet-lines.js";
 import { decodeBase58 } from "./base58.js";
+import { TIP, TX, messagePassedLog, u256 } from "./withdrawals.fixtures.js";
 
 const ACCOUNT = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
 const RELAY = parseAbi([
   "function relayMessage(uint256 _nonce, address _sender, address _target, uint256 _value, uint256 _minGasLimit, bytes _message)",
   "function finalizeBridgeETH(address _from, address _to, uint256 _amount, bytes _extraData)",
 ]);
-
-// A DuskEVM withdrawal of 10 DUSK (web wallet fixture): relayMessage(...) to
-// L1's bridge, finalizeBridgeETH(from, to, amount, Dusk recipient).
-const messagePassedLog = {
-  address: "0x4200000000000000000000000000000000000016",
-  blockHash: "0x5510dbadb5bce778c1b7b331d37fcc0c86f2fe55f7b60f83b6d678b60f7726e0",
-  blockNumber: "0x3564",
-  data: "0x0000000000000000000000000000000000000000000000008ac7230489e80000000000000000000000000000000000000000000000000000000000000007ed760000000000000000000000000000000000000000000000000000000000000080e78b3f4d6f313300774677027a3a41540ab6eeaed0c3464d5865d53553fc27860000000000000000000000000000000000000000000000000000000000000284d764ad0b00010000000000000000000000000000000000000000000000000000000000070000000000000000000000004200000000000000000000000000000000000010000000000000000000000000f44f202151ffb9742ad4391849c62be3fb441e720000000000000000000000000000000000000000000000008ac7230489e800000000000000000000000000000000000000000000000000000000000000030d4000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000001841635f5fd000000000000000000000000eb9ea22334e679cdbc669cf9ad2d713b559708b1000000000000000000000000eb9ea22334e679cdbc669cf9ad2d713b559708b10000000000000000000000000000000000000000000000008ac7230489e80000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000c200fafd19fa981abfac15b121a37fabbf45d8e5630d79da8d13fae7c3c5dd03afb611f1c468c1b5961b5ecdfff7bc85c319b53a1d9979c7c041926e5b7cbf5e4dfe5adc1369895d5e341a7651079b25663c58909f2cf400d4cb70651413c5cd06185747ff4aac9dfe2d947fb6fdbf470562e3ee884afbf66427e4171dc95bc41ba64f5d97e6859cb85b307108b51f15c801d14c78437c13edef03ad3d455193020a6a1c99858112912522dace4683191ae1274ddfea6e686a9724eed4012029e913000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-  logIndex: "0x2",
-  removed: false,
-  topics: [
-    "0x02a52367d10742d8032712c1bb8e0144ff1ec5ffda1ed7d70bb05a2744955054",
-    "0x0001000000000000000000000000000000000000000000000000000000000007",
-    "0x0000000000000000000000004200000000000000000000000000000000000007",
-    "0x00000000000000000000000004ffbc4c863235f94f99ccc849de181a1ab74759",
-  ],
-  transactionHash: "0x57ac2440f740f3cdd4c90c758dcf28be7b35ed496d8b580958693d2e37883a57",
-  transactionIndex: "0x1",
-};
-const TX = messagePassedLog.transactionHash;
 const SUBMITTER = `0x${"2c".repeat(20)}`;
-// Testnet's contracts count Dusk block height × 10. The tip, as read on
-// 28 Oct 2026, and wallet-both.dusk's 1 DUSK withdrawal, the worked
-// example: proved at block 4,687,744, its game created at 4,687,605.
-const TIP = Object.freeze({ height: 4_704_959n, timestamp: 1_793_156_989n });
+// wallet-both.dusk's 1 DUSK withdrawal, the worked example, in the
+// contracts' time (testnet's: block height × 10): proved at block 4,687,744,
+// its game created at 4,687,605.
 const PROVEN_AT = 46_877_440n;
 const GAME_CREATED = 46_876_050n;
 /** A contract time on the wall clock, in seconds, counted from the tip. */
@@ -57,16 +37,6 @@ const wall = (seconds, tip = TIP) => tip.timestamp + seconds - 10n * tip.height;
 /** A proof long matured, against a game resolved and final long ago: claimable now. */
 const CLAIMABLE = Object.freeze({ createdAt: 45_250_000n, gameStatus: 2, provenAt: 45_252_320n, resolvedAt: 45_555_010n });
 const HUB_ID = "d5".repeat(32);
-
-function u256(value) {
-  let remaining = BigInt(value);
-  const out = Array(32).fill(0);
-  for (let i = 31; i >= 0; i -= 1) {
-    out[i] = Number(remaining & 0xffn);
-    remaining >>= 8n;
-  }
-  return out;
-}
 
 /** A spy: records calls, answers from `impl`. */
 function fn(impl) {
@@ -117,7 +87,6 @@ function setup({
     },
   };
   const hubIds = [];
-  const sent = [];
   const withdrawals = createWithdrawals({
     dgf,
     gasPrice: async () => 2n,
@@ -144,12 +113,8 @@ function setup({
     portal,
     proofSubmitter: () => SUBMITTER,
     registry,
-    sendPortalCall: async (fnName, args, gas) => {
-      sent.push({ args, fnName, gas });
-      return { hash: "finalize-hash" };
-    },
   });
-  return { dgf, hub, hubIds, portal, registry, sent, withdrawals };
+  return { dgf, hub, hubIds, portal, registry, withdrawals };
 }
 
 const invalidGame = async () => {
@@ -324,24 +289,22 @@ test("a withdrawal's waits are two node queries through Multicall for Dusk", asy
 });
 
 test("a finalized withdrawal isn't claimed again", async () => {
-  const { sent, withdrawals } = setup({ finalized: true });
+  const { withdrawals } = setup({ finalized: true });
 
-  await assert.rejects(withdrawals.finalizeWithdrawal(TX), /already finalized/u);
-  assert.equal(sent.length, 0);
+  await assert.rejects(withdrawals.prepareFinalize(TX), /already finalized/u);
 });
 
 test("a claim that needs more gas than the bound isn't sent", async () => {
-  const { sent, withdrawals } = setup({ ...CLAIMABLE, gasUpper: 50_000_000n });
+  const { withdrawals } = setup({ ...CLAIMABLE, gasUpper: 50_000_000n });
 
-  await assert.rejects(withdrawals.finalizeWithdrawal(TX), { message: WITHDRAWAL_GAS_REFUSAL });
-  assert.equal(sent.length, 0);
+  await assert.rejects(withdrawals.prepareFinalize(TX), { message: WITHDRAWAL_GAS_REFUSAL });
 });
 
 test("a claim sends the SDK-serialized withdrawal with its own gas on top", async () => {
-  const { sent, withdrawals } = setup(CLAIMABLE);
+  const { withdrawals } = setup(CLAIMABLE);
 
-  assert.equal(await withdrawals.finalizeWithdrawal(TX), "finalize-hash");
-  const [{ args, fnName, gas }] = sent;
+  const prepared = await withdrawals.prepareFinalize(TX);
+  const { args, fnName, gas } = prepared;
   assert.equal(fnName, "finalizeWithdrawalTransaction");
   // 50M plus the 519,542 gas the withdrawal asks for, raised to the 1M bound
   // the proof uses too, at the node's price.
@@ -354,7 +317,6 @@ test("a claim sends the SDK-serialized withdrawal with its own gas on top", asyn
   // The claim carries its withdrawal, so the review lists what Dusk Wallet
   // reads from the call. This one's extra data is in an older form that
   // names no Dusk account, so the window shows a plain contract call.
-  const prepared = await withdrawals.prepareFinalize(TX);
   const claimLines = (withdrawal) => {
     const details = withdrawalDetails(withdrawal);
     return duskCallLines({
@@ -426,7 +388,6 @@ test("a status check reads the Portal and game factory in one node query", async
     latestTimestamp: async () => 0n,
     portal,
     proofSubmitter: () => SUBMITTER,
-    sendPortalCall: async () => ({ hash: "" }),
   });
 
   const status = await batched.loadWithdrawalStatus(TX);
@@ -490,11 +451,10 @@ test("only the bridge's own DUSK withdrawals are followed, proved or claimed", a
   };
   for (const [name, log] of Object.entries(others)) {
     assert.throws(() => parseWithdrawalReceipt(receipt(log)), { message: NOT_A_DUSK_WITHDRAWAL }, name);
-    const { sent, withdrawals } = setup({ logs: [log] });
+    const { withdrawals } = setup({ logs: [log] });
     await assert.rejects(withdrawals.loadWithdrawalStatus(TX), { message: NOT_A_DUSK_WITHDRAWAL }, name);
-    await assert.rejects(withdrawals.proveWithdrawal(TX), { message: NOT_A_DUSK_WITHDRAWAL }, name);
-    await assert.rejects(withdrawals.finalizeWithdrawal(TX), { message: NOT_A_DUSK_WITHDRAWAL }, name);
-    assert.equal(sent.length, 0, name);
+    await assert.rejects(withdrawals.prepareProve(TX), { message: NOT_A_DUSK_WITHDRAWAL }, name);
+    await assert.rejects(withdrawals.prepareFinalize(TX), { message: NOT_A_DUSK_WITHDRAWAL }, name);
   }
 });
 
@@ -511,10 +471,8 @@ test("a proof this account already has isn't prepared again", async () => {
     [{ finalized: true }, "This withdrawal is already claimed."],
   ];
   for (const [options, message] of cases) {
-    const { sent, withdrawals } = setup(options);
+    const { withdrawals } = setup(options);
     await assert.rejects(withdrawals.prepareProve(TX), { message });
-    await assert.rejects(withdrawals.proveWithdrawal(TX), { message });
-    assert.deepEqual(sent, []);
   }
   // Not proven yet: it goes on to look for the output to prove against.
   await assert.rejects(setup({ provenAt: 0n }).withdrawals.prepareProve(TX), /No dispute games have been proposed yet/u);
@@ -522,9 +480,8 @@ test("a proof this account already has isn't prepared again", async () => {
 
 test("a withdrawal whose claim would need more gas than the bound isn't proved", async () => {
   // Not proven yet: the refusal comes before the proof is looked for.
-  const { sent, withdrawals } = setup({ gasUpper: 50_000_000n, provenAt: 0n });
+  const { withdrawals } = setup({ gasUpper: 50_000_000n, provenAt: 0n });
   await assert.rejects(withdrawals.prepareProve(TX), { message: WITHDRAWAL_GAS_REFUSAL });
-  assert.deepEqual(sent, []);
 });
 
 test("a proof or claim is prepared for the account its review is for", async () => {
@@ -694,7 +651,6 @@ test("a waiting withdrawal's check is one Multicall query once its game is known
     },
     portal: contractFacade(reader, contract("14".repeat(32))),
     proofSubmitter: () => SUBMITTER,
-    sendPortalCall: async () => ({ hash: "" }),
   });
 
   // The first check: the Portal's values; the game's hub (once a session) with the Portal's check; then the game.
@@ -795,10 +751,8 @@ test("a claim isn't ready before its date, even when the Portal's check says yes
   const status = await early.withdrawals.loadWithdrawalStatus(TX);
   assert.deepEqual([status.stage, status.readyAtExact, status.claimOverdue], ["proven_waiting", true, false]);
   assert.equal(new Date(Number(status.readyAt) * 1_000).toISOString(), "2026-11-02T03:24:19.000Z");
-  // Claim stays off: nothing is prepared or sent.
+  // Claim stays off: nothing is prepared, so nothing can be sent.
   await assert.rejects(early.withdrawals.prepareFinalize(TX), /Wait for its dispute game to become final/u);
-  await assert.rejects(early.withdrawals.finalizeWithdrawal(TX));
-  assert.deepEqual(early.sent, []);
   // From its date, the Portal's yes counts.
   assert.equal((await setup(CLAIMABLE).withdrawals.loadWithdrawalStatus(TX)).stage, "ready_to_finalize");
 });
