@@ -43,3 +43,29 @@ test("discovers and connects to an EIP-6963 provider", async () => {
   delete globalThis.addEventListener;
   delete globalThis.dispatchEvent;
 });
+
+test("requests the route's EVM source chain", async () => {
+  const requests = [];
+  globalThis.ethereum = {
+    on() {},
+    removeListener() {},
+    async request(request) {
+      requests.push(request);
+      if (request.method === "eth_accounts")
+        return ["0x0000000000000000000000000000000000000001"];
+      if (request.method === "eth_chainId") return "0x1";
+      if (request.method === "wallet_switchEthereumChain") return null;
+      throw new Error(`Unexpected method: ${request.method}`);
+    },
+  };
+  const wallet = await import(`./evm-wallet.js?switch=${Date.now()}`);
+  await wallet.initializeEvmWallet();
+  await wallet.ensureEvmChain({ chainId: 11_155_111 });
+
+  assert.deepEqual(
+    requests.find(({ method }) => method === "wallet_switchEthereumChain")
+      ?.params,
+    [{ chainId: "0xaa36a7" }],
+  );
+  delete globalThis.ethereum;
+});

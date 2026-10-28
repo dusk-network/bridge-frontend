@@ -1,7 +1,7 @@
 import { formatUnits, parseUnits } from "viem";
 
 import { ensureEvmChain, getEvmClients } from "./evm-wallet.js";
-import { normalizeEvmAddress } from "./validation.js";
+import { normalizeDuskAddress, normalizeEvmAddress } from "./validation.js";
 
 const erc20Abi = [
   {
@@ -58,6 +58,15 @@ export function parseMigrationAmount(amount) {
   return value;
 }
 
+export function assertMigrationBalance(balance, amount) {
+  const value = parseMigrationAmount(amount);
+  if (BigInt(balance) < value)
+    throw new Error(
+      `Insufficient DUSK token balance: ${formatUnits(balance, 18)} available, ${formatUnits(value, 18)} required.`,
+    );
+  return value;
+}
+
 export async function migrationSnapshot(network) {
   await ensureEvmChain(network);
   const { account, publicClient } = getEvmClients(network);
@@ -102,9 +111,7 @@ export async function submitMigration(network, amount, duskAccount) {
   await ensureEvmChain(network);
   const { account, publicClient, walletClient } = getEvmClients(network);
   const value = parseMigrationAmount(amount);
-  const recipient = String(duskAccount ?? "").trim();
-  if (!recipient)
-    throw new Error("Connect a Dusk wallet to select the recipient.");
+  const recipient = normalizeDuskAddress(duskAccount);
   const { request } = await publicClient.simulateContract({
     account,
     abi: migrationAbi,

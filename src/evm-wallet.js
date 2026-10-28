@@ -100,9 +100,14 @@ async function initializeReown() {
         public: { http: [rpcUrl] },
       },
     });
+    const legacyNetworkIds = new Set([
+      ...config.legacy.migrationKeys,
+      config.legacy.serviceNetworkId,
+    ]);
     const networks = [
-      network(config.legacy.migrations.ethereum),
-      network(config.legacy.migrations.bsc),
+      ...[...legacyNetworkIds].map((id) =>
+        network(config.legacy.migrations[id]),
+      ),
       network({
         chainId: config.duskEvm.chainId,
         chainName: config.duskEvm.name,

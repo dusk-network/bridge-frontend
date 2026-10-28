@@ -1,41 +1,47 @@
+import { config } from "./config.js";
+
 const defineRoute = (route) => Object.freeze(route);
 
 export const networks = Object.freeze({
-  bsc: Object.freeze({ id: "bsc", kind: "evm", label: "BNB Smart Chain" }),
+  bsc: Object.freeze({
+    id: "bsc",
+    kind: "evm",
+    label: config.legacy.migrations.bsc.chainName,
+  }),
   duskL1: Object.freeze({ id: "dusk-l1", kind: "dusk", label: "Dusk L1" }),
   duskMainnet: Object.freeze({
     id: "dusk-mainnet",
     kind: "dusk",
-    label: "Dusk Mainnet",
+    label: config.legacy.duskLabel,
   }),
   duskEvm: Object.freeze({ id: "dusk-evm", kind: "evm", label: "DuskEVM" }),
-  ethereum: Object.freeze({ id: "ethereum", kind: "evm", label: "Ethereum" }),
+  ethereum: Object.freeze({
+    id: "ethereum",
+    kind: "evm",
+    label: config.legacy.migrations.ethereum.chainName,
+  }),
 });
 
+const migrationRoutes = config.legacy.migrationKeys.map((networkId) =>
+  defineRoute({
+    amountDecimals: 18,
+    from: networks[networkId],
+    id: `${networkId}-to-dusk`,
+    mode: "migration",
+    signer: "evm",
+    to: networks.duskMainnet,
+  }),
+);
+
 export const bridgeRoutes = Object.freeze([
-  defineRoute({
-    amountDecimals: 18,
-    from: networks.ethereum,
-    id: "ethereum-to-dusk",
-    mode: "migration",
-    signer: "evm",
-    to: networks.duskMainnet,
-  }),
-  defineRoute({
-    amountDecimals: 18,
-    from: networks.bsc,
-    id: "bsc-to-dusk",
-    mode: "migration",
-    signer: "evm",
-    to: networks.duskMainnet,
-  }),
+  ...migrationRoutes,
   defineRoute({
     amountDecimals: 9,
     from: networks.duskMainnet,
-    id: "dusk-to-bsc",
+    id: `dusk-to-${config.legacy.serviceNetworkId}`,
     mode: "service-transfer",
     signer: "dusk",
-    to: networks.bsc,
+    to: networks[config.legacy.serviceNetworkId],
   }),
   defineRoute({
     amountDecimals: 9,

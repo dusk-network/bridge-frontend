@@ -114,6 +114,7 @@ select { appearance: none; padding-right: 2.5rem; }
 .message { margin: 0; padding: .75rem; border-radius: .5rem; overflow-wrap: anywhere; font-size: .8rem; }
 .message.error { background: #31131b; color: #ff9caf; }
 .message.success { background: #11291f; color: #6fbf8e; }
+.message.notice { background: #172332; color: #b8d8ff; }
 .withdrawal-manager { display: grid; gap: 1rem; margin-top: .35rem; padding-top: 1.25rem; border-top: 1px solid var(--border); }
 .activity { margin-top: 1rem; padding: 1.25rem 1.5rem; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }

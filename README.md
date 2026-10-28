@@ -50,6 +50,19 @@ The same keys can be provided before the app loads through
 `window.__DUSK_BRIDGE_CONFIG__`, which allows one immutable build to be
 deployed with environment-specific configuration.
 
+For local Messina/Reggio testing, use:
+
+```dotenv
+VITE_BRIDGE_PROFILE=testnet
+VITE_DEFAULT_DUSK_RECIPIENT=<public Dusk testnet account>
+```
+
+This selects the verified Sepolia Messina token and migrator, Dusk testnet,
+and the Reggio testnet bridge account. EVM → Dusk accepts an explicit Dusk
+recipient because only the EVM wallet signs that transaction. Dusk → Sepolia
+still requires Dusk Connect because the transfer originates from the Dusk
+wallet. The backend Messina/Reggio workers must be running for settlement.
+
 ## Development
 
 ```sh
