@@ -1,23 +1,16 @@
-import { createDuskApp, createDuskWallet } from "@dusk/connect";
+import { createDuskWallet } from "@dusk/connect";
 
 import { config } from "./config.js";
+import { toHex } from "./data-driver.js";
 
+// Dusk Connect is used for the account, signing and sending only. Chain state
+// is read from the deployment's own node (see dusk-node.js).
 let wallet;
-let app;
 
 export async function createDuskConnection() {
   wallet = wallet ?? createDuskWallet();
-  app =
-    app ??
-    createDuskApp({
-      wallet,
-      nodeUrl: config.duskEvm.l1NodeUrl,
-      chain: { chainId: config.duskEvm.l1ChainId },
-    });
   await wallet.ready();
-
   return {
-    app,
     connect: () => wallet.connect({ reason: "bridge_recipient" }),
     disconnect: () => wallet.disconnect(),
     get state() {
@@ -33,18 +26,16 @@ export function getDuskWallet() {
   return wallet;
 }
 
-export function getDuskApp() {
-  if (!app) throw new Error("The Dusk app is not initialized.");
-  return app;
+/** For tests: a stand-in for the Dusk Connect wallet. */
+export function useDuskWallet(next) {
+  wallet = next;
 }
 
 export function isRecoverableDuskSessionError(error) {
   return error?.code === 4100;
 }
 
-export async function ensureDuskConnected(
-  chainId = config.dusk.mainnet.chainId,
-) {
+export async function ensureDuskConnected(chainId = config.dusk.chainId) {
   const current = getDuskWallet();
   await current.refresh().catch(() => {});
   if (!current.state.authorized || !current.state.selectedProfile)
@@ -55,8 +46,20 @@ export async function ensureDuskConnected(
   return profile;
 }
 
-async function withDuskSession(chainId, operation) {
-  await ensureDuskConnected(chainId);
+/** Why a request isn't sent again after a reconnect: it was reviewed for another account. */
+export const DUSK_ACCOUNT_CHANGED = "Dusk Wallet switched to another account, so nothing was sent. Review it again.";
+
+/**
+ * Sends with Dusk Wallet's session, connecting again once if it lapsed.
+ * `reviewed` is the account the request was reviewed for; without one, it's
+ * the account connected when sending starts. A connect can come back with
+ * another profile: the request is only sent as the reviewed account.
+ */
+async function withDuskSession(operation, reviewed) {
+  const { account } = await ensureDuskConnected();
+  const expected = reviewed || account;
+  const moved = () => Object.assign(new Error(DUSK_ACCOUNT_CHANGED), { code: "DUSK_ACCOUNT_CHANGED" });
+  if (account !== expected) throw moved();
   try {
     return await operation();
   } catch (error) {
@@ -64,26 +67,32 @@ async function withDuskSession(chainId, operation) {
     const current = getDuskWallet();
     await current.refresh().catch(() => {});
     await current.connect({ reason: "bridge_transaction" });
-    await ensureDuskConnected(chainId);
+    if ((await ensureDuskConnected()).account !== expected) throw moved();
     return operation();
   }
 }
 
-export async function sendDuskTransfer({ amountLux, chainId, memo, to }) {
-  return withDuskSession(chainId, () =>
-    getDuskWallet().sendTransfer({
-      amount: BigInt(amountLux).toString(),
-      memo: String(memo ?? ""),
-      privacy: "public",
-      to,
-    }),
+/** A public transfer; the wallet applies its own public-transfer gas. */
+export function buildTransferRequest({ amountLux, memo, to }) {
+  return {
+    amount: BigInt(amountLux).toString(),
+    memo: String(memo ?? ""),
+    privacy: "public",
+    to,
+  };
+}
+
+export async function sendDuskTransfer(request, { account } = {}) {
+  return withDuskSession(
+    () => getDuskWallet().sendTransfer(buildTransferRequest(request)),
+    account,
   );
 }
 
 export function buildContractCallRequest({
-  chainId: _chainId,
   contractId,
   depositLux,
+  display,
   fnArgs,
   fnName,
   gas,
@@ -92,18 +101,18 @@ export function buildContractCallRequest({
     ...(depositLux === undefined
       ? {}
       : { deposit: BigInt(depositLux).toString() }),
-    contractId,
-    display: { contractName: "Dusk bridge", methodSig: fnName },
-    fnArgs,
+    contractId: `0x${String(contractId).replace(/^0x/iu, "")}`,
+    display,
+    fnArgs: `0x${toHex(fnArgs)}`,
     fnName,
-    gas,
+    gas: { limit: String(gas.limit), price: String(gas.price) },
     privacy: "public",
   };
 }
 
-export async function sendDuskContractCall(request) {
-  const { chainId } = request;
-  return withDuskSession(chainId, () =>
-    getDuskWallet().sendContractCall(buildContractCallRequest(request)),
+export async function sendDuskContractCall(request, { account } = {}) {
+  return withDuskSession(
+    () => getDuskWallet().sendContractCall(buildContractCallRequest(request)),
+    account,
   );
 }

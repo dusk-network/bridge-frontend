@@ -1,14 +1,25 @@
 import {
+  DEFAULT_WITHDRAWAL_MIN_GAS_LIMIT,
   encodeDuskExternalAssetRecipient,
   prepareNativeWithdrawal,
 } from "@dusk/evm-sdk";
 
+import { duskToLux } from "./amount.js";
 import { decodeBase58 } from "./base58.js";
 import { config } from "./config.js";
 import { ensureDuskConnected } from "./dusk-wallet.js";
 import { ensureEvmChain, getEvmClients } from "./evm-wallet.js";
 
-export const DEFAULT_WITHDRAWAL_MIN_GAS_LIMIT = 200_000;
+/** DuskEVM counts 18 decimals; Dusk holds whole Lux (9). */
+export const WEI_PER_LUX = 1_000_000_000n;
+
+/**
+ * A withdrawal amount in wei, refusing anything finer than one Lux: Dusk
+ * can't hold less, so the web wallet never sends it either.
+ */
+export function withdrawalAmountWei(amount) {
+  return duskToLux(amount) * WEI_PER_LUX;
+}
 
 export const duskEvmNetwork = () => ({
   chainId: config.duskEvm.chainId,
@@ -18,19 +29,25 @@ export const duskEvmNetwork = () => ({
   rpcUrl: config.duskEvm.rpcUrl,
 });
 
-export async function submitDuskEvmWithdrawal({ amountWei }) {
-  const profile = await ensureDuskConnected(config.duskEvm.l1ChainId);
+export function prepareWithdrawalCall({ account, amountWei, duskAccount }) {
+  return prepareNativeWithdrawal({
+    amountWei: BigInt(amountWei),
+    extraData: encodeDuskExternalAssetRecipient(decodeBase58(duskAccount)),
+    minGasLimit: DEFAULT_WITHDRAWAL_MIN_GAS_LIMIT,
+    recipient: account,
+  });
+}
+
+export async function submitDuskEvmWithdrawal({ amount }) {
+  const amountWei = withdrawalAmountWei(amount);
+  const profile = await ensureDuskConnected();
   const network = duskEvmNetwork();
   await ensureEvmChain(network);
   const { account, publicClient, walletClient } = getEvmClients(network);
-  const extraData = encodeDuskExternalAssetRecipient(
-    decodeBase58(profile.account),
-  );
-  const operation = prepareNativeWithdrawal({
-    amountWei: BigInt(amountWei),
-    extraData,
-    minGasLimit: DEFAULT_WITHDRAWAL_MIN_GAS_LIMIT,
-    recipient: account,
+  const operation = prepareWithdrawalCall({
+    account,
+    amountWei,
+    duskAccount: profile.account,
   });
   const hash = await walletClient.sendTransaction({
     account,
@@ -39,8 +56,9 @@ export async function submitDuskEvmWithdrawal({ amountWei }) {
     value: operation.l2Transaction.value,
   });
   return {
+    amountWei,
+    duskAccount: profile.account,
     hash,
-    operation,
     receipt: await publicClient.waitForTransactionReceipt({ hash }),
   };
 }

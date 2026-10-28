@@ -1,40 +1,109 @@
-const STORAGE_KEY = "dusk-bridge:activity:v1";
+// Recent transfers, kept in this browser only. An entry needs just its route
+// and source transaction hash: the tracker rebuilds everything else from the
+// chain, so a lost or cleared entry can be added back from its hash.
+
+const STORAGE_KEY = "dusk-bridge:activity:v2";
+const LEGACY_KEY = "dusk-bridge:activity:v1";
 const MAX_ITEMS = 40;
 
-export function readActivity(storage = localStorage) {
+const defaultStorage = () => globalThis.localStorage;
+
+export function normalizeTxHash(hash) {
+  const value = String(hash ?? "").trim().toLowerCase();
+  return /^(0x)?[0-9a-f]{64}$/u.test(value) ? value : null;
+}
+
+export const entryId = (routeId, hash) =>
+  `${routeId}:${normalizeTxHash(hash) ?? String(hash).toLowerCase()}`;
+
+function validItem(item) {
+  return (
+    item &&
+    typeof item.id === "string" &&
+    typeof item.routeId === "string" &&
+    typeof item.hash === "string"
+  );
+}
+
+/** v1 kept status words and no hash field; the tracker re-derives both. */
+function fromLegacy(item) {
+  const hash = normalizeTxHash(item?.transactionHash ?? item?.id);
+  if (!hash || typeof item?.routeId !== "string") return null;
+  return {
+    amount: item.amount ?? null,
+    createdAt: item.createdAt ?? new Date().toISOString(),
+    destination: item.destination ?? null,
+    hash,
+    id: entryId(item.routeId, hash),
+    routeId: item.routeId,
+    status: "pending",
+  };
+}
+
+function load(storage) {
   try {
-    const parsed = JSON.parse(storage.getItem(STORAGE_KEY) ?? "[]");
-    return Array.isArray(parsed)
-      ? parsed.filter(validItem).slice(0, MAX_ITEMS)
+    const parsed = JSON.parse(storage.getItem(STORAGE_KEY) ?? "null");
+    if (Array.isArray(parsed)) return parsed.filter(validItem).slice(0, MAX_ITEMS);
+    const legacy = JSON.parse(storage.getItem(LEGACY_KEY) ?? "[]");
+    return Array.isArray(legacy)
+      ? legacy.map(fromLegacy).filter(Boolean).slice(0, MAX_ITEMS)
       : [];
   } catch {
     return [];
   }
 }
 
-export function recordActivity(item, storage = localStorage) {
-  const next = [
-    { ...item, createdAt: item.createdAt ?? new Date().toISOString() },
-    ...readActivity(storage).filter((entry) => entry.id !== item.id),
-  ].slice(0, MAX_ITEMS);
-  storage.setItem(STORAGE_KEY, JSON.stringify(next));
-  return next;
+// What this page kept when the browser refused to store it (a private window,
+// a full quota): it's read from here until a write succeeds again, so the
+// list still works for this visit.
+const unsaved = new WeakMap();
+
+function save(items, storage) {
+  const kept = items.slice(0, MAX_ITEMS);
+  try {
+    storage.setItem(STORAGE_KEY, JSON.stringify(kept));
+    unsaved.delete(storage);
+  } catch {
+    unsaved.set(storage, kept);
+  }
+  return kept;
 }
 
-export function updateActivity(id, patch, storage = localStorage) {
-  const next = readActivity(storage).map((item) =>
+export function readActivity(storage = defaultStorage()) {
+  if (!storage) return [];
+  return unsaved.get(storage) ?? load(storage);
+}
+
+/** Adds an entry, or merges into the one with the same route and hash. */
+export function recordActivity(item, storage = defaultStorage()) {
+  const hash = normalizeTxHash(item.hash) ?? item.hash;
+  const id = entryId(item.routeId, hash);
+  const items = readActivity(storage);
+  const existing = items.find((entry) => entry.id === id);
+  const next = {
+    status: "pending",
+    ...existing,
+    ...item,
+    createdAt: existing?.createdAt ?? item.createdAt ?? new Date().toISOString(),
+    hash,
+    id,
+  };
+  return storage
+    ? save([next, ...items.filter((entry) => entry.id !== id)], storage)
+    : [next];
+}
+
+export function updateActivity(id, patch, storage = defaultStorage()) {
+  const items = readActivity(storage).map((item) =>
     item.id === id ? { ...item, ...patch } : item,
   );
-  storage.setItem(STORAGE_KEY, JSON.stringify(next));
-  return next;
+  return storage ? save(items, storage) : items;
 }
 
-export function clearActivity(storage = localStorage) {
-  storage.removeItem(STORAGE_KEY);
+export function findActivity(id, storage = defaultStorage()) {
+  return readActivity(storage).find((item) => item.id === id) ?? null;
 }
 
-function validItem(item) {
-  return (
-    item && typeof item.id === "string" && typeof item.routeId === "string"
-  );
+export function clearActivity(storage = defaultStorage()) {
+  storage?.removeItem(STORAGE_KEY);
 }
