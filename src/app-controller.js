@@ -9,7 +9,7 @@ import { bridgeRoutes, getBridgeRoute } from "./bridge-routes.js";
 import { cardRoute, choosePair, entryRoutes, flipRoute, followsWallets, fromChoices, handedOverRecipient, primaryButton, routeBetween, toChoices } from "./bridge-card.js";
 import { claimReminder } from "./calendar.js";
 import { config } from "./config.js";
-import { bridgeOperator, contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
+import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
 import { followAfterDiscovery, mergeTransfer, mergeTransfers, partyKey } from "./discovery.js";
 import { createDiscoveryRuns } from "./discovery-runs.js";
 import { depositRequest } from "./dusk-deposit.js";
@@ -230,15 +230,6 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         terms: cfg.links.terms,
       },
       officialSite: cfg.links.sites[cfg.profile],
-      // Who runs the bridge, once; by route only where they differ.
-      operator: bridgeOperator(cfg),
-      operators: bridgeOperator(cfg)
-        ? []
-        : [
-            cfg.migrations.length && cfg.operators.migration ? { name: cfg.operators.migration, route: "migrations to Dusk" } : null,
-            cfg.service && cfg.operators.service ? { name: cfg.operators.service, route: `Dusk to ${networkName(cfg, cfg.service.network)}` } : null,
-            cfg.duskEvm.enabled && cfg.operators.duskEvm ? { name: cfg.operators.duskEvm, route: "DuskEVM" } : null,
-          ].filter(Boolean),
     });
   }
 
@@ -874,7 +865,6 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         badge: names.badge,
         groups: contractGroups(cfg),
         links: { privacy: cfg.links.privacy, terms: cfg.links.terms },
-        operator: bridgeOperator(cfg),
         servers: serversLine(cfg),
       });
     } else if (state.sheet === "network") {

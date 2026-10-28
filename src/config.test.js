@@ -187,11 +187,11 @@ test("the gas bound, fee and multicall come from config", () => {
   );
 });
 
-test("Dusk runs every route, under its own terms and privacy policy, with no support contact unless one is set", () => {
+test("the page links the network's terms of use and privacy policy, names no operator, and has no support contact unless one is set", () => {
   const bare = withConfig({ VITE_BRIDGE_PROFILE: "mainnet" }).cfg;
   assert.equal(bare.links.support, "");
   assert.equal(bare.links.sites.testnet, "");
-  assert.deepEqual({ ...bare.operators }, { duskEvm: "Dusk", migration: "Dusk", service: "Dusk" });
+  assert.equal("operators" in bare, false);
   // The same as the explorer's footer.
   assert.equal(bare.links.terms, "https://dusk.network/terms-of-use");
   assert.equal(bare.links.privacy, "https://dusk.network/privacy-policy");
@@ -204,7 +204,8 @@ test("Dusk runs every route, under its own terms and privacy policy, with no sup
     VITE_SUPPORT_URL: "javascript:alert(1)",
     VITE_TESTNET_BRIDGE_URL: "https://bridge.example.org",
   }).cfg;
-  assert.equal(set.operators.service, "Example Operator B.V.");
+  // An operator setting names no one.
+  assert.doesNotMatch(JSON.stringify(set, (key, value) => (typeof value === "bigint" ? String(value) : value)), /Example Operator/u);
   assert.equal(withConfig({ VITE_BRIDGE_PROFILE: "mainnet", VITE_DOCS_MIGRATION_URL: "https://guide.example.org" }).cfg.links.docs.migration, "https://guide.example.org");
   assert.equal(set.links.sites.testnet, "https://bridge.example.org");
   // Only http(s) links are shown.
