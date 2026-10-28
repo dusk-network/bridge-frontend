@@ -40,11 +40,11 @@ import { serviceTransferRequest, submitServiceTransfer } from "./service-transfe
 import { createServices, proofSubmitterFor } from "./services.js";
 import { createLookupFlow } from "./lookup-flow.js";
 import { createReceiptLookups } from "./receipt-lookups.js";
-import { checkDuskRecipient, checkEvmRecipient, isDuskName } from "./recipient.js";
+import { checkDuskRecipient, checkEvmRecipient, nameToLookUp, settledEvmRecipient } from "./recipient.js";
 import { readWatched, saveWatched, watchTarget } from "./watched-account.js";
 import { createReviewSession, sameSigner, sentActionPatch } from "./review-session.js";
 import { createScheduler, takenByAnother } from "./tracking.js";
-import { friendlyWalletError, html, privacyLine, proverMismatch, short, switchToProver, transferView } from "./transfer-view.js";
+import { actionErrorOf, friendlyWalletError, html, privacyLine, proverMismatch, short, switchToProver, transferView } from "./transfer-view.js";
 import {
   activityPanel,
   cardPage,
@@ -198,7 +198,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   const accounts = () => [listedDusk(), evmAccount()].filter(Boolean);
 
   function transfersVm() {
-    return transfersModel(state.activity, { account: duskAccount(), accounts: accounts(), cfg, routeOf, submitter: proofSubmitterFor(duskAccount()), timing: timing() });
+    return transfersModel(state.activity, { account: duskAccount(), accounts: accounts(), cfg, name: duskName(), routeOf, submitter: proofSubmitterFor(duskAccount()), timing: timing() });
   }
 
   function headerVm() {
@@ -402,9 +402,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     clearTimeout(nameTimer);
     const form = state.form;
     const route = formRoute();
-    const typed = form?.recipientInput?.trim() ?? "";
-    if (!route || route.to.kind !== "dusk" || !isDuskName(typed) || !services.names) return;
-    const name = typed.toLowerCase();
+    const name = nameToLookUp(form?.recipientInput);
+    if (!route || route.to.kind !== "dusk" || !name || !services.names) return;
     const known = form.lookups[name];
     // An answer is used for a minute; a failed lookup is tried again.
     if (known && !known.failed && Date.now() - known.at < 60_000) return;
@@ -964,7 +963,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       // DUSK paid to another Dusk account than the connected one: said before the steps.
       notYours:
         route.to.kind === "dusk" && duskAccount() && destination !== duskAccount()
-          ? `This pays ${typedRecipient(route)?.name ?? short(destination)}${typedRecipient(route)?.name ? ` (${short(destination)})` : ""}, not ${duskName() ? `your ${duskName()}` : "your connected Dusk account"}.`
+          ? `This pays ${typedRecipient(route)?.name ?? short(destination)}${typedRecipient(route)?.name ? ` (${short(destination)})` : ""}, not ${duskName() || "your connected Dusk account"}.`
           : "",
       privacy: privacyLine(route, cfg, {
         dusk: route.to.kind === "dusk" ? destination : duskAccount(),
@@ -1080,7 +1079,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         const lines =
           route.mode === "duskevm-deposit"
             ? await duskCallLines({ ...request, chainId: cfg.dusk.chainId, from: duskAccount(), fromName: duskName(), note: "The DuskEVM bridge contract on Dusk." })
-            : duskTransferLines({ amountLux: request.amountLux, from: duskAccount(), fromName: duskName(), gas: request.gas, memo: request.memo, to: request.to });
+            : duskTransferLines({ amountLux: request.amountLux, chainId: cfg.dusk.chainId, from: duskAccount(), fromName: duskName(), gas: request.gas, memo: request.memo, to: request.to });
         return { lines, request };
       },
       ({ lines, request }) => {
@@ -1277,7 +1276,11 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
           error?.code === "DUSK_ACCOUNT_CHANGED"
             ? SIGNER_MOVED.dusk
             : friendlyWalletError(error, review.kind === "send" && route.signer === "evm" ? "evm" : "dusk");
-        if (review.entryId) setActivity(updateActivity(review.entryId, { actionError: error?.message ?? String(error) }));
+        if (review.entryId) {
+          // Kept on the transfer: its receipt says so behind the sheet, grey when you cancelled.
+          setActivity(updateActivity(review.entryId, { actionError: actionErrorOf(error) }));
+          if (state.page.page === "transfer") renderMain();
+        }
         renderSheet();
       }
     }
@@ -1440,8 +1443,15 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       refreshForm();
       loadGasSoon();
     } else if (name === "recipient") {
-      // Pasted across lines or with spaces, it's still one address.
-      state.form.recipientInput = value.replace(/\s+/gu, "");
+      // Pasted across lines or with spaces, it's still one address. An EVM
+      // address takes its checksum's capitals once it's a whole one.
+      const typed = value.replace(/\s+/gu, "");
+      state.form.recipientInput = formRoute()?.to.kind === "evm" ? settledEvmRecipient(typed) : typed;
+      if (state.form.recipientInput !== typed) {
+        const { selectionEnd, selectionStart } = event.target;
+        event.target.value = state.form.recipientInput;
+        if (value.length === typed.length) event.target.setSelectionRange(selectionStart, selectionEnd);
+      }
       refreshForm();
       loadGasSoon();
       lookUpRecipientName();

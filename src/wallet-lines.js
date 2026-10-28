@@ -6,6 +6,9 @@
 // and its Details stay folded), group by group. A `head` line is the window's
 // title, amount and recipient; `gap` starts the window's next group.
 
+import { getAddress } from "viem";
+
+import { MAINNET_BSC_BRIDGE_ACCOUNT, TESTNET_REGGIO_BRIDGE_ACCOUNT } from "./config.js";
 import { decodeDepositArgs } from "./dusk-deposit.js";
 import { sha256Hex, toHex } from "./data-driver.js";
 import { aboutFee, formatDusk, formatLux, formatMaxFee } from "./format.js";
@@ -13,6 +16,17 @@ import { networkName, tokenName } from "./names.js";
 import { normalizeEvmAddress } from "./validation.js";
 
 const WEI_PER_LUX = 1_000_000_000n;
+
+/**
+ * The bridge's accounts on Dusk that Dusk Wallet knows, by network, with the
+ * chain each pays out on as its window names it, the bridge's fee, and
+ * whether the bridge pays out there now. A transfer to one shows as "Bridge
+ * to <chain>"; to any other account, as "Pay".
+ */
+export const DUSK_WALLET_SERVICE_ACCOUNTS = Object.freeze({
+  "dusk:1": Object.freeze({ account: MAINNET_BSC_BRIDGE_ACCOUNT, chain: "BNB Smart Chain", feeLux: 1_000_000_000n, network: "bsc", running: true }),
+  "dusk:2": Object.freeze({ account: TESTNET_REGGIO_BRIDGE_ACCOUNT, chain: "Sepolia", feeLux: 1_000_000_000n, network: "ethereum", running: false }),
+});
 
 /**
  * The DuskEVM bridge contracts whose calls Dusk Wallet reads, by network:
@@ -216,17 +230,54 @@ function readWithdrawal(withdrawal) {
   };
 }
 
+/** Whether Dusk Wallet reads `memo` as an EVM address: 0x and 40 hex digits, mixed case only with its checksum. */
+const walletReadsAddress = (memo) =>
+  /^0x(?:[0-9a-f]{40}|[0-9A-F]{40})$/u.test(memo) || (/^0x[0-9a-fA-F]{40}$/u.test(memo) && getAddress(memo) === memo);
+
 /**
- * A public transfer: Dusk Wallet's "Pay" window. The amount and recipient,
- * the fee, then who pays whom and the memo.
+ * A public transfer, as Dusk Wallet's window shows it. To a bridge account
+ * it knows (DUSK_WALLET_SERVICE_ACCOUNTS): "Bridge to <chain>", the amount
+ * to the memo's address there, and what arrives once the bridge takes its
+ * fee, or that nothing does; then the fee, and who pays, the bridge's
+ * account and the recipient there. To any other account: "Pay", with the
+ * memo last.
  */
-export function duskTransferLines({ amountLux, from, fromName = "", gas, memo, to }) {
+export function duskTransferLines({ amountLux, chainId, from, fromName = "", gas, memo, to }) {
+  const service = DUSK_WALLET_SERVICE_ACCOUNTS[chainId];
+  if (service?.account !== to)
+    return [
+      { amount: `${formatLux(amountLux)} DUSK`, kind: "head", title: "Pay", to: middle(to, 6, 6), toFull: to },
+      ...feeLines(gas, amountLux),
+      { ...fromLine(from, fromName), gap: true },
+      { address: to, label: "To", network: "dusk" },
+      { label: "Memo", mono: true, note: "Where the bridge pays out. It must be your address.", value: memo },
+    ];
+  const { chain } = service;
+  const sent = BigInt(amountLux);
+  const arrivesLux = sent > service.feeLux ? sent - service.feeLux : 0n;
+  const recipient = String(memo ?? "").trim();
+  const recipientOk = walletReadsAddress(recipient);
+  const arrives =
+    !service.running || arrivesLux <= 0n
+      ? `Nothing arrives on ${chain}`
+      : recipientOk
+        ? `${formatLux(arrivesLux)} DUSK arrives on ${chain}`
+        : `Nothing arrives without ${/^[aeiou]/iu.test(chain) ? "an" : "a"} ${chain} address in the memo`;
   return [
-    { amount: `${formatLux(amountLux)} DUSK`, kind: "head", title: "Pay", to: middle(to, 6, 6), toFull: to },
-    ...feeLines(gas, amountLux),
+    {
+      amount: `${formatLux(sent)} DUSK`,
+      kind: "head",
+      sub: `${formatLux(sent)} DUSK sent · ${formatLux(service.feeLux)} DUSK bridge fee · ${arrives}`,
+      tag: "Known bridge account",
+      title: `Bridge to ${chain}`,
+      ...(recipientOk ? { to: middle(recipient, 6, 4), toFull: recipient, where: `on ${chain}` } : {}),
+    },
+    ...feeLines(gas, sent),
     { ...fromLine(from, fromName), gap: true },
-    { address: to, label: "To", network: "dusk" },
-    { label: "Memo", mono: true, note: "Where the bridge pays out. It must be your address.", value: memo },
+    { address: to, label: "To", network: "dusk", value: `The bridge's account for ${chain}` },
+    recipientOk
+      ? { address: recipient, label: `Recipient on ${chain}`, network: service.network }
+      : { label: `Recipient on ${chain}`, mono: true, value: recipient || "(none)" },
   ];
 }
 
@@ -266,10 +317,18 @@ export async function duskCallLines({ chainId, contractId, depositLux = 0n, disp
   const read = kind === "prove" || kind === "claim" ? readWithdrawal(withdrawal) : null;
   if (read) {
     const { amount, pays, sender } = read;
+    // What it costs leads: it moves none of the account's DUSK. Then the
+    // withdrawal it's for and whom that pays.
     return [
       {
-        amount,
+        amount: walletFee(maxFee(gas)),
         kind: "head",
+        lead: "Costs up to",
+        prefix: `for a ${amount} withdrawal that pays`,
+        sub:
+          kind === "prove"
+            ? "Proving moves no DUSK. You claim it once the waiting period ends."
+            : "Claiming pays this DUSK to the account above. You pay only the network fee.",
         tag: "Known DuskEVM bridge call",
         title: kind === "prove" ? "Prove a DuskEVM withdrawal" : "Claim a DuskEVM withdrawal",
         to: middle(pays.account ?? pays.contractId, 6, 6),

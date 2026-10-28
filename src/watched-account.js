@@ -42,6 +42,9 @@ export async function watchTarget(input, { resolveName }) {
     return checked.address ? { account: checked.address, name: "" } : { error: checked.error };
   }
   const name = typed.toLowerCase();
+  // A name Dusk Domains can't hold isn't looked up.
+  const invalid = checkDuskRecipient(name).error;
+  if (invalid) return { error: invalid };
   let found;
   try {
     found = await resolveName(name);

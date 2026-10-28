@@ -3,6 +3,8 @@ import test from "node:test";
 
 import { WITHDRAWAL_GAS_REFUSAL } from "./gas.js";
 import {
+  WALLET_CANCELLED,
+  actionErrorOf,
   explorerTxUrl,
   friendlyWalletError,
   privacyLine,
@@ -11,7 +13,7 @@ import {
   transferView,
 } from "./transfer-view.js";
 import { receiptModel } from "./page-models.js";
-import { receiptPage, transferRow } from "./views.js";
+import { receiptPage, reviewSheet, transferRow } from "./views.js";
 
 const cfg = {
   dusk: { explorerUrl: "https://apps.testnet.dusk.network/explorer/" },
@@ -43,6 +45,8 @@ test("explorer links point at each network's own explorer", () => {
 
 test("short forms are the same everywhere: 0x and 4 + 4, or 6 + 6", () => {
   assert.equal(short(EVM), "0x3E5B…a11d");
+  // An address kept in lower case reads with its checksum's capitals, as wallets write it.
+  assert.equal(short(EVM.toLowerCase()), "0x3E5B…a11d");
   assert.equal(short(ACCOUNT), "21n5nc…fMMLNz");
   assert.equal(short("abc"), "abc");
 });
@@ -117,7 +121,7 @@ test("a withdrawal shows its three steps, their times and the next action", () =
   assert.deepEqual(unread.steps.slice(1).map(({ detail }) => detail), ["", ""]);
   assert.equal(transferSubline(unread, { sourceAt: sentAt, stage: "waiting_for_output" }, withdrawal, cfg, { timeZone: AMS }), "Sent Fri 23 Oct, 16:20 CEST");
   assert.deepEqual(ready.action, { blocked: "", failure: "", kind: "prove", label: "Prove on Dusk" });
-  assert.equal(ready.title, "Prove your withdrawal of 200 DUSK");
+  assert.equal(ready.title, "Prove the withdrawal of 200 DUSK");
   assert.deepEqual(ready.tracker.map(({ label }) => label), ["Sent", "Prove now", "Claim"]);
 
   // Proven only by another account: the user still proves, and is told why.
@@ -128,8 +132,15 @@ test("a withdrawal shows its three steps, their times and the next action", () =
     transferView({ destination, hash: L2_HASH, provenByOther: true, sourceAt: sentAt, stage: "ready_to_prove", status: "pending" }, { account, cfg, route: withdrawal }).steps[1].detail;
   assert.equal(paying(ACCOUNT, ACCOUNT), "Another account proved it. Prove it yourself to claim it.");
   const stranger = `25z9o6${"x".repeat(40)}5Etftt`;
-  assert.equal(paying(stranger, ACCOUNT), "Another account proved it. It pays 25z9o6…5Etftt, not your connected Dusk account. Prove it yourself to claim it.");
-  assert.equal(paying(stranger, ""), "Another account proved it. It pays 25z9o6…5Etftt. Prove it yourself to claim it.");
+  // Proving and claiming it still pays that account: said plainly, by your .dusk name where you have one.
+  assert.equal(paying(stranger, ACCOUNT), "Another account proved it. This pays 25z9o6…5Etftt, not your connected Dusk account. If you prove and claim, the DUSK still goes there.");
+  assert.equal(paying(stranger, ""), "Another account proved it. This pays 25z9o6…5Etftt. If you prove and claim, the DUSK still goes there.");
+  const named = { amountLux: "1008000000000", destination: stranger, hash: L2_HASH, provenByOther: true, sourceAt: sentAt, stage: "ready_to_prove", status: "pending" };
+  const namedView = transferView(named, { account: ACCOUNT, cfg, name: "alice.dusk", route: withdrawal });
+  assert.equal(namedView.steps[1].detail, "Another account proved it. This pays 25z9o6…5Etftt, not alice.dusk. If you prove and claim, the DUSK still goes there.");
+  assert.equal(transferSubline(namedView, named, withdrawal, cfg, { account: ACCOUNT, name: "alice.dusk" }), namedView.steps[1].detail);
+  // Not "your withdrawal": it may pay another account.
+  assert.equal(namedView.title, "Prove the withdrawal of 1,008 DUSK");
   assert.equal(other.action.kind, "prove");
   assert.equal(other.tracker[1].label, "Proven by another");
 
@@ -302,4 +313,25 @@ test("a late claim says only the wait and its soonest date: no countdown, nothin
   // In My transfers, its claim step counts down to nothing either.
   const view = transferView(entry, { cfg, now, route: withdrawal, timeZone: AMS, timing });
   assert.deepEqual([view.tracker[2].label, view.tracker[2].when], ["Claim", "from 2 Nov at the soonest"]);
+});
+
+test("a proof or claim you rejected in your wallet says so in grey, as a deposit's review does, not as a failure", () => {
+  // Kept on the transfer: a rejection as itself, anything else as its reason.
+  assert.equal(actionErrorOf({ code: 4001, message: "User rejected the request." }), WALLET_CANCELLED);
+  assert.equal(actionErrorOf({ cause: { code: 4001 } }), WALLET_CANCELLED);
+  assert.equal(actionErrorOf(new Error("The node refused it.")), "The node refused it.");
+  const at = Date.UTC(2026, 9, 7, 7, 7);
+  const entry = { actionError: WALLET_CANCELLED, amountLux: "1008000000000", hash: L2_HASH, id: "w", provenByOther: true, sourceAt: at, stage: "ready_to_prove", status: "pending" };
+  const view = transferView(entry, { cfg, route: withdrawal });
+  assert.equal(view.action.failure, "You cancelled in your wallet, so nothing was sent.");
+  const receipt = receiptPage({ ...receiptModel(entry, { cfg, route: withdrawal, url: "https://bridge.example/#/transfer/x" }), canAct: true });
+  assert.match(receipt, /<div class="action-box"><p class="message">You cancelled in your wallet, so nothing was sent\.<\/p><button type="button" class="btn pri" data-action="withdrawal-prove"/u);
+  assert.doesNotMatch(receipt, /message error|Try again/u);
+  // A proof that did fail is still red, and offered again.
+  const failed = receiptPage({ ...receiptModel({ ...entry, actionError: "Proof transaction failed: out of gas" }, { cfg, route: withdrawal, url: "x" }), canAct: true });
+  assert.match(failed, /<p class="message error">The proof wasn&#039;t sent\. Try again\.<\/p>/u);
+  // In the review, the same: grey for a rejection, red for a failure.
+  const sheet = (error) => reviewSheet({ canConfirm: true, cfgLinks: { explorer: () => null }, checks: [], confirmLabel: "Prove on Dusk", error, feeRows: [], lead: { amount: "0.051", label: "Proving costs up to", line: "" }, privacy: "x", steps: [], sub: "", walletCheckName: "Dusk Wallet" });
+  assert.match(sheet(WALLET_CANCELLED), /<div class="sheet-foot"><p class="message" role="status">You cancelled in your wallet, so nothing was sent\.<\/p>/u);
+  assert.match(sheet("The Dusk wallet disconnected. Reconnect it and try again."), /<p class="message error" role="alert">The Dusk wallet disconnected/u);
 });

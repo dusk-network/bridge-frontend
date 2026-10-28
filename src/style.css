@@ -358,7 +358,11 @@ h1 { font-size: 28px; font-weight: 500; letter-spacing: -0.01em; line-height: 1.
 .act .sync { margin: 8px 0 0; min-height: 1px; }
 .act .sec-t { margin: 18px 0 0; padding: 7px 12px; border-radius: 10px; background: var(--surface-2); color: var(--text-2); font-size: 12.5px; font-weight: 400; }
 .act .trs .tr { grid-template-columns: 84px minmax(0, 1fr) auto; padding: 12px 8px; }
-.act .trs .pair .cm { width: 30px; height: 30px; }
+/* The route's marks and DuskEVM's tag stay inside their cell, clear of the text. */
+.act .trs .pair { gap: 4px; }
+.act .trs .pair svg.pa { width: 13px; height: 13px; }
+.act .trs .pair .cm { width: 28px; height: 28px; }
+.act .trs .evm-tag { right: -3px; bottom: -3px; box-shadow: 0 0 0 1.5px var(--surface); }
 .act .empty { margin-top: 16px; padding: 16px; border-radius: 14px; background: var(--field); }
 .act .watch { margin-top: 14px; background: var(--field); }
 
@@ -525,6 +529,8 @@ h1 { font-size: 28px; font-weight: 500; letter-spacing: -0.01em; line-height: 1.
 .tr-main { min-width: 0; }
 .tr .t1 { font-size: 15px; font-weight: 500; }
 .tr .t2 { margin-top: 2px; font-size: 13px; }
+.tr .t3 { margin-top: 2px; color: var(--text-2); font-size: 12.5px; overflow-wrap: anywhere; }
+.tr .t3 code { color: var(--text-2); font-size: 12px; }
 .tr .am { font-size: 15px; font-weight: 500; white-space: nowrap; }
 .st { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; white-space: nowrap; }
 .st .dot { width: 7px; height: 7px; border-radius: 50%; }
@@ -567,9 +573,15 @@ form.group .l1 { display: block; color: var(--text); font-size: 14px; font-weigh
   .brand { margin-right: 0; }
   .brand > span { display: none; }
   .hdr-r { gap: 6px; }
-  /* The wallets as their marks; the card names the account. */
-  .hdr-r .wpill { padding: 0 5px; }
-  .hdr-r .wpill > :not(.av) { display: none; }
+  /* Each wallet by a short label, so whose accounts these are shows: "alice.dusk", "0x7568…". */
+  .hdr-r { min-width: 0; }
+  .hdr-r .net { padding: 0 12px; }
+  .hdr-r .net > svg { display: none; }
+  .hdr-r .wpill { min-width: 0; gap: 5px; padding: 0 10px 0 4px; }
+  .hdr-r .wpill .av, .hdr-r .wpill .av .cm { width: 22px; height: 22px; }
+  .hdr-r .wpill .av svg { width: 13px; height: 13px; }
+  .hdr-r .wpill .nm, .hdr-r .wpill .mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .hdr-r .wpill .tail { display: none; }
   .hdr-r .wpill.cta { display: none; }
   .page, .col { padding: 16px 16px 12px; }
   .foot { margin-top: 24px; padding: 16px 16px 24px; flex-direction: column; align-items: flex-start; }
@@ -604,6 +616,7 @@ form.group .l1 { display: block; color: var(--text); font-size: 14px; font-weigh
   .netmenu { position: fixed; left: 0; right: 0; top: auto; bottom: 0; z-index: 41; width: auto; padding: 8px 8px calc(14px + env(safe-area-inset-bottom)); border-radius: 22px 22px 0 0; }
   .netscrim { display: block; position: fixed; inset: 0; z-index: 40; background: var(--scrim); }
   .act .trs .tr { grid-template-columns: 76px minmax(0, 1fr); padding: 12px 4px; }
+  .act .trs .pair .cm { width: 26px; height: 26px; }
   .act-h { flex-direction: column; }
 }
 

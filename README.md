@@ -74,20 +74,23 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
 - **A task**: the amount, where it goes, and the quote: what you send, the
   network fee as a maximum and its usual cost, the bridge fee, what you
   receive and when. One line says what becomes public.
-- **Review**: the checked facts (balances, gas, where the payout goes), then
-  each wallet step with the lines its window will show, in its order and
-  words, raw values decoded next to them and every recipient in full. Cancel
-  and confirm are equal. A Dusk call is built before the review, so the call
-  data's sha256 shown is the one Dusk Wallet prints (older versions show a
-  bridge call only as its bytes), and the reviewed request is what is sent.
+- **Review**: what moves and what becomes public, the checked facts
+  (balances, gas, where the payout goes), then each wallet step with the
+  lines its window will show, in its order and words, raw values decoded
+  next to them and every recipient in full. Cancel and confirm are equal; a
+  request you reject in the wallet is said in grey, not as a failure. A
+  Dusk call is built before the review, so the call data's sha256 shown is
+  the one Dusk Wallet prints (older versions show a bridge call only as its
+  bytes), and the reviewed request is what is sent.
 - **Receipt**, at `#/transfer/<hash>`: the steps with times, explorer links
   and hashes, both transactions in full, the fees paid and the receipt link.
   It shows no balances: the link is safe to share. A withdrawal waiting for
   its claim counts down, says when a clock change falls inside the wait, and
   offers an .ics file made in the browser ("Add to calendar").
 - **My transfers**: the connected accounts' transfers, read from the networks
-  (below), plus any sent or looked up on this device. "Look up a transfer"
-  finds a transfer's route from its hash alone.
+  (below), plus any sent or looked up on this device, each with whom it pays
+  and its transaction's short hash. "Look up a transfer" finds a transfer's
+  route from its hash alone.
 - **Contracts**: every address and contract ID each route uses, in full,
   with copy buttons and explorer links, and an operator only where the
   deployment names one.

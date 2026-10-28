@@ -375,7 +375,11 @@ test("a claim sends the SDK-serialized withdrawal with its own gas on top", asyn
   const extraData = encodeDuskExternalAssetRecipient(decodeBase58(ACCOUNT));
   const message = encodeFunctionData({ abi: RELAY, args: [...bridged.args.slice(0, 3), extraData], functionName: "finalizeBridgeETH" });
   const lines = await claimLines({ ...prepared.withdrawal, data: encodeFunctionData({ abi: RELAY, args: [...relay.args.slice(0, 5), message], functionName: "relayMessage" }) });
-  assert.deepEqual([lines[0].title, lines[0].amount, lines[0].tag], ["Claim a DuskEVM withdrawal", "10 DUSK", "Known DuskEVM bridge call"]);
+  // The window leads with what the claim costs, then the withdrawal it's for.
+  assert.deepEqual(
+    [lines[0].title, lines[0].lead, lines[0].amount, lines[0].prefix, lines[0].tag],
+    ["Claim a DuskEVM withdrawal", "Costs up to", "0.102 DUSK", "for a 10 DUSK withdrawal that pays", "Known DuskEVM bridge call"],
+  );
   assert.deepEqual(lines.slice(1, 4).map((line) => [line.label, line.address ?? line.value]), [
     ["Pays to", ACCOUNT],
     ["Amount", "10 DUSK"],

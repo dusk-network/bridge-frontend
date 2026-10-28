@@ -204,7 +204,7 @@ export function actionLead(kind, entry, { account = "", amountLux = null, claim 
   const payee = !pays ? "the withdrawal's Dusk account" : /^[0-9a-f]{64}$/u.test(pays) ? `the Dusk contract ${short(pays)}` : short(pays);
   // Said before the steps: the DUSK goes to another account than Dusk Wallet's.
   const notYours =
-    account && pays && pays !== account ? `This withdrawal pays ${payee}, not ${name ? `your ${name}` : "your connected Dusk account"}.` : "";
+    account && pays && pays !== account ? `This withdrawal pays ${payee}, not ${name || "your connected Dusk account"}.` : "";
   return kind === "prove"
     ? {
         amount: cost,
@@ -223,7 +223,7 @@ export function actionLead(kind, entry, { account = "", amountLux = null, claim 
 
 /** The receipt of one transfer. No balances: the link may be shared. */
 export function receiptModel(entry, { cfg, gasPrice = 1n, now = Date.now(), own = null, route, submitter = null, timeZone, timing, url }) {
-  const view = transferView(entry, { account: own?.account ?? "", cfg, now, route, submitter, timeZone, timing, year: true });
+  const view = transferView(entry, { account: own?.account ?? "", cfg, name: own?.name ?? "", now, route, submitter, timeZone, timing, year: true });
   const from = networkName(cfg, route.from.id);
   const to = networkName(cfg, route.to.id);
   // Your own Dusk account by its .dusk name, others by their short code.
@@ -308,22 +308,26 @@ function txHtml(cfg, network, hash, label) {
 // My transfers
 // ---------------------------------------------------------------------------
 
-export function transfersModel(entries, { account = "", accounts, cfg, now = Date.now(), routeOf, submitter = null, timeZone, timing }) {
+export function transfersModel(entries, { account = "", accounts, cfg, name = "", now = Date.now(), routeOf, submitter = null, timeZone, timing }) {
   const shown = entries.filter((entry) => routeOf(entry.routeId) && shownFor(entry, accounts));
   const groups = groupTransfers(shown, routeOf);
   const row = (entry) => {
     const route = routeOf(entry.routeId);
-    const view = transferView(entry, { account, cfg, now, route, submitter, timeZone, timing });
+    const view = transferView(entry, { account, cfg, name, now, route, submitter, timeZone, timing });
     return {
       action: view.action,
       amountText: view.amountText,
+      // Its transaction, as the receipt and Look up know it.
+      hash: short(entry.hash),
       href: transferHref(entry.hash),
       id: entry.id,
       pair: view.pair,
       status: view.status,
       statusWord: view.statusWord,
-      subline: transferSubline(view, entry, route, cfg, { account, now, timeZone }),
+      subline: transferSubline(view, entry, route, cfg, { account, name, now, timeZone }),
       title: routeTitle(cfg, route),
+      // Whom it pays: your account by its .dusk name, any other by its short form.
+      to: !entry.destination ? null : entry.destination === account && name ? { name } : { address: short(entry.destination) },
       tracker: view.tracker,
     };
   };

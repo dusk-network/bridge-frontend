@@ -3,6 +3,7 @@ import {
   createWalletClient,
   custom,
   defineChain,
+  getAddress,
   http,
 } from "viem";
 import { config } from "./config.js";
@@ -30,9 +31,18 @@ export function walletNameOf(candidate) {
   return "";
 }
 
+/** The account with its EIP-55 checksum, as every address on the page is written; wallets often give it in lower case. */
+const checksummed = (value) => {
+  try {
+    return getAddress(value);
+  } catch {
+    return value;
+  }
+};
+
 const state = () =>
   Object.freeze({
-    account,
+    account: account ? checksummed(account) : null,
     chainId,
     installed: Boolean(config.reown.projectId || findProvider()),
     provider,
