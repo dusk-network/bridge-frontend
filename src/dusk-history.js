@@ -302,6 +302,3 @@ export async function syncDuskHistory({ account, cfg, maxRequests = RUN_REQUESTS
     state: { covered, crowded, entries, target, updatedAt: Date.now(), window },
   };
 }
-
-/** Whether the kept history reaches the first block. */
-export const historyComplete = (state) => Boolean(state?.covered?.length) && topGap(state.covered, state.target ?? 0) === null;

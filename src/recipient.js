@@ -24,7 +24,38 @@ export function checkEvmRecipient(input) {
   return { error: EVM_CHECKSUM_MISMATCH, fix: getAddress(value.toLowerCase()) };
 }
 
+/** A typed EVM recipient once it's an address: with its checksum's capitals. Anything else as typed. */
+export const settledEvmRecipient = (typed) => checkEvmRecipient(typed).address ?? typed;
+
 export const isDuskName = (value) => DUSK_NAME.test(String(value ?? "").trim());
+
+/**
+ * A part of a .dusk name, as Dusk Domains' SDK checks it (`validateLabel`):
+ * 1 to 63 of a–z, 0–9 and hyphens, with no hyphen at either end. Its
+ * `validateName` takes at most five parts, the last "dusk". The SDK isn't
+ * imported for it: its entry point adds about 140 kB to the page's first
+ * load. A test holds the two to the same answers.
+ */
+const NAME_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
+
+/**
+ * Why a .dusk name, in lower case, can't be one by Dusk Domains' rules, or
+ * "" when it can. Such a name is never looked up.
+ */
+export function duskNameProblem(name) {
+  const labels = name.split(".");
+  if (labels.length <= 5 && labels.at(-1) === "dusk" && labels.every((label) => NAME_LABEL.test(label))) return "";
+  // Word joiners keep "a–z" and "0–9" whole where a phone wraps the line.
+  if (labels.some((label) => /[^a-z0-9-]/u.test(label))) return `${name} isn't a valid .dusk name: names use a\u2060–\u2060z, 0\u2060–\u20609 and hyphens.`;
+  if (labels.some((label) => label.startsWith("-") || label.endsWith("-"))) return `${name} isn't a valid .dusk name: names don't start or end with a hyphen.`;
+  return `${name} isn't a valid .dusk name.`;
+}
+
+/** The typed .dusk name to look up, in lower case, or "" for anything else. */
+export function nameToLookUp(value) {
+  const name = String(value ?? "").trim().toLowerCase();
+  return isDuskName(name) && !duskNameProblem(name) ? name : "";
+}
 
 /**
  * A Dusk recipient: `{ address }` for an account, `{ address, name }` for a
@@ -42,6 +73,8 @@ export function checkDuskRecipient(input, lookups = {}) {
     }
   }
   const name = value.toLowerCase();
+  const invalid = duskNameProblem(name);
+  if (invalid) return { error: invalid, name };
   const found = lookups[name];
   if (!found) return { name, pending: true };
   if (found.failed) return { error: `Couldn't look up ${name} just now. Try again, or paste the Dusk account.`, name };

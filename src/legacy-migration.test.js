@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  assertMigrationBalance,
-  parseMigrationAmount,
-} from "./legacy-migration.js";
+import { erc20Abi } from "@dusk/evm-sdk";
+import { toFunctionSelector } from "viem";
+
+import { MIGRATION_ABI, assertMigrationBalance, parseMigrationAmount } from "./legacy-migration.js";
 
 test("legacy migration accepts exact Lux and rejects fractions the contract rounds away", () => {
   assert.equal(parseMigrationAmount("1.000000001"), 1_000_000_001_000_000_000n);
@@ -22,4 +22,11 @@ test("legacy migration rejects an amount above the wallet token balance", () => 
     () => assertMigrationBalance(0n, "5"),
     /0 available, 5 required/u,
   );
+});
+
+test("the token and migration calls are encoded as the contracts take them", () => {
+  // The SDK's ERC-20 ABI, as the token contracts' own functions.
+  const selector = (abi, name) => toFunctionSelector(abi.find((item) => item.name === name));
+  assert.deepEqual(["allowance", "approve", "balanceOf"].map((name) => selector(erc20Abi, name)), ["0xdd62ed3e", "0x095ea7b3", "0x70a08231"]);
+  assert.equal(selector(MIGRATION_ABI, "migrate"), toFunctionSelector("function migrate(uint256 amount, string mainnetDuskAddress)"));
 });

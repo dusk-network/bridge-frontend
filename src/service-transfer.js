@@ -1,6 +1,5 @@
-import { formatUnits } from "./amount.js";
+import { formatUnits } from "viem";
 import { config } from "./config.js";
-import { sendDuskTransfer } from "./dusk-wallet.js";
 import { gasAtNodePrice, TRANSFER_GAS_LIMIT } from "./gas.js";
 import { normalizeEvmAddress } from "./validation.js";
 
@@ -26,10 +25,4 @@ export async function serviceTransferRequest({ amountLux, destination, node }) {
     memo: to,
     to: service.account,
   };
-}
-
-export async function submitServiceTransfer(options) {
-  const request = options.request ?? (await serviceTransferRequest(options));
-  const { hash } = await sendDuskTransfer(request, { account: options.account });
-  return { hash, to: request.memo };
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { entryId, findActivity, readActivity, recordActivity, saveActivity, updateActivity, useActivityNetwork } from "./activity.js";
+import { entryId, readActivity, recordActivity, saveActivity, updateActivity, useActivityNetwork } from "./activity.js";
 
 const storage = (initial = {}) => {
   const values = new Map(Object.entries(initial));
@@ -26,7 +26,7 @@ test("an entry is its route and hash; recording it again merges", () => {
   assert.equal(entry.amountLux, "5");
 
   updateActivity(entry.id, { stage: "ready_to_prove" }, store);
-  assert.equal(findActivity(entry.id, store).stage, "ready_to_prove");
+  assert.equal(readActivity(store).find((item) => item.id === entry.id).stage, "ready_to_prove");
 });
 
 test("the same hash on two routes is two entries", () => {
@@ -66,7 +66,7 @@ test("an entry stays for this visit when the browser refuses to store it", () =>
   const id = entryId("dusk-to-dusk-evm", HASH);
   assert.deepEqual(readActivity(full).map((item) => item.id), [id]);
   updateActivity(id, { status: "completed" }, full);
-  assert.equal(findActivity(id, full).status, "completed");
+  assert.equal(readActivity(full).find((item) => item.id === id).status, "completed");
 
   // Once the browser stores again, the list is stored with it.
   refuse = false;

@@ -3,6 +3,8 @@
 // source transaction hash: the tracker rebuilds everything else from the
 // chain, so a lost or cleared entry can be added back from its hash.
 
+import { canonicalHash } from "./permalink.js";
+
 const STORAGE_KEY = "dusk-bridge:activity:v2";
 const LEGACY_KEY = "dusk-bridge:activity:v1";
 const MAX_ITEMS = 200;
@@ -21,13 +23,8 @@ export function useActivityNetwork(profile) {
 
 const storageKey = () => (network ? `${STORAGE_KEY}:${network}` : STORAGE_KEY);
 
-export function normalizeTxHash(hash) {
-  const value = String(hash ?? "").trim().toLowerCase();
-  return /^(0x)?[0-9a-f]{64}$/u.test(value) ? value : null;
-}
-
 export const entryId = (routeId, hash) =>
-  `${routeId}:${normalizeTxHash(hash) ?? String(hash).toLowerCase()}`;
+  `${routeId}:${canonicalHash(hash) ?? String(hash).toLowerCase()}`;
 
 function validItem(item) {
   return (
@@ -40,7 +37,7 @@ function validItem(item) {
 
 /** v1 kept status words and no hash field; the tracker re-derives both. */
 function fromLegacy(item) {
-  const hash = normalizeTxHash(item?.transactionHash ?? item?.id);
+  const hash = canonicalHash(item?.transactionHash ?? item?.id);
   if (!hash || typeof item?.routeId !== "string") return null;
   return {
     amount: item.amount ?? null,
@@ -117,7 +114,7 @@ export function readActivity(storage = defaultStorage()) {
 
 /** Adds an entry, or merges into the one with the same route and hash. */
 export function recordActivity(item, storage = defaultStorage()) {
-  const hash = normalizeTxHash(item.hash) ?? item.hash;
+  const hash = canonicalHash(item.hash) ?? item.hash;
   const id = entryId(item.routeId, hash);
   const items = readActivity(storage);
   const existing = items.find((entry) => entry.id === id);
@@ -139,12 +136,4 @@ export function updateActivity(id, patch, storage = defaultStorage()) {
     item.id === id ? { ...item, ...patch } : item,
   );
   return storage ? save(items, storage) : items;
-}
-
-export function findActivity(id, storage = defaultStorage()) {
-  return readActivity(storage).find((item) => item.id === id) ?? null;
-}
-
-export function clearActivity(storage = defaultStorage()) {
-  storage?.removeItem(storageKey());
 }

@@ -35,26 +35,29 @@ stays on that network's counterparts. There are three routes:
 | Dusk → BNB Smart Chain | |
 | Ethereum → Dusk | Ethereum (Sepolia) → Dusk, not running |
 | | Dusk → Ethereum (Sepolia), not running |
-| Dusk → DuskEVM, once configured | Dusk → DuskEVM |
-| DuskEVM → Dusk, once configured | DuskEVM → Dusk |
+| Dusk → DuskEVM, once DuskEVM is on mainnet | Dusk → DuskEVM |
+| DuskEVM → Dusk, once DuskEVM is on mainnet | DuskEVM → Dusk |
 
 Each chain has one name per network: Dusk and DuskEVM keep theirs next to the
 network badge, and Ethereum and BNB Smart Chain name their testnet in
 brackets. DUSK on them is named by its token standard: ERC20 DUSK and BEP20
 DUSK.
 
-The migration contracts and the operated Dusk → BSC account are pinned to the
-values used by the Dusk Web Wallet and documentation, and so are the accounts
-that pay out each chain's migrations on mainnet: `2427XSRs…` for Ethereum, and
-for BSC the Dusk → BSC bridge account. DuskEVM routes appear only when its
-contract IDs and endpoints are configured; mainnet has none until DuskEVM
-mainnet is live.
+The routes, and everything they use, come from the network's file in
+[`@dusk-network/networks`](https://www.npmjs.com/package/@dusk-network/networks),
+pinned to an exact version, as the web wallet, the wallet extension and the
+explorer take them: the chains and their endpoints, the migration contracts,
+the bridge account and its fee, the accounts that pay out each chain's
+migrations (on mainnet `2427XSRs…` for Ethereum, and for BSC the Dusk → BSC
+bridge account), DuskEVM's contracts, predeploys and drivers, and whether a
+route runs. DuskEVM's routes appear where the file has them: testnet, and
+mainnet once DuskEVM is live there.
 
-Nothing has been paid out on the testnet Sepolia routes since 11 Feb 2026, so
-they're shown as not running: listed, disabled, and never opened unless a link
-names one. `VITE_PAUSED_ROUTES` lists the routes shown that way (testnet:
-`ethereum-to-dusk,dusk-to-ethereum`); `none` runs them again. Transfers already
-sent on a paused route are still followed.
+A route the file says isn't running is shown as not running: listed,
+disabled, and never opened unless a link names one. On testnet that's the
+Sepolia routes, on which nothing has been paid out since 11 Feb 2026.
+`VITE_PAUSED_ROUTES` sets the routes shown that way instead; `none` runs them
+all. Transfers already sent on a paused route are still followed.
 
 The app supports:
 
@@ -74,20 +77,23 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
 - **A task**: the amount, where it goes, and the quote: what you send, the
   network fee as a maximum and its usual cost, the bridge fee, what you
   receive and when. One line says what becomes public.
-- **Review**: the checked facts (balances, gas, where the payout goes), then
-  each wallet step with the lines its window will show, in its order and
-  words, raw values decoded next to them and every recipient in full. Cancel
-  and confirm are equal. A Dusk call is built before the review, so the call
-  data's sha256 shown is the one Dusk Wallet prints (older versions show a
-  bridge call only as its bytes), and the reviewed request is what is sent.
+- **Review**: what moves and what becomes public, the checked facts
+  (balances, gas, where the payout goes), then each wallet step with the
+  lines its window will show, in its order and words, raw values decoded
+  next to them and every recipient in full. Cancel and confirm are equal; a
+  request you reject in the wallet is said in grey, not as a failure. A
+  Dusk call is built before the review, so the call data's sha256 shown is
+  the one Dusk Wallet prints (older versions show a bridge call only as its
+  bytes), and the reviewed request is what is sent.
 - **Receipt**, at `#/transfer/<hash>`: the steps with times, explorer links
   and hashes, both transactions in full, the fees paid and the receipt link.
   It shows no balances: the link is safe to share. A withdrawal waiting for
   its claim counts down, says when a clock change falls inside the wait, and
   offers an .ics file made in the browser ("Add to calendar").
 - **My transfers**: the connected accounts' transfers, read from the networks
-  (below), plus any sent or looked up on this device. "Look up a transfer"
-  finds a transfer's route from its hash alone.
+  (below), plus any sent or looked up on this device, each with whom it pays
+  and its transaction's short hash. "Look up a transfer" finds a transfer's
+  route from its hash alone.
 - **Contracts**: every address and contract ID each route uses, in full,
   with copy buttons and explorer links, and an operator only where the
   deployment names one.
@@ -149,7 +155,7 @@ others count block time, a second later for their strict comparisons.
 
 - Before the proof: "Claim 7 days after you prove. You can prove about 30
   minutes after sending.", with the chain's figures.
-- After it: "Claim from Mon 2 Nov, 04:20 CET" once the game has resolved, and
+- After it: "Claim from 2 Nov, 04:20 CET" once the game has resolved, and
   "Claim from about …", the earliest it can be, before that. A game left
   unresolved more than an hour past its clock is late: "Waiting for DuskEVM
   to settle this proof. Claim from … at the soonest.", with no countdown or
@@ -157,9 +163,11 @@ others count block time, a second later for their strict comparisons.
 - A claim is ready once the Portal's check passes and its date has come.
 - A proof goes against a game that covers the withdrawal, has already
   resolved, and that the Portal would take, where there is one: the anchor
-  state registry calls it proper and respected. Its date is then exact when
-  the proof is made ("If you prove now, you can claim from …"). Otherwise the
-  proof goes against the newest covering game.
+  state registry calls it proper and respected, and it was created after the
+  respected game type last changed (`respectedGameTypeUpdatedAt`), as the web
+  wallet requires. Its date is then exact when the proof is made ("If you
+  prove now, you can claim from …"). Otherwise the proof goes against the
+  newest covering game.
 
 Several contract reads on one screen go to the node as one Multicall for Dusk
 query (`93de287b…6ce1d4`, mainnet and testnet). A read that fails inside a
@@ -180,10 +188,9 @@ only this network's:
   a day per network.
 - **Otherwise**: what this browser's own transfers on the route took (the
   middle of the last five completed in 30 days, with two at least), or the
-  profile's value in `src/config.js`, which says where each number comes
-  from. `VITE_ETHEREUM_MIGRATION_SECONDS`, `VITE_BSC_MIGRATION_SECONDS`,
-  `VITE_SERVICE_BRIDGE_DELAY_SECONDS` and `VITE_DUSKEVM_DEPOSIT_SECONDS` set a
-  deployment's own; `none` clears one.
+  route's typical time in the network's file. `VITE_ETHEREUM_MIGRATION_SECONDS`,
+  `VITE_BSC_MIGRATION_SECONDS`, `VITE_SERVICE_BRIDGE_DELAY_SECONDS` and
+  `VITE_DUSKEVM_DEPOSIT_SECONDS` set a deployment's own; `none` clears one.
 
 A route whose time isn't known on this network shows none.
 
@@ -198,12 +205,15 @@ cost next to it.
 
 ## Configuration
 
-Copy `.env.example` to `.env.local`. Empty values mean the default. The
-DuskEVM contract IDs come from the trusted deployment address book. They are
-deliberately not guessed from EVM addresses. The anchor state registry's
-(`VITE_DUSKEVM_ANCHOR_STATE_REGISTRY_CONTRACT_ID`) is optional, and testnet's
-by default. Without it (`none`), a proof goes against the newest covering
-game.
+Copy `.env.example` to `.env.local`. Empty values mean the network file's
+value, so `VITE_BRIDGE_PROFILE=testnet` alone runs every testnet route. The
+other keys are local overrides: a deployment's own endpoints, contracts,
+accounts, fee or times for the file's routes, or fewer routes. A chain or a
+route the file doesn't have can't be added. DuskEVM's contract IDs in the
+file come from its address book (duskevm-genesis); they are never guessed
+from EVM addresses. The anchor state registry
+(`VITE_DUSKEVM_ANCHOR_STATE_REGISTRY_CONTRACT_ID`) is optional. Without it
+(`none`), a proof goes against the newest covering game.
 
 The same keys can be provided before the app loads through
 `window.__DUSK_BRIDGE_CONFIG__`, which allows one immutable build to be
@@ -213,15 +223,18 @@ For local testnet use:
 
 ```dotenv
 VITE_BRIDGE_PROFILE=testnet
-VITE_DUSKEVM_L1_STANDARD_BRIDGE_CONTRACT_ID=<from the address book>
-VITE_DUSKEVM_OPTIMISM_PORTAL_CONTRACT_ID=<from the address book>
-VITE_DUSKEVM_DISPUTE_GAME_FACTORY_CONTRACT_ID=<from the address book>
 ```
 
-`.env.example` lists the testnet values in use today.
+The page writes times, IDs and fees as every Dusk app does
+(`@dusk-network/networks/format`): times in English words on the viewer's
+clock, with the zone ("Today, 14:05 CET", records in full: "Wed 28 Oct
+2026, 14:05 CET"); Dusk contract IDs without 0x and EVM addresses with their
+checksum; the most a fee can be rounded up, and the fee a transfer paid
+exact in its receipt's details.
 
-The footer and About this page say the bridge is operated by Dusk, and link
-Dusk's Terms of use and Privacy policy, as the explorer does. A deployment can
+The footer and About this page say the bridge is operated by the network's
+operator, Dusk, and link its Terms of use and Privacy policy, as the explorer
+does. A deployment can
 name its own (`VITE_TERMS_URL`, `VITE_PRIVACY_URL`), or another operator for a
 route (`VITE_MIGRATION_OPERATOR`, `VITE_SERVICE_OPERATOR`,
 `VITE_DUSKEVM_OPERATOR`), which the Contracts sheet and the footer then name.

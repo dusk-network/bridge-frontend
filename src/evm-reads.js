@@ -2,16 +2,11 @@
 // from each chain's public RPC: the wallet isn't asked to switch chains just
 // so the page can read.
 
-import { decodeFunctionResult, encodeFunctionData, parseAbi, toHex } from "viem";
+import { erc20Abi as ERC20 } from "@dusk/evm-sdk";
+import { decodeFunctionResult, encodeFunctionData, toHex } from "viem";
 
 import { prepareWithdrawalCall } from "./duskevm-withdrawal.js";
-
-const ERC20 = parseAbi([
-  "function allowance(address owner, address spender) view returns (uint256)",
-  "function approve(address spender, uint256 amount) returns (bool)",
-  "function balanceOf(address account) view returns (uint256)",
-]);
-const MIGRATION = parseAbi(["function migrate(uint256 amount, string mainnetDuskAddress)"]);
+import { MIGRATION_ABI } from "./legacy-migration.js";
 
 /**
  * What a migration usually spends when it can't be estimated yet (before
@@ -70,7 +65,7 @@ export function createEvmReads({ cfg, rpc, rpcBatch }) {
         ? estimate(
             network,
             {
-              data: encodeFunctionData({ abi: MIGRATION, args: [amountWei, duskAccount], functionName: "migrate" }),
+              data: encodeFunctionData({ abi: MIGRATION_ABI, args: [amountWei, duskAccount], functionName: "migrate" }),
               from: owner,
               to: chain.migrationContract,
             },

@@ -7,8 +7,6 @@
 // The wallet only signs and sends.
 
 import {
-  L2_STANDARD_BRIDGE_ADDRESS,
-  L2_TO_L1_MESSAGE_PASSER_ADDRESS,
   parseMessagePassedReceipt,
   hashWithdrawal as sdkHashWithdrawal,
   serializeOutputRootProofForDuskAbi,
@@ -27,6 +25,7 @@ import {
 } from "viem";
 
 import { GAME_STATUS, claimFrom, contractClock, contractNow, wallTime } from "./claim-date.js";
+import { DUSKEVM_PREDEPLOYS } from "./config.js";
 import { MAX_BATCH } from "./contract-reader.js";
 import { withdrawalRecipientAccount } from "./dusk-recipient.js";
 import { withdrawalGasLimit } from "./gas.js";
@@ -34,8 +33,8 @@ import { withdrawalGasLimit } from "./gas.js";
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 // Every message from DuskEVM to Dusk passes the same contract. A withdrawal of
 // DUSK is the L2 bridge's own `finalizeBridgeETH`, sent through the L2
-// messenger (OP-stack predeploys).
-const L2_CROSS_DOMAIN_MESSENGER = "0x4200000000000000000000000000000000000007";
+// messenger (OP-stack predeploys, from DuskEVM's network file).
+const { l2CrossDomainMessenger, l2StandardBridge, l2ToL1MessagePasser } = DUSKEVM_PREDEPLOYS;
 
 /** Why a DuskEVM transaction isn't followed, proved or claimed as a withdrawal. */
 export const NOT_A_DUSK_WITHDRAWAL = "That DuskEVM transaction isn't a DUSK withdrawal.";
@@ -86,14 +85,15 @@ export const GAME_HUB_DRIVER = Object.freeze({
 /**
  * The anchor state registry the Portal asks whether a game is proper and
  * respected, read raw like the hubs: a game's 20-byte address in, yes or no
- * out.
+ * out. `respectedGameTypeUpdatedAt` takes nothing and gives a u64.
  */
 export const GAME_REGISTRY_DRIVER = Object.freeze({
   decodeOutputFn(fnName, bytes) {
+    if (fnName === "respectedGameTypeUpdatedAt") return readU64Le(bytes);
     if (bytes?.length !== 1 || bytes[0] > 1) throw new RangeError(`Expected ${fnName}'s yes or no.`);
     return bytes[0] === 1;
   },
-  encodeInputFn: (_fnName, json) => Uint8Array.from(JSON.parse(json)),
+  encodeInputFn: (fnName, json) => (fnName === "respectedGameTypeUpdatedAt" ? new Uint8Array(0) : Uint8Array.from(JSON.parse(json))),
 });
 
 export function parseGameSearchDepth(value) {
@@ -195,7 +195,7 @@ export function parseWithdrawalReceipt(receipt) {
     if (parsed.blockNumber === undefined)
       throw new Error("Withdrawal receipt is missing its L2 block number.");
     if (
-      String(parsed.withdrawal.sender).toLowerCase() !== L2_CROSS_DOMAIN_MESSENGER ||
+      String(parsed.withdrawal.sender).toLowerCase() !== l2CrossDomainMessenger.toLowerCase() ||
       !withdrawalDetails(parsed.withdrawal)
     )
       throw new Error(NOT_A_DUSK_WITHDRAWAL);
@@ -222,7 +222,7 @@ export function withdrawalDetails(withdrawal) {
     const relay = decodeFunctionData({ abi: RELAY_ABI, data: withdrawal.data });
     if (relay.functionName !== "relayMessage") return null;
     const [, sender, , relayValue, , message] = relay.args;
-    if (String(sender).toLowerCase() !== L2_STANDARD_BRIDGE_ADDRESS.toLowerCase()) return null;
+    if (String(sender).toLowerCase() !== l2StandardBridge.toLowerCase()) return null;
     const inner = decodeFunctionData({ abi: RELAY_ABI, data: message });
     if (inner.functionName !== "finalizeBridgeETH") return null;
     const [from, , amountWei, extraData] = inner.args;
@@ -377,7 +377,6 @@ function finalizationNotReadyMessage(status) {
  * @param {() => Promise<bigint>} deps.gasPrice the node's gas price
  * @param {bigint} deps.gasUpper the bridge's gas limit bound
  * @param {bigint} [deps.gameSearchDepth]
- * @param {(fnName: string, args: unknown, gas: object) => Promise<{ hash: string }>} deps.sendPortalCall
  */
 export function createWithdrawals(deps) {
   const searchDepth = deps.gameSearchDepth ?? 64n;
@@ -476,7 +475,7 @@ export function createWithdrawals(deps) {
   async function getWithdrawalProof(withdrawalHash, blockNumber) {
     const key = withdrawalStorageKey(withdrawalHash);
     const proof = await deps.l2Rpc("eth_getProof", [
-      L2_TO_L1_MESSAGE_PASSER_ADDRESS,
+      l2ToL1MessagePasser,
       [key],
       toHex(blockNumber),
     ]);
@@ -587,17 +586,24 @@ export function createWithdrawals(deps) {
    * A game covering the withdrawal that has already resolved for its
    * proposal, and that the Portal would take a proof against: one the
    * registry calls proper (registered, not blacklisted, not retired) and
-   * respected. A proof against it can be claimed exactly its maturity delay
-   * later. Games come at a steady pace, so the search starts about where
-   * games are old enough to have resolved, and goes back a few pages. Null
-   * when none covers the withdrawal yet, none of them has resolved and
-   * passes, or the registry isn't known.
+   * respected, created after the respected game type last changed, as the
+   * web wallet takes it. A proof against it can be claimed exactly its
+   * maturity delay later. Games come at a steady pace, so the search starts
+   * about where games are old enough to have resolved, and goes back a few
+   * pages. Null when none covers the withdrawal yet, none of them has
+   * resolved and passes, or the registry isn't known.
    */
   async function findResolvedProof({ gameCount, gameType, tip, withdrawalBlockNumber, withdrawalHash }) {
     if (!registry) return null;
     const page = async (from) =>
       (await dgf.call.findLatestGames([gameType, bigIntToU256(from), bigIntToU256(RESOLVED_PAGE)])).map(searchedGame);
-    const [known, newest] = await Promise.all([gameHub(gameType), page(gameCount - 1n)]);
+    // In one query: the type's hub, the newest games, and when the respected
+    // game type last changed. Games created then or before are retired.
+    const [known, newest, updatedAt] = await Promise.all([
+      gameHub(gameType),
+      page(gameCount - 1n),
+      registry.call.respectedGameTypeUpdatedAt().then(BigInt),
+    ]);
     if (newest.length < 2) return null;
     const clock = contractClock(newest[0].createdAt, tip);
     // Its clock ran out, and its resolver's usual lag has passed.
@@ -611,7 +617,7 @@ export function createWithdrawals(deps) {
       const old = games.filter((game) => game.createdAt <= cutoff);
       // The newest of them doesn't cover the withdrawal: none does.
       if (old.length && old[0].l2BlockNumber < withdrawalBlockNumber) return null;
-      const covering = old.filter((game) => game.l2BlockNumber >= withdrawalBlockNumber);
+      const covering = old.filter((game) => game.l2BlockNumber >= withdrawalBlockNumber && game.createdAt > updatedAt);
       // Each one's status, and whether the Portal would take it, as the
       // registry it asks says: a query at a time, newest first, until one
       // passes.
@@ -1096,23 +1102,10 @@ export function createWithdrawals(deps) {
     };
   }
 
-  async function proveWithdrawal(txHash) {
-    const { args, fnName, gas } = await prepareProve(txHash);
-    return (await deps.sendPortalCall(fnName, args, gas)).hash;
-  }
-
-  async function finalizeWithdrawal(txHash) {
-    const { args, fnName, gas } = await prepareFinalize(txHash);
-    return (await deps.sendPortalCall(fnName, args, gas)).hash;
-  }
-
   return Object.freeze({
-    finalizeWithdrawal,
     loadTiming,
     loadWithdrawalStatus,
     prepareFinalize,
     prepareProve,
-    proveWithdrawal,
-    withdrawalGas,
   });
 }

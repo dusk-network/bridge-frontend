@@ -4,6 +4,8 @@
 // and how long the route takes on this network; no balances, no network
 // requests.
 
+import { formatEvmAddress, shortAccount } from "@dusk-network/networks/format";
+
 import { claimText } from "./claim-date.js";
 import {
   clockChangeBetween,
@@ -16,7 +18,7 @@ import {
 import { networkName, tokenName } from "./names.js";
 import { aboutTime, lateAfterSeconds, routeTime } from "./route-times.js";
 import { STATUS_WORDS } from "./tracking.js";
-import { withdrawalActionFailure, withdrawalNextAction } from "./withdrawal-lifecycle.js";
+import { WITHDRAWAL_GAS_REFUSAL } from "./gas.js";
 
 export const html = (value) =>
   String(value ?? "")
@@ -38,19 +40,39 @@ export function explorerTxUrl(cfg, network, hash) {
   return explorer ? `${explorer.replace(/\/+$/u, "")}/tx/${withPrefix(hash)}` : null;
 }
 
-/** "0xd63b…8df4" for EVM addresses, "rz2gFT…3VGXyt" for Dusk accounts and hashes. */
+/**
+ * As every Dusk app shortens them: "0xd63b…8DF4" for EVM addresses, with
+ * their checksum's capitals; "rz2gFT…3VGXyt" for Dusk accounts and hashes.
+ */
 export function short(value) {
   const text = String(value ?? "");
-  if (/^0x[0-9a-f]{40}$/iu.test(text)) return `${text.slice(0, 6)}…${text.slice(-4)}`;
-  return text.length > 14 ? `${text.slice(0, 6)}…${text.slice(-6)}` : text;
+  return /^0x[0-9a-f]{40}$/iu.test(text) ? formatEvmAddress(text, { short: true }) : shortAccount(text);
 }
+
+/** The action a withdrawal's stage waits for, if the user can take it now. */
+export const withdrawalNextAction = (stage) => (stage === "ready_to_prove" ? "prove" : stage === "ready_to_finalize" ? "finalize" : null);
+
+/** What a proof or claim that couldn't be sent says, at the stage that offers to send it again. */
+const ACTION_FAILURE = Object.freeze({
+  ready_to_finalize: "The claim wasn't sent. Try again.",
+  ready_to_prove: "The proof wasn't sent. Try again.",
+});
+
+/** What every page says when you reject a request in your wallet: never in red, it's your choice. */
+export const WALLET_CANCELLED = "You cancelled in your wallet, so nothing was sent.";
+
+/** Whether the wallet's user rejected the request (4001), however the wallet wrapped it. */
+export const walletCancelled = (error) =>
+  [error?.code, error?.cause?.code, error?.cause?.cause?.code].includes(4001) || error?.name === "UserRejectedRequestError";
+
+/** What a proof or claim that wasn't sent keeps on its transfer: that you cancelled it, or why it failed. */
+export const actionErrorOf = (error) => (walletCancelled(error) ? WALLET_CANCELLED : error?.message ?? String(error));
 
 /** Wallet errors in plain words, naming the wallet that raised them. */
 export function friendlyWalletError(error, wallet = "dusk") {
   const codes = [error?.code, error?.cause?.code, error?.cause?.cause?.code];
   const name = wallet === "evm" ? "EVM wallet" : "Dusk wallet";
-  if (codes.includes(4001) || error?.name === "UserRejectedRequestError")
-    return "You cancelled in your wallet, so nothing was sent.";
+  if (walletCancelled(error)) return WALLET_CANCELLED;
   if (codes.includes(4100) || /wallet (?:is )?locked/iu.test(error?.message ?? ""))
     return `The ${name} is locked. Unlock it, reconnect, and try again.`;
   if (codes.includes(4900)) return `The ${name} disconnected. Reconnect it and try again.`;
@@ -71,14 +93,16 @@ export const switchToProver = (entry) =>
     : "Switch Dusk Wallet to the account that proved it. Only that account can claim.";
 
 /**
- * A proof by another account, in the list and on the receipt: that proving it
- * yourself lets you claim, and whom it pays where that's another account than
- * the connected one (`account`).
+ * A proof by another account, in the list and on the receipt. When the
+ * withdrawal pays the connected account (`account`), proving it yourself lets
+ * you claim it. When it pays another, it says whom, and that proving and
+ * claiming still pays that account, naming yours by its .dusk `name`.
  */
-export function provenByOtherLine(entry, account = "") {
+export function provenByOtherLine(entry, account = "", name = "") {
   const pays = entry?.destination ?? "";
-  const payee = pays && pays !== account ? ` It pays ${short(pays)}${account ? ", not your connected Dusk account" : ""}.` : "";
-  return `Another account proved it.${payee} Prove it yourself to claim it.`;
+  if (!pays || pays === account) return "Another account proved it. Prove it yourself to claim it.";
+  const notYours = account ? `, not ${name || "your connected Dusk account"}` : "";
+  return `Another account proved it. This pays ${short(pays)}${notYours}. If you prove and claim, the DUSK still goes there.`;
 }
 
 const amountOf = (entry) =>
@@ -115,9 +139,9 @@ function claimTiming(entry) {
 
 const REJECTED_PROOF = "The proof was rejected. Prove again once DuskEVM reports a new output.";
 
-function withdrawalSteps(entry, cfg, { account, now, time: usual, timeZone, year }) {
+function withdrawalSteps(entry, cfg, { account, locale, name, now, time: usual, timeZone, year }) {
   const stage = entry.stage ?? "submitted";
-  const time = (ms) => (ms ? formatDateTime(ms, { timeZone, year }) : "");
+  const time = (ms) => (ms ? formatDateTime(ms, { locale, now, timeZone, year }) : "");
   // The current stage decides: a proof the Portal rejected leaves the
   // withdrawal ready to prove again, whatever proof times are kept.
   const proved = ["proven_waiting", "ready_to_finalize", "finalize_submitted", "finalized"].includes(stage);
@@ -143,7 +167,7 @@ function withdrawalSteps(entry, cfg, { account, now, time: usual, timeZone, year
       detail: entry.pendingAction === "prove"
         ? "Proof sent, waiting for Dusk"
         : entry.provenByOther
-          ? provenByOtherLine(entry, account)
+          ? provenByOtherLine(entry, account, name)
           : "Ready now",
       hash: entry.pendingHash ?? null,
       network: "dusk",
@@ -190,8 +214,8 @@ function withdrawalSteps(entry, cfg, { account, now, time: usual, timeZone, year
 /** A proven withdrawal whose date isn't read yet: "7 days after the proof at the soonest". */
 const afterTheProof = (time) => (time?.maturity ? `${durationWords(time.maturity)} after the proof at the soonest` : "");
 
-function sourceSteps(entry, route, cfg, { timeZone, year }) {
-  const time = (ms) => (ms ? formatDateTime(ms, { timeZone, year }) : "");
+function sourceSteps(entry, route, cfg, { locale, now, timeZone, year }) {
+  const time = (ms) => (ms ? formatDateTime(ms, { locale, now, timeZone, year }) : "");
   const from = networkName(cfg, route.from.id);
   const to = networkName(cfg, route.to.id);
   const failed = entry.status === "failed";
@@ -241,7 +265,7 @@ function titleFor(entry, route, cfg, amount) {
     return route.mode === "duskevm-withdrawal" ? `The withdrawal failed on ${from}` : `${token} didn't reach ${to}`;
   if (route.mode === "duskevm-withdrawal") {
     if (entry.stage === "ready_to_finalize" && !entry.pendingAction) return `${text} is ready to claim`;
-    if (entry.stage === "ready_to_prove" && !entry.pendingAction) return `Prove your withdrawal of ${text}`;
+    if (entry.stage === "ready_to_prove" && !entry.pendingAction) return `Prove the withdrawal of ${text}`;
     return `Moving ${text} from ${from} to ${to}`;
   }
   if (route.mode === "migration") return `Moving ${token} to ${to}`;
@@ -257,18 +281,20 @@ function titleFor(entry, route, cfg, amount) {
  * @param {object} options.route the entry's route
  * @param {number} [options.now]
  * @param {string} [options.timeZone] for tests; the viewer's own otherwise
+ * @param {string} [options.locale] for tests: whose clock times are written on; the viewer's otherwise
  * @param {boolean} [options.year] dates as records: with the year
  * @param {string|null} [options.submitter] Dusk Wallet's account, as the Portal knows provers
  * @param {string} [options.account] the connected Dusk account
+ * @param {string} [options.name] its .dusk name, where it has one
  * @param {object} [options.timing] what `routeTime` reads the route's time from
  */
-export function transferView(entry, { account = "", cfg, now = Date.now(), route, submitter = null, timeZone, timing, year = false }) {
+export function transferView(entry, { account = "", cfg, locale, name = "", now = Date.now(), route, submitter = null, timeZone, timing, year = false }) {
   const status = entry.status === "completed" || entry.status === "failed" ? entry.status : "pending";
   const amount = amountOf(entry);
   const withdrawal = route.mode === "duskevm-withdrawal";
   // How long the route takes on this network, as every page says it.
   const time = routeTime(route, cfg, { ...timing, now });
-  const options = { account, now, time, timeZone, year };
+  const options = { account, locale, name, now, time, timeZone, year };
   const steps = (withdrawal ? withdrawalSteps(entry, cfg, options) : sourceSteps({ ...entry, status }, route, cfg, options)).map(
     (item) => ({ ...item, href: item.hash && item.network ? explorerTxUrl(cfg, item.network, item.hash) : null }),
   );
@@ -285,12 +311,12 @@ export function transferView(entry, { account = "", cfg, now = Date.now(), route
       const change = proof ? clockChangeBetween(proof, timing.at, zone) : null;
       countdown = {
         at: timing.at,
-        atText: formatDateTime(timing.at, { timeZone, year }),
+        atText: formatDateTime(timing.at, { locale, now, timeZone, year }),
         clockNote: clockChangeNote(change, { now, timeZone: zone }),
         exact: timing.exact,
         left: durationWords(Math.max(0, (timing.at - now) / 1_000)),
         // "Claim from …", "Claim from about …", or, late, "Waiting for DuskEVM to settle this proof. …"
-        line: claimText(timing, (ms) => formatDateTime(ms, { timeZone, year })),
+        line: claimText(timing, (ms) => formatDateTime(ms, { locale, now, timeZone, year })),
         overdue: timing.overdue,
       };
     }
@@ -310,7 +336,13 @@ export function transferView(entry, { account = "", cfg, now = Date.now(), route
       ? {
           // A claim waits for the account that proved it.
           blocked: actionKind === "finalize" && proverMismatch(entry, submitter) ? switchToProver(entry) : "",
-          failure: entry.actionError ? withdrawalActionFailure(entry.stage, entry.actionError) : "",
+          // Rejected in the wallet: that, as the deposit says it. Refused for
+          // its gas: that, since trying again would be refused too.
+          failure: !entry.actionError
+            ? ""
+            : entry.actionError === WALLET_CANCELLED || entry.actionError === WITHDRAWAL_GAS_REFUSAL
+              ? entry.actionError
+              : ACTION_FAILURE[entry.stage],
           kind: actionKind,
           label: actionKind === "prove" ? "Prove on Dusk" : "Claim on Dusk",
         }
@@ -366,8 +398,8 @@ function trackerLabel(item, entry, now) {
 }
 
 /** The line under a transfer in My transfers. */
-export function transferSubline(view, entry, route, cfg, { account = "", now = Date.now(), timeZone } = {}) {
-  const time = (ms) => formatDateTime(ms, { timeZone });
+export function transferSubline(view, entry, route, cfg, { account = "", locale, name = "", now = Date.now(), timeZone } = {}) {
+  const time = (ms) => formatDateTime(ms, { locale, now, timeZone });
   if (view.status === "failed") return view.note || "This transfer didn't go through.";
   if (route.mode === "duskevm-withdrawal") {
     const stage = entry.stage ?? "submitted";
@@ -376,7 +408,7 @@ export function transferSubline(view, entry, route, cfg, { account = "", now = D
     if (entry.pendingAction === "prove" || stage === "prove_submitted") return "Proof sent, waiting for Dusk";
     if (entry.pendingAction === "finalize" || stage === "finalize_submitted") return "Claim sent, waiting for Dusk";
     if (stage === "ready_to_prove")
-      return entry.provenByOther ? provenByOtherLine(entry, account) : "Ready to prove on Dusk";
+      return entry.provenByOther ? provenByOtherLine(entry, account, name) : "Ready to prove on Dusk";
     if (stage === "ready_to_finalize")
       return entry.readyAt ? `Ready to claim since ${time(Number(entry.readyAt) * 1_000)}` : "Ready to claim on Dusk";
     // A rejected proof never matures: it's proved again, once there's a new output.

@@ -6,7 +6,7 @@
 // checked, with a copy button and an explorer link, in Söhne Mono.
 
 import { GLYPH, chainMark, icon, pairMark } from "./icons.js";
-import { html, short } from "./transfer-view.js";
+import { WALLET_CANCELLED, html, short } from "./transfer-view.js";
 
 export const copyButton = (value, label) =>
   `<button type="button" class="icon-btn" data-copy="${html(value)}" aria-label="Copy ${html(label)}" title="Copy">${icon("copy")}</button>`;
@@ -32,6 +32,15 @@ const statusPill = (status, word) =>
 const statusWord = (status, word) =>
   status === "completed" ? "" : `<span class="st ${status}"><span class="dot"></span>${html(word)}</span>`;
 
+/**
+ * Why a step didn't go: red when it failed, grey when you cancelled it in
+ * your wallet. `live` announces it as it appears, as the review and the card do.
+ */
+export const messageLine = (text, { live = true } = {}) =>
+  text === WALLET_CANCELLED
+    ? `<p class="message"${live ? ' role="status"' : ""}>${html(text)}</p>`
+    : `<p class="message error"${live ? ' role="alert"' : ""}>${html(text)}</p>`;
+
 /** What's public, its networks in bold: "Public on Dusk and DuskEVM, and linked:" then the parties. */
 export function publicLine(text) {
   const at = String(text ?? "").indexOf(": ");
@@ -50,20 +59,27 @@ export function strip(vm) {
   return `<div class="strip" role="note">Testnet <span class="sep" aria-hidden="true">·</span> Test DUSK has no value${link}</div>`;
 }
 
+/** "0x7568…b72D", its tail in a span a phone leaves out ("0x7568…"), so the header labels both wallets. */
+function shortLabel(value) {
+  const text = short(value);
+  const cut = text.indexOf("…") + 1;
+  return cut ? `${html(text.slice(0, cut))}<span class="tail">${html(text.slice(cut))}</span>` : html(text);
+}
+
 function duskPill(dusk) {
   if (dusk.state === "missing")
     return `<a class="wpill cta" href="${html(dusk.getUrl)}" target="_blank" rel="noreferrer">Get Dusk Wallet ${icon("ext")}<span class="sr-only"> (opens in a new tab)</span></a>`;
   if (dusk.state !== "connected")
     return `<button type="button" class="wpill cta" data-action="connect-dusk">${dusk.state === "locked" ? "Unlock Dusk Wallet" : "Connect Dusk Wallet"}</button>`;
   // The account by its .dusk name where Dusk Wallet sent one.
-  const who = dusk.name ? `<span class="nm">${html(dusk.name)}</span>` : `<code class="mono">${html(short(dusk.account))}</code>`;
+  const who = dusk.name ? `<span class="nm">${html(dusk.name)}</span>` : `<code class="mono">${shortLabel(dusk.account)}</code>`;
   return `<button type="button" class="wpill" data-action="connect-dusk" aria-label="Dusk Wallet, account ${html(dusk.name ? `${dusk.name}, ${dusk.account}` : dusk.account)}"><span class="av">${chainMark("dusk", "xs")}</span>${who}</button>`;
 }
 
 function evmPill(evm) {
   if (evm.state !== "connected")
     return `<button type="button" class="wpill cta" data-action="connect-evm">Connect EVM wallet</button>`;
-  return `<button type="button" class="wpill" data-action="connect-evm" aria-label="${html(evm.walletName || "EVM wallet")}, ${html(evm.account)}${evm.chainName ? `, on ${html(evm.chainName)}` : ""}"><span class="av">${icon("wallet")}</span><code class="mono">${html(short(evm.account))}</code>${evm.chainName ? `<span class="chainchip">${html(evm.chainName)}</span>` : ""}</button>`;
+  return `<button type="button" class="wpill" data-action="connect-evm" aria-label="${html(evm.walletName || "EVM wallet")}, ${html(evm.account)}${evm.chainName ? `, on ${html(evm.chainName)}` : ""}"><span class="av">${icon("wallet")}</span><code class="mono">${shortLabel(evm.account)}</code>${evm.chainName ? `<span class="chainchip">${html(evm.chainName)}</span>` : ""}</button>`;
 }
 
 /** The thin top bar: the name, the network, the wallets. The card's tabs are the pages. */
@@ -157,7 +173,7 @@ export function cardRegions(vm) {
     ? `<div class="kv"><dt class="k">Leaves your Dusk account</dt><dd class="v"><span class="num">${html(vm.quote.leaves)}</span></dd></div>`
     : "";
   return {
-    cta: `${vm.error ? `<p class="message error" role="alert">${html(vm.error)}</p>` : ""}${primaryControl(vm.button)}`,
+    cta: `${vm.error ? messageLine(vm.error) : ""}${primaryControl(vm.button)}`,
     "from-foot": `<span>${html(vm.from.balanceLabel)}</span><span class="bal">${vm.from.balance ? `<span class="num">${html(vm.from.balance)}</span>` : ""}${vm.canMax ? '<button type="button" class="mini" data-action="max">Max</button>' : ""}</span>`,
     receive: html(vm.receive || "0"),
     "recipient-note": recipientNote(vm.to),
@@ -216,12 +232,16 @@ export function cardPage(vm) {
 // Review sheet
 // ---------------------------------------------------------------------------
 
-// The top of a wallet's window: its title, the amount, to whom, and its tag.
+// The top of a wallet's window: its title, the amount, to whom, its small
+// print and its tag. A cost ("Costs up to 0.051 DUSK") takes its own line,
+// then what it's for ("for a 1,008 DUSK withdrawal that pays …").
 function walletHead(head) {
+  const amount = head.amount ? `${head.lead ? `${html(head.lead)} ` : ""}<span class="num">${html(head.amount)}</span>` : "";
   const to = head.to
-    ? ` to <code class="mono" title="${html(head.toFull ?? head.to)}">${html(head.to)}</code>${head.where ? ` ${html(head.where)}` : ""}`
+    ? `${html(head.prefix ?? "to")} <code class="mono" title="${html(head.toFull ?? head.to)}">${html(head.to)}</code>${head.where ? ` ${html(head.where)}` : ""}`
     : "";
-  return `<div class="wlhd"><div class="wlt">${html(head.title)}</div>${head.amount || to ? `<div class="wlto">${head.amount ? `<span class="num">${html(head.amount)}</span>` : ""}${to}</div>` : ""}${head.sub ? `<div class="wlto">${html(head.sub)}</div>` : ""}${head.tag ? `<span class="tag">${icon("check")}${html(head.tag)}</span>` : ""}</div>`;
+  const lines = (head.prefix ? [amount, to] : [[amount, to].filter(Boolean).join(" ")]).filter(Boolean);
+  return `<div class="wlhd"><div class="wlt">${html(head.title)}</div>${lines.map((line) => `<div class="wlto">${line}</div>`).join("")}${head.sub ? `<div class="wlto">${html(head.sub)}</div>` : ""}${head.tag ? `<span class="tag">${icon("check")}${html(head.tag)}</span>` : ""}</div>`;
 }
 
 export function walletLines(lines, cfgLinks) {
@@ -248,9 +268,8 @@ const otherAccount = (text) =>
   `<div class="group pad warn-box" role="note"><div class="note">${icon("person")}<span><b>Another account gets this DUSK.</b> ${html(text)}</span></div></div>`;
 
 // A proof's or a claim's review leads with what the step costs and what moves.
-function actionLead(lead) {
-  return `<div class="flow group lead"><div><div class="k">${html(lead.label)}</div><div class="v num">${html(lead.amount)}<span class="u">DUSK</span></div><div class="w">${lead.chain ? chainMark(lead.chain, "xs") : ""}<span>${html(lead.line)}</span></div></div></div>${lead.notYours ? otherAccount(lead.notYours) : ""}`;
-}
+const actionLead = (lead) =>
+  `<div class="flow group lead"><div><div class="k">${html(lead.label)}</div><div class="v num">${html(lead.amount)}<span class="u">DUSK</span></div><div class="w">${lead.chain ? chainMark(lead.chain, "xs") : ""}<span>${html(lead.line)}</span></div></div></div>`;
 
 export function reviewSheet(vm) {
   const checks = vm.checks.length
@@ -269,19 +288,22 @@ export function reviewSheet(vm) {
     </section>`,
     )
     .join("");
+  // Another account paid: said before the checks, after what's public.
+  const notYours = vm.lead ? vm.lead.notYours : vm.notYours;
   return `<div class="sheet-head"><div><h2 id="sheet-title">Review</h2><p class="sub">${html(vm.sub)}</p></div><button type="button" class="icon-btn round" data-action="close-sheet" aria-label="Close the review">${icon("close")}</button></div>
   <div class="sheet-body">
     ${vm.lead ? actionLead(vm.lead) : `<div class="flow group">
       <div><div class="k">You send</div><div class="v num">${html(vm.send.amount)}<span class="u">${html(vm.send.unit)}</span></div><div class="w">${chainMark(vm.send.chain, "xs")}${html(vm.send.where)}</div></div>
       <div class="dn" aria-hidden="true">${icon("back", "down")}</div>
       <div><div class="k">You receive</div><div class="v num">${html(vm.receive.amount)}<span class="u">${html(vm.receive.unit)}</span></div><div class="w">${chainMark(vm.receive.chain, "xs")}${html(vm.receive.where)}</div></div>
-    </div>${vm.notYours ? otherAccount(vm.notYours) : ""}`}
+    </div>`}
+    <p class="note">${icon("eye")}<span>${publicLine(vm.privacy)}</span></p>
+    ${notYours ? otherAccount(notYours) : ""}
     ${checks}
     <dl class="group kvs">${quoteRows({ rows: vm.feeRows })}</dl>
     ${steps}
-    <p class="note">${icon("eye")}<span>${publicLine(vm.privacy)}</span></p>
   </div>
-  <div class="sheet-foot">${vm.error ? `<p class="message error" role="alert">${html(vm.error)}</p>` : ""}<p class="hint">Check each line against ${html(vm.walletCheckName)}.</p><div class="btn-pair"><button type="button" class="btn sec" data-action="close-sheet">Cancel</button><button type="button" class="btn pri" data-action="confirm" ${vm.canConfirm ? "" : "disabled"}>${html(vm.confirmLabel)}</button></div>${vm.after ? `<p class="small t2">${html(vm.after)}</p>` : ""}</div>`;
+  <div class="sheet-foot">${vm.error ? messageLine(vm.error) : ""}<p class="hint">Check each line against ${html(vm.walletCheckName)}.</p><div class="btn-pair"><button type="button" class="btn sec" data-action="close-sheet">Cancel</button><button type="button" class="btn pri" data-action="confirm" ${vm.canConfirm ? "" : "disabled"}>${html(vm.confirmLabel)}</button></div>${vm.after ? `<p class="small t2">${html(vm.after)}</p>` : ""}</div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -325,7 +347,7 @@ export function receiptPage(vm) {
       ? `<div class="action-box">${actionNeedsWallet(view.action.kind)}<span class="small t2">Dusk Wallet is a browser extension for computers.</span></div>`
       : view.action.blocked
         ? `<div class="action-box"><p class="note">${icon("info")}<span>${html(view.action.blocked)}</span></p></div>`
-        : `<div class="action-box">${view.action.failure ? `<p class="message error">${html(view.action.failure)}</p>` : ""}<button type="button" class="btn pri" data-action="withdrawal-${view.action.kind}" data-id="${html(vm.id)}">${html(view.action.label)}</button><span class="small t2">${html(vm.actionFee ?? "")}</span></div>`
+        : `<div class="action-box">${view.action.failure ? messageLine(view.action.failure, { live: false }) : ""}<button type="button" class="btn pri" data-action="withdrawal-${view.action.kind}" data-id="${html(vm.id)}">${html(view.action.label)}</button><span class="small t2">${html(vm.actionFee ?? "")}</span></div>`
     : "";
   const details = vm.details
     .map((row) => `<div class="kv"><dt class="k">${html(row.label)}</dt><dd class="v">${row.html ?? `<span class="num">${html(row.value)}</span>`}</dd></div>`)
@@ -376,7 +398,10 @@ export function transferRow(row, { canAct = true } = {}) {
   else if (row.action.blocked) right = `<span class="tag">${icon("info")}Switch account to claim</span>`;
   else
     right = `<button type="button" class="btn pri xs" data-action="withdrawal-${row.action.kind}" data-id="${html(row.id)}">${html(row.action.kind === "prove" ? "Prove" : "Claim")}<span class="sr-only"> ${html(row.amountText)} from ${html(row.title)}</span></button>`;
-  return `<li class="tr" data-status="${html(row.status)}"><a class="tr-link" href="${html(row.href)}" aria-label="${html(row.title)}, ${html(row.amountText)}, ${html(row.statusWord)}. Open the receipt"></a>${pairMark(row.pair[0], row.pair[1])}<div class="tr-main"><div class="t1">${html(row.title)}</div><div class="t2">${html(row.subline)}</div>${trackerBars(row.tracker)}</div><div class="rt"><span class="am num">${html(row.amountText)}</span>${right}</div></li>`;
+  // Whom it pays and its transaction, so equal transfers are told apart.
+  const to = row.to ? `To ${row.to.name ? html(row.to.name) : `<code class="mono">${html(row.to.address)}</code>`}` : "";
+  const meta = [to, row.hash ? `<code class="mono">${html(row.hash)}</code>` : ""].filter(Boolean).join(" · ");
+  return `<li class="tr" data-status="${html(row.status)}"><a class="tr-link" href="${html(row.href)}" aria-label="${html(row.title)}, ${html(row.amountText)}, ${html(row.statusWord)}. Open the receipt"></a>${pairMark(row.pair[0], row.pair[1])}<div class="tr-main"><div class="t1">${html(row.title)}</div><div class="t2">${html(row.subline)}</div>${meta ? `<div class="t3">${meta}</div>` : ""}${trackerBars(row.tracker)}</div><div class="rt"><span class="am num">${html(row.amountText)}</span>${right}</div></li>`;
 }
 
 /**

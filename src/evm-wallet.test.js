@@ -69,3 +69,20 @@ test("requests the route's EVM source chain", async () => {
   );
   delete globalThis.ethereum;
 });
+
+test("an account the wallet gives in lower case is used with its checksum's capitals", async () => {
+  globalThis.ethereum = {
+    on() {},
+    removeListener() {},
+    async request({ method }) {
+      if (method === "eth_accounts" || method === "eth_requestAccounts") return ["0x75685f9d88749b583732b40d56fe007cd404b72d"];
+      if (method === "eth_chainId") return "0x2e9";
+      throw new Error(`Unexpected method: ${method}`);
+    },
+  };
+  const wallet = await import(`./evm-wallet.js?checksum=${Date.now()}`);
+
+  assert.equal((await wallet.connectEvmWallet()).account, "0x75685f9D88749B583732B40d56fe007cD404b72D");
+  assert.equal(wallet.getEvmState().account, "0x75685f9D88749B583732B40d56fe007cD404b72D");
+  delete globalThis.ethereum;
+});

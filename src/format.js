@@ -1,6 +1,9 @@
 // Amounts, fees, dates and durations as the page writes them: grouped digits,
-// DUSK as the unit, absolute dates with weekday and time zone, and durations
-// in whole words.
+// DUSK as the unit, durations in whole words, and dates and Dusk fees as
+// every Dusk app writes them (@dusk-network/networks): English words on the
+// viewer's clock, fees rounded up where they're the most a step can cost.
+
+import { formatDusk as formatShared, formatTime } from "@dusk-network/networks/format";
 
 const LUX_DECIMALS = 9;
 
@@ -45,18 +48,21 @@ export function formatFee(value, decimals = LUX_DECIMALS, { round = "nearest" } 
   return formatUnitsGrouped(units, decimals);
 }
 
+/** A Dusk fee in the apps' short form: 4 decimals, 2 significant digits under 0.01, the page's separators. */
+const shortFee = (lux, round) => formatShared(lux, { locale: "en-US", round }).text;
+
 /**
- * The most a Dusk fee can be, as Dusk Wallet writes it: DUSK to four
- * decimals, rounded up, trailing zeros trimmed ("0.051"). Every "up to" fee
- * on the page is written this way, so it reads as the wallet's window does.
+ * The most a Dusk fee can be, as Dusk Wallet writes it: rounded up, so it
+ * never reads lower than it can be ("0.051"). Every "up to" fee on the page
+ * is written this way, so it reads as the wallet's window does.
  */
-export function formatMaxFee(lux) {
-  const value = BigInt(lux);
-  if (value <= 0n) return "0";
-  const units = (value + 99_999n) / 100_000n;
-  const fraction = (units % 10_000n).toString().padStart(4, "0").replace(/0+$/u, "");
-  return `${formatUnitsGrouped(units / 10_000n, 0)}${fraction ? `.${fraction}` : ""}`;
-}
+export const formatMaxFee = (lux) => (BigInt(lux) > 0n ? shortFee(lux, "up") : "0");
+
+/** What a Dusk fee usually comes to, to the nearest: "0.002". */
+export const formatTypicalFee = (lux) => shortFee(lux, "nearest");
+
+/** A Dusk fee paid, exact, as a record keeps it: "0.001986599". */
+export const formatExactFee = (lux) => formatShared(lux, { locale: "en-US", mode: "exact" }).text;
 
 /**
  * An estimated fee in a coin with `decimals`: "about 0.00021 ETH", or "less
@@ -81,31 +87,13 @@ function parts(ms, options) {
 }
 
 /**
- * "Sat 31 Oct, 13:38 CET", in the viewer's time zone unless one is given.
- * Records (`year`) add the year: "Sat 31 Oct 2026, 13:38 CET".
+ * A date and time as every Dusk app writes one: English words on the
+ * viewer's clock, and the zone. Records (`year`) give the day in full, "Sat
+ * 31 Oct 2026, 13:38 CET"; otherwise "Today, 13:38 CET" or "31 Oct, 13:38
+ * CET", as of `now`. The viewer's locale and time zone unless given.
  */
-export function formatDateTime(ms, { seconds = false, timeZone, year = false } = {}) {
-  const p = parts(ms, {
-    day: "numeric",
-    hour: "2-digit",
-    hourCycle: "h23",
-    minute: "2-digit",
-    month: "short",
-    ...(seconds ? { second: "2-digit" } : {}),
-    timeZone,
-    timeZoneName: "short",
-    weekday: "short",
-    ...(year ? { year: "numeric" } : {}),
-  });
-  const time = `${p.hour}:${p.minute}${seconds ? `:${p.second}` : ""}`;
-  return `${p.weekday} ${p.day} ${p.month}${year ? ` ${p.year}` : ""}, ${time} ${p.timeZoneName}`;
-}
-
-/** "Sat 31 Oct", without the time. */
-export function formatDay(ms, { timeZone } = {}) {
-  const p = parts(ms, { day: "numeric", month: "short", timeZone, weekday: "short" });
-  return `${p.weekday} ${p.day} ${p.month}`;
-}
+export const formatDateTime = (ms, { locale, now, seconds = false, timeZone, year = false } = {}) =>
+  formatTime(ms, { date: year ? "full" : "auto", locale, now, seconds, timeZone });
 
 /** "25 Oct". */
 export function formatShortDay(ms, { timeZone } = {}) {

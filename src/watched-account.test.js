@@ -34,4 +34,12 @@ test("an account or a .dusk name's public account can be followed", async () => 
   assert.match((await watchTarget("alice.dusk", { resolveName: async () => { throw new Error("offline"); } })).error, /^Couldn't look up alice\.dusk just now/u);
   assert.match((await watchTarget("", { resolveName })).error, /^Paste a Dusk account/u);
   assert.match((await watchTarget("0x1234", { resolveName })).error, /^That isn't a Dusk account or a \.dusk name/u);
+  // A name Dusk Domains can't hold says why, without a lookup.
+  let asked = 0;
+  const counting = async (name) => {
+    asked += 1;
+    return resolveName(name);
+  };
+  assert.deepEqual(await watchTarget("bad_name.dusk", { resolveName: counting }), { error: "bad_name.dusk isn't a valid .dusk name: names use a\u2060–\u2060z, 0\u2060–\u20609 and hyphens." });
+  assert.equal(asked, 0);
 });

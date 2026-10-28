@@ -9,7 +9,11 @@ import {
   toHex,
 } from "viem";
 
-import { MAINNET_BSC_BRIDGE_ACCOUNT, TESTNET_REGGIO_BRIDGE_ACCOUNT } from "./config.js";
+import { networks } from "@dusk-network/networks";
+
+// Two accounts the networks' files name: the BSC and the Sepolia bridge accounts.
+const MAINNET_BSC_BRIDGE_ACCOUNT = networks.mainnet.routes.services[0].account;
+const TESTNET_REGGIO_BRIDGE_ACCOUNT = networks.testnet.routes.services[0].account;
 import { encodeDepositArgs } from "./dusk-deposit.js";
 import { createScheduler, createTracking, duskAccountEvmAddress, orderAmongAlike, takenByAnother } from "./tracking.js";
 import { NOT_A_DUSK_WITHDRAWAL } from "./withdrawals.js";
@@ -24,7 +28,7 @@ const cfg = {
   dusk: {},
   duskEvm: {
     l1StandardBridgeContractId: "11".repeat(32),
-    l2StandardBridgeAddress: "0x4200000000000000000000000000000000000010",
+    predeploys: { l2StandardBridge: "0x4200000000000000000000000000000000000010" },
     name: "DuskEVM Testnet",
   },
   evmNetworks: {
@@ -409,7 +413,7 @@ test("a deposit is followed to its DuskEVM credit through the bridge event when 
       throw Object.assign(new Error("Method not found"), { code: -32601 });
     },
     "dusk-evm:eth_getLogs": ([filter]) => {
-      assert.equal(filter.address, cfg.duskEvm.l2StandardBridgeAddress);
+      assert.equal(filter.address, cfg.duskEvm.predeploys.l2StandardBridge);
       assert.deepEqual(filter.topics, [
         finalized,
         pad(duskAccountEvmAddress(SENDER).toLowerCase()),
@@ -434,7 +438,6 @@ test("a deposit is followed to its DuskEVM credit through the bridge event when 
   assert.equal(waiting.status, "pending");
   assert.equal(waiting.destination, RECIPIENT);
   assert.equal(waiting.amountLux, "100000000");
-  assert.equal(tracking.adapterLookup(), "missing");
 
   credited = true;
   const done = await tracking.refresh(entry, ROUTES.deposit);
@@ -457,7 +460,9 @@ test("a deposit waits while the adapter hasn't seen it, and fails with its Dusk 
   const entry = { hash: DUSK_HASH, routeId: ROUTES.deposit.id };
 
   assert.equal((await tracking.refresh(entry, ROUTES.deposit)).status, "pending");
-  assert.equal(tracking.adapterLookup(), "available");
+  // This adapter maps Dusk hashes: it's asked again on the next check.
+  assert.equal((await tracking.refresh(entry, ROUTES.deposit)).status, "pending");
+  assert.equal(rpc.calls.filter(({ method }) => method === "duskevm_getTransactionHashByDuskHash").length, 2);
 
   tx = duskTx({ callData: call, error: "Panic: out of gas" });
   assert.equal((await tracking.refresh(entry, ROUTES.deposit)).status, "failed");

@@ -1,6 +1,10 @@
-// One deployment, one network. A profile names the Dusk network; every route
-// in it stays on that network's counterparts. Values can come from Vite env
-// at build time or from `window.__DUSK_BRIDGE_CONFIG__` at runtime.
+// One deployment, one network. A profile names the Dusk network, and its file
+// in @dusk-network/networks gives everything a route uses: endpoints, chains,
+// contracts, accounts, fees, typical times and whether a route runs. Every
+// route stays on that network's counterparts. Values can be overridden from
+// Vite env at build time or from `window.__DUSK_BRIDGE_CONFIG__` at runtime.
+
+import { networks, routes } from "@dusk-network/networks";
 
 const env = import.meta.env ?? {};
 
@@ -21,7 +25,7 @@ const positiveInteger = (name, fallback) => {
 
 /**
  * How long a route usually takes on this network, in seconds, or null where
- * it isn't known: empty keeps the profile's value, `none` clears it.
+ * it isn't known: empty keeps the network file's value, `none` clears it.
  */
 const seconds = (name, fallback = null) => {
   const raw = value(name).toLowerCase();
@@ -41,232 +45,108 @@ const contractId = (name, fallback = "") =>
 
 const isContractId = (id) => /^[0-9a-f]{64}$/u.test(id);
 
-export const MAINNET_BSC_BRIDGE_ACCOUNT =
-  "24jFms4JqYdWb19jFn3CUjNUQz1AeRozYnwsHuUkLbXAj2gRBq598aLAJmqmsaPcsCNJTgTaJTaUZCXpT3s9UeWBsHTmd5hQx95JymZSUsmtwoibiB8AMp4bZjAiLMjmAH3x";
+/**
+ * DuskEVM's OP-stack predeploys, as its network's file lists them: the same
+ * addresses on every DuskEVM.
+ */
+export const DUSKEVM_PREDEPLOYS = networks.testnet.duskEvm.predeploys;
 
-/** The Dusk account that pays out Ethereum migrations on mainnet. */
-export const MAINNET_ETHEREUM_PAYOUT_ACCOUNT =
-  "2427XSRsdBpgBp3TtcYbFXc8NoGXX4pRZNurE1uRcSgsyGTo4yFJz3or2id85xZdGimEREB8ufEuW9UTPoX53r9ns4EsfSuLkzNMyqt4ha34A6T3DbjBKYNowih6YLGW1Zvi";
-
-/** Who runs the bridge, and the terms and privacy notice it's offered under. */
-export const OPERATOR = "Dusk";
-export const DUSK_TERMS_URL = "https://dusk.network/terms-of-use";
-export const DUSK_PRIVACY_URL = "https://dusk.network/privacy-policy";
-
-export const TESTNET_REGGIO_BRIDGE_ACCOUNT =
-  "25z9o6qCaVk1ReyHjmB4pyXcE3D1vRu4FVV1rR8ChYcosdTSktkANLDHq9GD6B4985Q1S2KrDZYBRrohWAjrNmACFUb3UMSRyYctJRzh3d28R1ZNC1ZyKm1HwXL4FF5Etftt";
-
-/** Multicall for Dusk, at the same contract ID on mainnet and testnet. */
-export const DUSK_MULTICALL_CONTRACT_ID =
-  "93de287b7d349d678a0038fe7772e8960e1a84a1b5da2d0b1f62f532616ce1d4";
-
-/** Reviewed data drivers bundled in `public/drivers`, pinned by SHA-256. */
-export const BUNDLED_DRIVERS = Object.freeze({
-  disputeGameFactory: Object.freeze({
-    sha256: "dd07f5a584779940bf116fb2ea32f455f8afbe3399c8e1f125f99f98d499afca",
-    url: "/drivers/dispute_game_factory_dd_opt.wasm",
-  }),
-  multicall: Object.freeze({
-    sha256: "d2ed9e7b89d81f12b877f787a7830b90405357c82c9c28f75f0e048530e91462",
-    url: "/drivers/dusk_multicall_driver.wasm",
-  }),
-  optimismPortal: Object.freeze({
-    sha256: "9220bf0e96f8d1d20ae8c56459c75d402045bb0fa63851b9413c7db57749b360",
-    url: "/drivers/optimism_portal_dd_opt.wasm",
-  }),
+/** Multicall for Dusk's data driver, bundled in `public/drivers` and pinned by SHA-256. */
+export const MULTICALL_DRIVER = Object.freeze({
+  sha256: "d2ed9e7b89d81f12b877f787a7830b90405357c82c9c28f75f0e048530e91462",
+  url: "/drivers/dusk_multicall_driver.wasm",
 });
 
-const ETH = Object.freeze({ decimals: 18, name: "Ether", symbol: "ETH" });
-
-/** A network's own coin when its profile has none: BSC pays in BNB, tBNB on its testnet (chain 97). */
-const nativeCurrency = (id, chainId) =>
-  id === "bsc" ? { decimals: 18, name: "BNB", symbol: chainId === 97 ? "tBNB" : "BNB" } : ETH;
+/** A DuskEVM contract's data driver, from `public/drivers`, as the network's file pins it. */
+const bundledDriver = ({ file, sha256 }) => Object.freeze({ sha256, url: `/drivers/${file}` });
 
 const url = (name, fallback = "") => {
   const raw = value(name, fallback);
   return /^https?:\/\//iu.test(raw) ? raw : "";
 };
 
-/** A Dusk account where one is known; `none` clears the profile's. */
+/** A Dusk account where one is known; `none` clears the network file's. */
 const account = (name, fallback = "") => {
   const raw = value(name, fallback);
   return raw.toLowerCase() === NONE ? "" : raw;
 };
 
-const PROFILES = Object.freeze({
-  mainnet: {
-    dusk: {
-      chainId: "dusk:1",
-      explorerUrl: "https://apps.dusk.network/explorer",
-      nodeUrl: "https://nodes.dusk.network",
-    },
-    evm: {
-      bsc: {
-        chainId: 56,
-        chainName: "BNB Smart Chain",
-        currency: { decimals: 18, name: "BNB", symbol: "BNB" },
-        explorerUrl: "https://bscscan.com",
-        migrationContract: "0x32979f040feb67a5223acb0716fe4c7a5956488c",
-        // "Around one hour" to the payout on Dusk, as the docs' migration
-        // guide says. The three payouts of the 7 days to 28 Oct 2026 came 63
-        // to 66.5 minutes after their migrations.
-        migrationSeconds: 3_600,
-        // The account Dusk -> BSC transfers go to pays out BSC migrations
-        // too, with the migration's hash as the memo: 189 payouts in the 200
-        // days to 27 Oct 2026.
-        payoutAccount: MAINNET_BSC_BRIDGE_ACCOUNT,
-        // bsc-dataseed refuses eth_getLogs over 1,000 blocks; payouts need it.
-        rpcUrl: "https://bsc-rpc.publicnode.com",
-        tokenContract: "0xb2bd0749dbe21f623d9baba856d3b0f0e1bfec9c",
-      },
-      ethereum: {
-        chainId: 1,
-        chainName: "Ethereum",
-        currency: ETH,
-        explorerUrl: "https://etherscan.io",
-        migrationContract: "0x36b8e0b938c0172c20e14cc32e7f0e51dcf1084f",
-        // 66 to 67 minutes from the migration's block to its payout on Dusk,
-        // for each of the 15 migrations of 28 Sep to 24 Oct 2026.
-        migrationSeconds: 4_000,
-        payoutAccount: MAINNET_ETHEREUM_PAYOUT_ACCOUNT,
-        rpcUrl: "https://ethereum-rpc.publicnode.com",
-        tokenContract: "0x940a2db1b7008b6c776d4faaca729d6d4a4aa551",
-      },
-    },
-    migrations: ["ethereum", "bsc"],
-    // The payout on BSC takes around 10 hours while a temporary security
-    // measure lasts, one hour otherwise, as the docs' BEP20 bridge guide
-    // says (Oct 2026).
-    service: { account: MAINNET_BSC_BRIDGE_ACCOUNT, delaySeconds: 36_000, network: "bsc" },
-    // DuskEVM mainnet isn't live: every endpoint and contract ID must be set.
-    duskEvm: { name: "DuskEVM" },
-  },
-  testnet: {
-    dusk: {
-      chainId: "dusk:2",
-      explorerUrl: "https://apps.testnet.dusk.network/explorer",
-      nodeUrl: "https://testnet.nodes.dusk.network",
-    },
-    evm: {
-      ethereum: {
-        chainId: 11_155_111,
-        chainName: "Sepolia",
-        currency: { decimals: 18, name: "Sepolia Ether", symbol: "ETH" },
-        explorerUrl: "https://sepolia.etherscan.io",
-        migrationContract: "0x7B1FF96D7edC07D8d83eC2A4da99EF8215a7366B",
-        // No time: the testnet worker that pays out doesn't always run (two
-        // payouts after 16 minutes in Feb 2026, none since).
-        migrationSeconds: null,
-        rpcUrl: "https://ethereum-sepolia-rpc.publicnode.com",
-        tokenContract: "0xAced3474eA24f5d77464A0F625dEEB6EaDeE25b8",
-      },
-    },
-    migrations: ["ethereum"],
-    // No time: the testnet worker that pays out doesn't always run (no
-    // transfers in the 60 days to 27 Oct 2026).
-    service: { account: TESTNET_REGGIO_BRIDGE_ACCOUNT, delaySeconds: null, network: "ethereum" },
-    // Shown, but not running: nothing has been paid out on the Sepolia
-    // routes since 11 Feb 2026. `VITE_PAUSED_ROUTES=none` runs them again.
-    paused: ["ethereum-to-dusk", "dusk-to-ethereum"],
-    duskEvm: {
-      // DuskEVM testnet's anchor state registry (its address book,
-      // testnet/l1-addresses.json): the Portal asks it whether a game is
-      // proper and respected.
-      anchorStateRegistryContractId: "1735498c11978854e390894502850916f4ba619e3f4b88c10ef758c5026619cc",
-      chainId: 745,
-      // Until DuskEVM's own figure is read: its 40 deposits of 1 Sep to
-      // 27 Oct 2026 took 25 to 39 s from their Dusk block (Dusk's own time)
-      // to their DuskEVM block, plus up to a Dusk block to be included.
-      depositSeconds: 60,
-      explorerUrl: "https://explorer.testnet.evm.dusk.network",
-      l1BridgeRpcUrl: "https://rpc.testnet.evm.dusk.network/l1",
-      name: "DuskEVM Testnet",
-      rpcUrl: "https://rpc.testnet.evm.dusk.network",
-    },
-  },
-});
+/** The chains whose DUSK migrates to Dusk, in the order the card lists them. */
+const CHAIN_ORDER = Object.freeze(["ethereum", "bsc"]);
 
 const ENV_PREFIX = Object.freeze({ bsc: "BSC", ethereum: "ETHEREUM" });
 
-function evmNetwork(id, defaults = {}) {
+/** An EVM chain a route reaches, from the network's file, with the deployment's overrides. */
+function evmNetwork(net, id) {
   const prefix = ENV_PREFIX[id];
-  const chainId = positiveInteger(`VITE_${prefix}_CHAIN_ID`, defaults.chainId ?? 0);
+  const chain = net.routes.chains[id];
+  const migration = net.routes.migrations.find((route) => route.chain === id);
   const network = {
-    chainId,
-    chainName: value(`VITE_${prefix}_CHAIN_NAME`, defaults.chainName),
-    currency: Object.freeze(defaults.currency ?? nativeCurrency(id, chainId)),
-    explorerUrl: value(`VITE_${prefix}_EXPLORER_URL`, defaults.explorerUrl),
+    chainId: positiveInteger(`VITE_${prefix}_CHAIN_ID`, chain.chainId),
+    // The name wallets list; the page says its own (names.js).
+    chainName: value(`VITE_${prefix}_CHAIN_NAME`, chain.name),
+    currency: chain.currency,
+    explorerUrl: value(`VITE_${prefix}_EXPLORER_URL`, chain.explorerUrl),
     id,
-    migrationContract: value(
-      `VITE_${prefix}_MIGRATION_CONTRACT`,
-      defaults.migrationContract,
-    ),
-    migrationSeconds: seconds(`VITE_${prefix}_MIGRATION_SECONDS`, defaults.migrationSeconds),
+    migrationContract: value(`VITE_${prefix}_MIGRATION_CONTRACT`, migration?.contract),
+    migrationSeconds: seconds(`VITE_${prefix}_MIGRATION_SECONDS`, migration?.typicalSeconds),
     // The Dusk account this chain's migrations are paid from, where it's
     // known: only its transfers then count as payouts.
-    payoutAccount: account(
-      `VITE_${prefix}_PAYOUT_ACCOUNT`,
-      value("VITE_MIGRATION_PAYOUT_ACCOUNT", defaults.payoutAccount),
-    ),
-    rpcUrl: value(`VITE_${prefix}_RPC_URL`, defaults.rpcUrl),
-    tokenContract: value(`VITE_${prefix}_TOKEN_CONTRACT`, defaults.tokenContract),
+    payoutAccount: account(`VITE_${prefix}_PAYOUT_ACCOUNT`, value("VITE_MIGRATION_PAYOUT_ACCOUNT", migration?.payoutAccount)),
+    rpcUrl: value(`VITE_${prefix}_RPC_URL`, chain.rpcUrl),
+    tokenContract: value(`VITE_${prefix}_TOKEN_CONTRACT`, chain.token),
   };
   network.configured = Boolean(
-    network.chainId &&
-      network.chainName &&
-      network.rpcUrl &&
-      /^0x[0-9a-f]{40}$/iu.test(network.tokenContract),
+    network.chainId && network.chainName && network.rpcUrl && /^0x[0-9a-f]{40}$/iu.test(network.tokenContract),
   );
   return Object.freeze(network);
 }
 
-function duskEvmConfig(defaults) {
+/**
+ * The DuskEVM adapter's view of Dusk: as the network's file names it, from
+ * @dusk-network/networks 0.2.0; otherwise `/l1` on the RPC's path, any
+ * query the RPC carries kept after it.
+ */
+export function adapterL1Url(evm, rpcUrl) {
+  if (evm?.l1AdapterUrl) return evm.l1AdapterUrl;
+  try {
+    const url = new URL(rpcUrl);
+    url.pathname = `${url.pathname.replace(/\/+$/u, "")}/l1`;
+    return url.href;
+  } catch {
+    return "";
+  }
+}
+
+function duskEvmConfig(net) {
+  const evm = net.duskEvm;
+  const contracts = evm?.contracts ?? {};
+  const deposit = net.routes.duskEvm.find((route) => route.direction === "deposit");
+  const rpcUrl = value("VITE_DUSKEVM_RPC_URL", evm?.rpcUrl);
   // Optional: without it, a proof goes against the newest game covering the
   // withdrawal, not one that has already resolved. `none` leaves it out.
-  const registry = contractId("VITE_DUSKEVM_ANCHOR_STATE_REGISTRY_CONTRACT_ID", defaults.anchorStateRegistryContractId);
+  const registry = contractId("VITE_DUSKEVM_ANCHOR_STATE_REGISTRY_CONTRACT_ID", contracts.anchor_state_registry?.contractId);
+  const driver = (name, key) =>
+    Object.freeze({
+      sha256: value(`VITE_DUSKEVM_${name}_DATA_DRIVER_SHA256`, evm?.drivers[key].sha256).toLowerCase(),
+      url: value(`VITE_DUSKEVM_${name}_DATA_DRIVER_URL`, evm ? bundledDriver(evm.drivers[key]).url : ""),
+    });
   const duskEvm = {
     anchorStateRegistryContractId: isContractId(registry) ? registry : "",
     bridgeGameSearchDepth: positiveInteger("VITE_DUSKEVM_BRIDGE_GAME_SEARCH_DEPTH", 64),
-    chainId: positiveInteger("VITE_DUSKEVM_CHAIN_ID", defaults.chainId ?? 0),
-    depositSeconds: seconds("VITE_DUSKEVM_DEPOSIT_SECONDS", defaults.depositSeconds),
-    disputeGameFactoryContractId: contractId(
-      "VITE_DUSKEVM_DISPUTE_GAME_FACTORY_CONTRACT_ID",
-    ),
-    disputeGameFactoryDriver: Object.freeze({
-      sha256: value(
-        "VITE_DUSKEVM_DISPUTE_GAME_FACTORY_DATA_DRIVER_SHA256",
-        BUNDLED_DRIVERS.disputeGameFactory.sha256,
-      ).toLowerCase(),
-      url: value(
-        "VITE_DUSKEVM_DISPUTE_GAME_FACTORY_DATA_DRIVER_URL",
-        BUNDLED_DRIVERS.disputeGameFactory.url,
-      ),
-    }),
-    explorerUrl: value("VITE_DUSKEVM_EXPLORER_URL", defaults.explorerUrl),
-    l1BridgeRpcUrl: value("VITE_DUSKEVM_L1_BRIDGE_RPC_URL", defaults.l1BridgeRpcUrl),
-    l1StandardBridgeContractId: contractId(
-      "VITE_DUSKEVM_L1_STANDARD_BRIDGE_CONTRACT_ID",
-    ),
-    l2StandardBridgeAddress: value(
-      "VITE_DUSKEVM_L2_STANDARD_BRIDGE_ADDRESS",
-      "0x4200000000000000000000000000000000000010",
-    ),
+    chainId: positiveInteger("VITE_DUSKEVM_CHAIN_ID", evm?.chainId ?? 0),
+    depositSeconds: seconds("VITE_DUSKEVM_DEPOSIT_SECONDS", deposit?.typicalSeconds),
+    disputeGameFactoryContractId: contractId("VITE_DUSKEVM_DISPUTE_GAME_FACTORY_CONTRACT_ID", contracts.dispute_game_factory?.contractId),
+    disputeGameFactoryDriver: driver("DISPUTE_GAME_FACTORY", "disputeGameFactory"),
+    explorerUrl: value("VITE_DUSKEVM_EXPLORER_URL", evm?.explorerUrl),
+    l1BridgeRpcUrl: value("VITE_DUSKEVM_L1_BRIDGE_RPC_URL", adapterL1Url(evm, rpcUrl)),
+    l1StandardBridgeContractId: contractId("VITE_DUSKEVM_L1_STANDARD_BRIDGE_CONTRACT_ID", contracts.l1_standard_bridge?.contractId),
     // The chain name wallets list; the page itself says "DuskEVM".
-    name: value("VITE_DUSKEVM_NAME", defaults.name ?? "DuskEVM"),
-    optimismPortalContractId: contractId(
-      "VITE_DUSKEVM_OPTIMISM_PORTAL_CONTRACT_ID",
-    ),
-    optimismPortalDriver: Object.freeze({
-      sha256: value(
-        "VITE_DUSKEVM_OPTIMISM_PORTAL_DATA_DRIVER_SHA256",
-        BUNDLED_DRIVERS.optimismPortal.sha256,
-      ).toLowerCase(),
-      url: value(
-        "VITE_DUSKEVM_OPTIMISM_PORTAL_DATA_DRIVER_URL",
-        BUNDLED_DRIVERS.optimismPortal.url,
-      ),
-    }),
-    rpcUrl: value("VITE_DUSKEVM_RPC_URL", defaults.rpcUrl),
+    name: value("VITE_DUSKEVM_NAME", evm?.name ?? "DuskEVM"),
+    optimismPortalContractId: contractId("VITE_DUSKEVM_OPTIMISM_PORTAL_CONTRACT_ID", contracts.optimism_portal?.contractId),
+    optimismPortalDriver: driver("OPTIMISM_PORTAL", "optimismPortal"),
+    predeploys: evm?.predeploys ?? DUSKEVM_PREDEPLOYS,
+    rpcUrl,
   };
   const missing = [
     ["VITE_DUSKEVM_L1_STANDARD_BRIDGE_CONTRACT_ID", isContractId(duskEvm.l1StandardBridgeContractId)],
@@ -280,44 +160,49 @@ function duskEvmConfig(defaults) {
     .filter(([, ok]) => !ok)
     .map(([name]) => name);
   duskEvm.missing = Object.freeze(missing);
-  duskEvm.enabled = missing.length === 0;
+  // Only where the network's file has DuskEVM's routes, and everything is set.
+  duskEvm.enabled = net.routes.duskEvm.length > 0 && missing.length === 0;
   return Object.freeze(duskEvm);
 }
 
 export function loadConfig() {
   const requested = value("VITE_BRIDGE_PROFILE", "mainnet").toLowerCase();
   const profile = requested === "testnet" ? "testnet" : "mainnet";
-  const defaults = PROFILES[profile];
+  const net = networks[profile];
 
   const dusk = Object.freeze({
-    chainId: value("VITE_DUSK_CHAIN_ID", defaults.dusk.chainId),
-    explorerUrl: value("VITE_DUSK_EXPLORER_URL", defaults.dusk.explorerUrl),
-    nodeUrl: value("VITE_DUSK_NODE_URL", defaults.dusk.nodeUrl),
+    chainId: value("VITE_DUSK_CHAIN_ID", `dusk:${net.chainId}`),
+    explorerUrl: value("VITE_DUSK_EXPLORER_URL", net.apps.explorer),
+    nodeUrl: value("VITE_DUSK_NODE_URL", net.urls.node),
   });
 
+  // The chains this network's routes reach; a deployment can change their
+  // endpoints and contracts, not add others.
   const evmNetworks = Object.freeze(
-    Object.fromEntries(
-      Object.keys(ENV_PREFIX).map((id) => [id, evmNetwork(id, defaults.evm[id])]),
-    ),
+    Object.fromEntries(Object.keys(net.routes.chains).filter((id) => ENV_PREFIX[id]).map((id) => [id, evmNetwork(net, id)])),
   );
   const usable = (id) => Boolean(evmNetworks[id]?.configured);
+  const migrating = net.routes.migrations.map((route) => route.chain);
   const migrations = Object.freeze(
-    list("VITE_MIGRATION_NETWORKS", defaults.migrations).filter(
-      (id) => usable(id) && /^0x[0-9a-f]{40}$/iu.test(evmNetworks[id].migrationContract),
+    list("VITE_MIGRATION_NETWORKS", CHAIN_ORDER.filter((id) => migrating.includes(id))).filter(
+      (id) => migrating.includes(id) && usable(id) && /^0x[0-9a-f]{40}$/iu.test(evmNetworks[id].migrationContract),
     ),
   );
-  const serviceNetwork = value("VITE_SERVICE_NETWORK", defaults.service.network).toLowerCase();
-  const service = usable(serviceNetwork)
-    ? Object.freeze({
-        account: value("VITE_SERVICE_BRIDGE_ACCOUNT", defaults.service.account),
-        delaySeconds: seconds("VITE_SERVICE_BRIDGE_DELAY_SECONDS", defaults.service.delaySeconds),
-        feeLux: BigInt(positiveInteger("VITE_SERVICE_BRIDGE_FEE_LUX", 1_000_000_000)),
-        network: serviceNetwork,
-        payoutAddress: value("VITE_SERVICE_BRIDGE_PAYOUT_ADDRESS"),
-      })
-    : null;
+  const offered = net.routes.services[0] ?? null;
+  const serviceNetwork = value("VITE_SERVICE_NETWORK", offered?.chain).toLowerCase();
+  const service =
+    offered && serviceNetwork === offered.chain && usable(serviceNetwork)
+      ? Object.freeze({
+          account: value("VITE_SERVICE_BRIDGE_ACCOUNT", offered.account),
+          delaySeconds: seconds("VITE_SERVICE_BRIDGE_DELAY_SECONDS", offered.typicalSeconds),
+          feeLux: BigInt(positiveInteger("VITE_SERVICE_BRIDGE_FEE_LUX", Number(offered.feeLux))),
+          network: serviceNetwork,
+          payoutAddress: value("VITE_SERVICE_BRIDGE_PAYOUT_ADDRESS"),
+        })
+      : null;
 
-  const multicallId = contractId("VITE_DUSK_MULTICALL_CONTRACT_ID", DUSK_MULTICALL_CONTRACT_ID);
+  const multicallId = contractId("VITE_DUSK_MULTICALL_CONTRACT_ID", net.contracts.multicall ?? "");
+  const { operator } = net;
 
   return Object.freeze({
     // Shown only when set: nothing here is guessed.
@@ -329,8 +214,8 @@ export function loadConfig() {
         migration: url("VITE_DOCS_MIGRATION_URL"),
         service: url("VITE_DOCS_SERVICE_URL"),
       }),
-      // Dusk's own, as on the explorer; a deployment can name its own.
-      privacy: url("VITE_PRIVACY_URL", DUSK_PRIVACY_URL),
+      // The network's operator's, as on the explorer; a deployment can name its own.
+      privacy: url("VITE_PRIVACY_URL", operator.privacyUrl),
       sites: Object.freeze({
         mainnet: url("VITE_MAINNET_BRIDGE_URL"),
         testnet: url("VITE_TESTNET_BRIDGE_URL"),
@@ -338,25 +223,28 @@ export function loadConfig() {
       status: url("VITE_STATUS_URL"),
       support: url("VITE_SUPPORT_URL"),
       supportLabel: value("VITE_SUPPORT_LABEL", "support"),
-      terms: url("VITE_TERMS_URL", DUSK_TERMS_URL),
+      terms: url("VITE_TERMS_URL", operator.termsUrl),
     }),
-    // Dusk runs every route, unless a deployment names another for one.
+    // The network's operator runs every route, unless a deployment names another for one.
     operators: Object.freeze({
-      duskEvm: value("VITE_DUSKEVM_OPERATOR", OPERATOR),
-      migration: value("VITE_MIGRATION_OPERATOR", OPERATOR),
-      service: value("VITE_SERVICE_OPERATOR", OPERATOR),
+      duskEvm: value("VITE_DUSKEVM_OPERATOR", operator.name),
+      migration: value("VITE_MIGRATION_OPERATOR", operator.name),
+      service: value("VITE_SERVICE_OPERATOR", operator.name),
     }),
     dusk,
-    duskEvm: duskEvmConfig(defaults.duskEvm),
+    duskEvm: duskEvmConfig(net),
     evmNetworks,
     gasLimitUpper: BigInt(positiveInteger("VITE_GAS_LIMIT_UPPER", 1_000_000_000)),
     migrations,
     multicall: Object.freeze({
       contractId: isContractId(multicallId) ? multicallId : "",
-      driver: BUNDLED_DRIVERS.multicall,
+      driver: MULTICALL_DRIVER,
     }),
-    // Routes shown but not running now, by route ID; `none` runs them all.
-    pausedRoutes: Object.freeze(list("VITE_PAUSED_ROUTES", defaults.paused ?? [])),
+    // The network's file, for its routes and labels.
+    network: net,
+    // Routes shown but not running now, by route ID: those the network's
+    // file says aren't running, unless set; `none` runs them all.
+    pausedRoutes: Object.freeze(list("VITE_PAUSED_ROUTES", routes(net).filter((route) => !route.running).map((route) => route.id))),
     profile,
     reown: Object.freeze({ projectId: value("VITE_REOWN_PROJECT_ID") }),
     service,
@@ -364,5 +252,3 @@ export function loadConfig() {
 }
 
 export const config = loadConfig();
-
-export const duskEvmDepositConfigured = () => config.duskEvm.enabled;

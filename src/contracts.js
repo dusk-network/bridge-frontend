@@ -3,11 +3,11 @@
 // explorer has a page, grouped by the three routes. Who runs them is said
 // once; a route another operator runs says so; nothing here is inferred.
 
+import { formatContractId } from "@dusk-network/networks/format";
+
 import { buildRoutes } from "./bridge-routes.js";
 import { NAME_FILE_HOSTS } from "./dusk-names.js";
 import { bridgeTasks, networkNames, notRunning, tokenName } from "./names.js";
-
-export const L2_TO_L1_MESSAGE_PASSER = "0x4200000000000000000000000000000000000016";
 
 const trim = (url) => String(url ?? "").replace(/\/+$/u, "");
 
@@ -30,11 +30,12 @@ const row = (cfg, network, label, value, note = "") => ({
 });
 
 /**
- * A Dusk contract, its ID written as Dusk Wallet writes it: 0x and the full
- * 64 hex characters, lower case. The copy button copies the same.
+ * A Dusk contract, its ID as every Dusk app writes one: the full 64 hex
+ * characters, lower case, without 0x, so it isn't taken for an EVM address.
+ * The copy button copies the same. It has no explorer link: the explorer has
+ * no contract pages, and without 0x an ID with no 0 reads as an account.
  */
-export const duskContractId = (id) => `0x${String(id ?? "").replace(/^0x/iu, "").toLowerCase()}`;
-const contractRow = (cfg, label, id, note = "") => row(cfg, "dusk", label, duskContractId(id), note);
+const contractRow = (label, id, note = "") => ({ href: null, label, network: "dusk", note, value: formatContractId(id) });
 
 /**
  * Who runs the bridge, said once: the operator every route shares, or ""
@@ -116,14 +117,14 @@ export function contractGroups(cfg) {
       id: "duskevm",
       operator: operatorOf("duskEvm"),
       rows: [
-        contractRow(cfg, "Bridge contract on Dusk", cfg.duskEvm.l1StandardBridgeContractId, "Takes deposits, and holds the DUSK that is on DuskEVM."),
-        contractRow(cfg, "Withdrawal portal on Dusk", cfg.duskEvm.optimismPortalContractId, "Checks proofs and releases claims."),
-        contractRow(cfg, "Dispute game factory on Dusk", cfg.duskEvm.disputeGameFactoryContractId),
+        contractRow("Bridge contract on Dusk", cfg.duskEvm.l1StandardBridgeContractId, "Takes deposits, and holds the DUSK that is on DuskEVM."),
+        contractRow("Withdrawal portal on Dusk", cfg.duskEvm.optimismPortalContractId, "Checks proofs and releases claims."),
+        contractRow("Dispute game factory on Dusk", cfg.duskEvm.disputeGameFactoryContractId),
         ...(cfg.duskEvm.anchorStateRegistryContractId
-          ? [contractRow(cfg, "Anchor state registry on Dusk", cfg.duskEvm.anchorStateRegistryContractId, "Says which dispute games the portal takes.")]
+          ? [contractRow("Anchor state registry on Dusk", cfg.duskEvm.anchorStateRegistryContractId, "Says which dispute games the portal takes.")]
           : []),
-        row(cfg, "dusk-evm", "Bridge on DuskEVM", cfg.duskEvm.l2StandardBridgeAddress),
-        row(cfg, "dusk-evm", "Message passer on DuskEVM", L2_TO_L1_MESSAGE_PASSER),
+        row(cfg, "dusk-evm", "Bridge on DuskEVM", cfg.duskEvm.predeploys.l2StandardBridge),
+        row(cfg, "dusk-evm", "Message passer on DuskEVM", cfg.duskEvm.predeploys.l2ToL1MessagePasser),
       ],
       title: `${names.dusk} ↔ ${names["dusk-evm"]}`,
     });
@@ -131,7 +132,7 @@ export function contractGroups(cfg) {
   if (cfg.multicall?.contractId)
     groups.push({
       id: "reads",
-      rows: [contractRow(cfg, "Multicall for Dusk", cfg.multicall.contractId, "Batches this page's reads of Dusk contracts.")],
+      rows: [contractRow("Multicall for Dusk", cfg.multicall.contractId, "Batches this page's reads of Dusk contracts.")],
       title: "Used to read Dusk",
     });
 

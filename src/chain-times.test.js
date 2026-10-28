@@ -15,6 +15,8 @@ function memoryStorage() {
 test("a deposit's lag is DuskEVM's latest block against Dusk's own time for the block it took in", async () => {
   const asked = [];
   const lag = await readDepositLag({
+    // The L1Block predeploy, as DuskEVM's network file lists it.
+    l1Block: "0x4200000000000000000000000000000000000015",
     node: {
       async query(selection) {
         asked.push(selection);

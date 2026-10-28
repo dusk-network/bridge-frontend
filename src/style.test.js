@@ -67,3 +67,32 @@ test("text is set in Söhne, addresses and hashes in Söhne Mono, from the page'
   assert.match(css, /--sans: Soehne, "Helvetica Neue"/u);
   assert.match(css, /--mono: "Soehne Mono", ui-monospace/u);
 });
+
+test("in My transfers, a route's marks and DuskEVM's tag fit their cell, clear of the text, on a phone and a computer", () => {
+  const computer = css.slice(0, css.indexOf("@media (max-width: 1023px)"));
+  const phone = css.slice(css.indexOf("@media (max-width: 767px)"));
+  // A rule's `property` in `text`, top-level or inside a media query.
+  const value = (text, selector, property) => {
+    const at = [`\n${selector} {`, `\n  ${selector} {`].map((head) => text.indexOf(head)).find((index) => index >= 0);
+    if (at === undefined) return null;
+    const body = text.slice(text.indexOf("{", at) + 1, text.indexOf("}", at));
+    return new RegExp(`(?:^|;)\\s*${property}:\\s*([^;]+)`, "u").exec(body)?.[1].trim() ?? null;
+  };
+  // As the cascade picks it: the most specific selector first, a phone's own rule before the computer's.
+  const px = (where, selectors, property) => {
+    for (const selector of selectors) {
+      const found = (where === "phone" && value(phone, selector, property)) || value(computer, selector, property);
+      if (found) return Number.parseFloat(found);
+    }
+    return Number.NaN;
+  };
+  for (const where of ["computer", "phone"]) {
+    const cell = px(where, [".act .trs .tr"], "grid-template-columns");
+    const mark = px(where, [".act .trs .pair .cm", ".tr .pair .cm", ".cm"], "width");
+    const gap = px(where, [".act .trs .pair", ".pair"], "gap");
+    const arrow = px(where, [".act .trs .pair svg.pa", ".pair svg.pa"], "width");
+    const tag = Math.max(0, -px(where, [".act .trs .evm-tag", ".evm-tag"], "right"));
+    const width = 2 * mark + 2 * gap + arrow + tag;
+    assert.ok(width <= cell, `${where}: ${width}px in a ${cell}px cell`);
+  }
+});

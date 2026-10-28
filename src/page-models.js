@@ -2,15 +2,17 @@
 // checked without a browser. The controller fetches and stores; views.js
 // writes the HTML.
 
+import { formatEvmAddress } from "@dusk-network/networks/format";
+
 import { explorerAddressUrl } from "./contracts.js";
 import { groupTransfers, shownFor } from "./discovery.js";
 import { claimAfterProving, proveNowText } from "./claim-date.js";
-import { aboutFee, formatDateTime, formatDusk, formatFee, formatLux, formatMaxFee, formatUnitsGrouped } from "./format.js";
-import { gasCoin, networkName, networkNames, routeTitle, tokenName } from "./names.js";
+import { aboutFee, formatDateTime, formatDusk, formatExactFee, formatLux, formatMaxFee, formatUnitsGrouped } from "./format.js";
+import { gasCoin, networkName, routeTitle, tokenName } from "./names.js";
 import { transferHref } from "./permalink.js";
 import { buildQuote, routeDuskFees, stepFeeText, withdrawalStepMax } from "./quote.js";
 import { routeTime, routeTimeText } from "./route-times.js";
-import { explorerTxUrl, html, privacyLine, short, transferSubline, transferView } from "./transfer-view.js";
+import { explorerTxUrl, html, short, transferSubline, transferView } from "./transfer-view.js";
 
 export const DUSK_WALLET_URL = "https://docs.dusk.network/use/wallets/#dusk-wallet";
 
@@ -140,8 +142,10 @@ export function lateLine(cfg) {
 // Receipt
 // ---------------------------------------------------------------------------
 
-function addressHtml(cfg, network, value, label) {
-  if (!value) return "";
+function addressHtml(cfg, network, address, label) {
+  if (!address) return "";
+  // An EVM address with its checksum's capitals, as every app writes it.
+  const value = /^0x[0-9a-f]{40}$/iu.test(address) ? formatEvmAddress(address) : address;
   const explorer = explorerAddressUrl(cfg, network, value);
   return `<span class="fullval"><code class="mono">${html(value)}</code><span class="full-actions"><button type="button" class="icon-btn" data-copy="${html(value)}" aria-label="Copy ${html(label)}">${copyIcon}</button>${explorer ? `<a class="icon-btn" href="${html(explorer)}" target="_blank" rel="noreferrer" aria-label="${html(label)} in the explorer (opens in a new tab)">${extIcon}</a>` : ""}</span></span>`;
 }
@@ -204,7 +208,7 @@ export function actionLead(kind, entry, { account = "", amountLux = null, claim 
   const payee = !pays ? "the withdrawal's Dusk account" : /^[0-9a-f]{64}$/u.test(pays) ? `the Dusk contract ${short(pays)}` : short(pays);
   // Said before the steps: the DUSK goes to another account than Dusk Wallet's.
   const notYours =
-    account && pays && pays !== account ? `This withdrawal pays ${payee}, not ${name ? `your ${name}` : "your connected Dusk account"}.` : "";
+    account && pays && pays !== account ? `This withdrawal pays ${payee}, not ${name || "your connected Dusk account"}.` : "";
   return kind === "prove"
     ? {
         amount: cost,
@@ -222,8 +226,8 @@ export function actionLead(kind, entry, { account = "", amountLux = null, claim 
 }
 
 /** The receipt of one transfer. No balances: the link may be shared. */
-export function receiptModel(entry, { cfg, gasPrice = 1n, now = Date.now(), own = null, route, submitter = null, timeZone, timing, url }) {
-  const view = transferView(entry, { account: own?.account ?? "", cfg, now, route, submitter, timeZone, timing, year: true });
+export function receiptModel(entry, { cfg, gasPrice = 1n, locale, now = Date.now(), own = null, route, submitter = null, timeZone, timing, url }) {
+  const view = transferView(entry, { account: own?.account ?? "", cfg, locale, name: own?.name ?? "", now, route, submitter, timeZone, timing, year: true });
   const from = networkName(cfg, route.from.id);
   const to = networkName(cfg, route.to.id);
   // Your own Dusk account by its .dusk name, others by their short code.
@@ -231,7 +235,7 @@ export function receiptModel(entry, { cfg, gasPrice = 1n, now = Date.now(), own 
     own?.name && account === own.account ? html(own.name) : `<code class="mono">${html(short(account))}</code>`;
   const fromAccount = entry.sender ? `${named(entry.sender)} on ${html(from)}` : `${html(from)}`;
   const toAccount = entry.destination ? `${named(entry.destination)} on ${html(to)}` : html(to);
-  const time = (ms) => (ms ? formatDateTime(ms, { timeZone, year: true }) : "");
+  const time = (ms) => (ms ? formatDateTime(ms, { locale, now, timeZone, year: true }) : "");
   let caption = "";
   if (view.status === "completed") {
     const at = entry.destinationAt ?? entry.claimAt;
@@ -247,10 +251,11 @@ export function receiptModel(entry, { cfg, gasPrice = 1n, now = Date.now(), own 
     details.push({ label: "Bridge fee", value: formatDusk(cfg.service.feeLux) });
     details.push({ label: "You receive", value: formatDusk(view.amount - BigInt(cfg.service.feeLux) > 0n ? view.amount - BigInt(cfg.service.feeLux) : 0n) });
   }
-  if (entry.feeLux) details.push({ label: "Network fee paid", value: `${formatFee(BigInt(entry.feeLux))} DUSK on ${from}` });
-  if (entry.feeWei) details.push({ label: "Network fee paid", value: `${formatFee(BigInt(entry.feeWei), 18)} ${gasCoin(cfg, route.from.id)} on ${from}` });
-  if (entry.proveFeeLux) details.push({ label: "Proof fee paid", value: `${formatFee(BigInt(entry.proveFeeLux))} DUSK on Dusk` });
-  if (entry.claimFeeLux) details.push({ label: "Claim fee paid", value: `${formatFee(BigInt(entry.claimFeeLux))} DUSK on Dusk` });
+  // The record: each fee as it was paid, to the last decimal.
+  if (entry.feeLux) details.push({ label: "Network fee paid", value: `${formatExactFee(BigInt(entry.feeLux))} DUSK on ${from}` });
+  if (entry.feeWei) details.push({ label: "Network fee paid", value: `${formatUnitsGrouped(BigInt(entry.feeWei), 18)} ${gasCoin(cfg, route.from.id)} on ${from}` });
+  if (entry.proveFeeLux) details.push({ label: "Proof fee paid", value: `${formatExactFee(BigInt(entry.proveFeeLux))} DUSK on Dusk` });
+  if (entry.claimFeeLux) details.push({ label: "Claim fee paid", value: `${formatExactFee(BigInt(entry.claimFeeLux))} DUSK on Dusk` });
   if (entry.sender) details.push({ html: addressHtml(cfg, sourceNetwork, entry.sender, `sender on ${from}`), label: `From, on ${from}` });
   if (entry.destination) details.push({ html: addressHtml(cfg, destinationNetwork, entry.destination, `recipient on ${to}`), label: `To, on ${to}` });
   details.push({ html: txHtml(cfg, sourceNetwork, entry.hash, `${from} transaction`), label: `${from} transaction` });
@@ -308,22 +313,26 @@ function txHtml(cfg, network, hash, label) {
 // My transfers
 // ---------------------------------------------------------------------------
 
-export function transfersModel(entries, { account = "", accounts, cfg, now = Date.now(), routeOf, submitter = null, timeZone, timing }) {
+export function transfersModel(entries, { account = "", accounts, cfg, locale, name = "", now = Date.now(), routeOf, submitter = null, timeZone, timing }) {
   const shown = entries.filter((entry) => routeOf(entry.routeId) && shownFor(entry, accounts));
   const groups = groupTransfers(shown, routeOf);
   const row = (entry) => {
     const route = routeOf(entry.routeId);
-    const view = transferView(entry, { account, cfg, now, route, submitter, timeZone, timing });
+    const view = transferView(entry, { account, cfg, locale, name, now, route, submitter, timeZone, timing });
     return {
       action: view.action,
       amountText: view.amountText,
+      // Its transaction, as the receipt and Look up know it.
+      hash: short(entry.hash),
       href: transferHref(entry.hash),
       id: entry.id,
       pair: view.pair,
       status: view.status,
       statusWord: view.statusWord,
-      subline: transferSubline(view, entry, route, cfg, { account, now, timeZone }),
+      subline: transferSubline(view, entry, route, cfg, { account, locale, name, now, timeZone }),
       title: routeTitle(cfg, route),
+      // Whom it pays: your account by its .dusk name, any other by its short form.
+      to: !entry.destination ? null : entry.destination === account && name ? { name } : { address: short(entry.destination) },
       tracker: view.tracker,
     };
   };
@@ -333,5 +342,3 @@ export function transfersModel(entries, { account = "", accounts, cfg, now = Dat
     needs: groups.needs.length,
   };
 }
-
-export { short, privacyLine };

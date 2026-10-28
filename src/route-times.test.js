@@ -13,14 +13,6 @@ const DUSKEVM = {
   VITE_DUSKEVM_L1_STANDARD_BRIDGE_CONTRACT_ID: "11".repeat(32),
   VITE_DUSKEVM_OPTIMISM_PORTAL_CONTRACT_ID: "22".repeat(32),
 };
-// DuskEVM on mainnet needs every endpoint set; none is a default there.
-const MAINNET_DUSKEVM = {
-  ...DUSKEVM,
-  VITE_DUSKEVM_CHAIN_ID: "744",
-  VITE_DUSKEVM_EXPLORER_URL: "https://explorer.example.org",
-  VITE_DUSKEVM_L1_BRIDGE_RPC_URL: "https://rpc.example.org/l1",
-  VITE_DUSKEVM_RPC_URL: "https://rpc.example.org",
-};
 function profile(name, extra = {}) {
   globalThis.__DUSK_BRIDGE_CONFIG__ = { VITE_BRIDGE_PROFILE: name, ...extra };
   try {
@@ -30,7 +22,7 @@ function profile(name, extra = {}) {
   }
 }
 const testnet = profile("testnet", DUSKEVM);
-const mainnet = profile("mainnet", MAINNET_DUSKEVM);
+const mainnet = profile("mainnet");
 const routes = (cfg) => buildRoutes(cfg);
 const byId = (cfg, id) => routes(cfg).find((route) => route.id === id);
 const text = (cfg, id, timing) => routeTimeText(routeTime(byId(cfg, id), cfg, timing));
@@ -55,10 +47,12 @@ test("each network has its own times, and another network's never stands in", ()
   assert.equal(text(testnet, "dusk-to-dusk-evm"), "~1 min");
   assert.equal(text(testnet, "ethereum-to-dusk"), "");
   assert.equal(text(testnet, "dusk-to-ethereum"), "");
-  // DuskEVM on mainnet has no configured times: only what its chains say.
-  assert.equal(text(mainnet, "dusk-to-dusk-evm"), "");
-  assert.equal(text(mainnet, "dusk-evm-to-dusk"), "");
-  assert.equal(text(mainnet, "dusk-to-dusk-evm", { chain: CHAIN }), "~1 min");
+  // Mainnet has no DuskEVM yet. Without a time of its own, DuskEVM's is only what its chains say.
+  assert.equal(byId(mainnet, "dusk-to-dusk-evm"), undefined);
+  const cleared = profile("testnet", { ...DUSKEVM, VITE_DUSKEVM_DEPOSIT_SECONDS: "none" });
+  assert.equal(text(cleared, "dusk-to-dusk-evm"), "");
+  assert.equal(text(cleared, "dusk-evm-to-dusk"), "");
+  assert.equal(text(cleared, "dusk-to-dusk-evm", { chain: CHAIN }), "~1 min");
   // A deployment sets or clears its own.
   const set = profile("mainnet", { VITE_BSC_MIGRATION_SECONDS: "none", VITE_SERVICE_BRIDGE_DELAY_SECONDS: "3600" });
   assert.equal(text(set, "bsc-to-dusk"), "");
@@ -100,8 +94,8 @@ test("this browser's own recent transfers measure a route the chain says nothing
   for (const transfers of [[paid(1, 3)], [paid(1, 31), paid(2, 40)], [paid(1, 3), paid(2, 2, { routeId: "bsc-to-dusk" })], [paid(1, 3), paid(2, 2, { status: "pending" })]])
     assert.equal(text(mainnet, "dusk-to-bsc", { now, transfers }), "~10 hours");
   // A withdrawal's time is always the chain's.
-  const withdrawal = byId(mainnet, "dusk-evm-to-dusk");
-  assert.equal(routeTime(withdrawal, mainnet, { now, transfers: [paid(1, 3, { routeId: withdrawal.id }), paid(2, 2, { routeId: withdrawal.id })] }), null);
+  const withdrawal = byId(testnet, "dusk-evm-to-dusk");
+  assert.equal(routeTime(withdrawal, testnet, { now, transfers: [paid(1, 3, { routeId: withdrawal.id }), paid(2, 2, { routeId: withdrawal.id })] }), null);
 });
 
 test("every page says the same time for the same route", () => {
@@ -117,7 +111,7 @@ test("every page says the same time for the same route", () => {
       // The quote's row, in the card's details and the review's fee rows.
       quote: quote.rows.find((row) => row.key === "arrives")?.value ?? "",
       receipt: receiptModel(entry, { cfg, now, route, timing, url }).caption,
-      activity: transfersModel([entry], { accounts: ["me"], cfg, now, routeOf, timeZone: "UTC", timing }).groups.progress[0]?.subline ?? "",
+      activity: transfersModel([entry], { accounts: ["me"], cfg, locale: "en-GB", now, routeOf, timeZone: "UTC", timing }).groups.progress[0]?.subline ?? "",
     };
   };
   const cases = [
@@ -145,7 +139,7 @@ test("every page says the same time for the same route", () => {
   assert.equal(actionLead("prove", {}, { maturity: view.time.maturity, maxLux: 1n }).line, "No DUSK moves now. Claim 7 days after you prove.");
   // Unknown on this network: no time anywhere, and no Arrives line in the review.
   const unknown = pages(testnet, byId(testnet, "dusk-to-ethereum"), {});
-  assert.deepEqual(unknown, { activity: "Sent Tue 27 Oct, 08:59 UTC", card: "1 DUSK bridge fee", quote: "", receipt: "" });
+  assert.deepEqual(unknown, { activity: "Sent Today, 08:59 UTC", card: "1 DUSK bridge fee", quote: "", receipt: "" });
   const checks = reviewChecks(byId(testnet, "dusk-to-ethereum"), { cfg: testnet, destination: "0x1", duskAccount: "a", evm: {}, quote: buildQuote(byId(testnet, "dusk-to-ethereum"), "10", { cfg: testnet }), reads: {} });
   assert.ok(checks.every((check) => !/arrive|usually|within/iu.test(check.html)));
 });

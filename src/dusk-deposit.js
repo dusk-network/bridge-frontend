@@ -1,9 +1,8 @@
 import { DEFAULT_BRIDGE_MIN_GAS_LIMIT } from "@dusk/evm-sdk";
 
-import { formatUnits } from "./amount.js";
+import { formatUnits } from "viem";
 import { config } from "./config.js";
 import { fromHex } from "./data-driver.js";
-import { sendDuskContractCall } from "./dusk-wallet.js";
 import { networkName } from "./names.js";
 import { DEPOSIT_GAS_LIMIT, gasAtNodePrice } from "./gas.js";
 import { normalizeEvmAddress } from "./validation.js";
@@ -102,9 +101,4 @@ export async function depositRequest({ amountLux, node, recipient }) {
     fnName: DEPOSIT_FN_NAME,
     gas: await gasAtNodePrice(DEPOSIT_GAS_LIMIT, node),
   };
-}
-
-/** Sends the deposit; `account` is the Dusk account it was reviewed for. */
-export async function submitDuskEvmDeposit(options) {
-  return sendDuskContractCall(options.request ?? (await depositRequest(options)), { account: options.account });
 }
