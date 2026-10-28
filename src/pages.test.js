@@ -488,6 +488,26 @@ test("the Contracts sheet lists every address in full, per route, with an operat
   assert.match(networkSheet({ badge: "Mainnet", isTestnet: false, networks: contractGroups(mainnet)[0].rows, otherName: "Testnet", otherSite: "" }), /Real DUSK\. Testnet has its own bridge\./u);
 });
 
+test("a Dusk contract in the Contracts sheet is never linked as an account", () => {
+  // Without 0x, an ID with no 0 in it is all Base58 characters, as an account is.
+  const ids = ["1b", "2c", "3d", "4e", "5f"].map((pair) => pair.repeat(32));
+  const cfg = profile("testnet", {
+    VITE_DUSK_MULTICALL_CONTRACT_ID: ids[4],
+    VITE_DUSKEVM_ANCHOR_STATE_REGISTRY_CONTRACT_ID: ids[0],
+    VITE_DUSKEVM_DISPUTE_GAME_FACTORY_CONTRACT_ID: ids[1],
+    VITE_DUSKEVM_L1_STANDARD_BRIDGE_CONTRACT_ID: ids[2],
+    VITE_DUSKEVM_OPTIMISM_PORTAL_CONTRACT_ID: ids[3],
+  });
+  const groups = contractGroups(cfg);
+  const rows = groups.flatMap((group) => group.rows).filter((row) => ids.includes(row.value));
+  assert.equal(rows.length, 5);
+  for (const row of rows) assert.equal(row.href, null, row.label);
+  const html = contractsSheet({ badge: "Testnet", groups });
+  for (const id of ids) assert.ok(!html.includes(`key=${id}`), id);
+  // The bridge's account keeps its page.
+  assert.ok(html.includes(`/accounts/?key=${cfg.service.account}`));
+});
+
 test("the card reads as a bridge: From, a flip, To, the route, then one button", () => {
   const vm = cardVmFor();
   const page = cardPage(vm);

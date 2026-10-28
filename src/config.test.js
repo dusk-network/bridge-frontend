@@ -5,7 +5,7 @@ import { networks } from "@dusk-network/networks";
 
 import { buildRoutes } from "./bridge-routes.js";
 import { decodeBase58 } from "./base58.js";
-import { loadConfig } from "./config.js";
+import { adapterL1Url, loadConfig } from "./config.js";
 
 // The accounts the networks' files name: the Dusk → BSC bridge account, which
 // pays out BSC's migrations too, Ethereum's migration payer, and Sepolia's
@@ -260,4 +260,15 @@ test("a profile takes everything from its network's file: testnet runs DuskEVM w
   assert.equal(cfg.evmNetworks.ethereum.migrationContract, networks.testnet.routes.migrations[0].contract);
   assert.deepEqual([cfg.service.account, cfg.service.feeLux], [TESTNET_REGGIO_BRIDGE_ACCOUNT, 1_000_000_000n]);
   assert.equal(cfg.dusk.explorerUrl, networks.testnet.apps.explorer);
+});
+
+test("DuskEVM's L1 RPC is the network file's, or /l1 on the RPC's path with its query kept", () => {
+  // A keyed RPC: /l1 goes on its path, not into its query.
+  const keyed = withConfig({ VITE_BRIDGE_PROFILE: "testnet", VITE_DUSKEVM_RPC_URL: "https://evm.example.org/rpc/?key=abc" }).cfg;
+  assert.equal(keyed.duskEvm.l1BridgeRpcUrl, "https://evm.example.org/rpc/l1?key=abc");
+  assert.equal(keyed.duskEvm.enabled, true);
+  // A file that names it (from @dusk-network/networks 0.2.0) is taken as it is; a setting still wins.
+  assert.equal(adapterL1Url({ l1AdapterUrl: "https://adapter.example.org/l1" }, "https://evm.example.org/rpc?key=abc"), "https://adapter.example.org/l1");
+  assert.equal(withConfig({ VITE_BRIDGE_PROFILE: "testnet", VITE_DUSKEVM_L1_BRIDGE_RPC_URL: "https://l1.example.org/" }).cfg.duskEvm.l1BridgeRpcUrl, "https://l1.example.org/");
+  assert.equal(adapterL1Url(undefined, ""), "");
 });

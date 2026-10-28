@@ -102,6 +102,22 @@ function evmNetwork(net, id) {
   return Object.freeze(network);
 }
 
+/**
+ * The DuskEVM adapter's view of Dusk: as the network's file names it, from
+ * @dusk-network/networks 0.2.0; otherwise `/l1` on the RPC's path, any
+ * query the RPC carries kept after it.
+ */
+export function adapterL1Url(evm, rpcUrl) {
+  if (evm?.l1AdapterUrl) return evm.l1AdapterUrl;
+  try {
+    const url = new URL(rpcUrl);
+    url.pathname = `${url.pathname.replace(/\/+$/u, "")}/l1`;
+    return url.href;
+  } catch {
+    return "";
+  }
+}
+
 function duskEvmConfig(net) {
   const evm = net.duskEvm;
   const contracts = evm?.contracts ?? {};
@@ -123,8 +139,7 @@ function duskEvmConfig(net) {
     disputeGameFactoryContractId: contractId("VITE_DUSKEVM_DISPUTE_GAME_FACTORY_CONTRACT_ID", contracts.dispute_game_factory?.contractId),
     disputeGameFactoryDriver: driver("DISPUTE_GAME_FACTORY", "disputeGameFactory"),
     explorerUrl: value("VITE_DUSKEVM_EXPLORER_URL", evm?.explorerUrl),
-    // The DuskEVM adapter's view of Dusk, next to its RPC.
-    l1BridgeRpcUrl: value("VITE_DUSKEVM_L1_BRIDGE_RPC_URL", rpcUrl ? `${rpcUrl.replace(/\/+$/u, "")}/l1` : ""),
+    l1BridgeRpcUrl: value("VITE_DUSKEVM_L1_BRIDGE_RPC_URL", adapterL1Url(evm, rpcUrl)),
     l1StandardBridgeContractId: contractId("VITE_DUSKEVM_L1_STANDARD_BRIDGE_CONTRACT_ID", contracts.l1_standard_bridge?.contractId),
     // The chain name wallets list; the page itself says "DuskEVM".
     name: value("VITE_DUSKEVM_NAME", evm?.name ?? "DuskEVM"),
