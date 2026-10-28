@@ -4,7 +4,7 @@
 // after the wallet opens.
 
 import { claimAfterProving, provingAfterSending } from "./claim-date.js";
-import { aboutFee, formatDusk, formatFee, formatLux, formatMaxFee, formatUnitsGrouped } from "./format.js";
+import { aboutFee, formatDusk, formatLux, formatMaxFee, formatTypicalFee, formatUnitsGrouped } from "./format.js";
 import {
   DEPOSIT_GAS_LIMIT,
   DEPOSIT_GAS_TYPICAL,
@@ -56,7 +56,7 @@ export function duskFee(limit, typical, gasPrice) {
 }
 
 const feeText = ({ maxLux, typicalLux }) => ({
-  detail: `usually about ${formatFee(typicalLux)} DUSK`,
+  detail: `usually about ${formatTypicalFee(typicalLux)} DUSK`,
   value: `up to ${formatMaxFee(maxLux)} DUSK`,
 });
 

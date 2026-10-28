@@ -15,6 +15,7 @@
     "vite": "8.0.16"
   },
   "dependencies": {
+    "@dusk-network/networks": "0.1.0",
     "@dusk/connect": "npm:@jsr/dusk__connect@0.2.0",
     "@dusk/evm-sdk": "npm:@jsr/dusk__evm-sdk@0.1.0-beta.3",
     "@duskdomains/sdk": "npm:@jsr/duskdomains__sdk@0.5.4",

@@ -286,7 +286,7 @@ export function createDiscovery({ cfg, node, rpc, rpcBatch, storage = defaultSto
     const key = stateKey(cfg, "l2", address);
     const { state } = await syncWithdrawals({
       address,
-      bridge: cfg.duskEvm.l2StandardBridgeAddress,
+      bridge: cfg.duskEvm.predeploys.l2StandardBridge,
       maxRequests,
       rpc: (method, params) => rpc("dusk-evm", method, params),
       state: loadState(key, storage),

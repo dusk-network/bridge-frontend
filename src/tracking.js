@@ -486,7 +486,7 @@ export function createTracking(deps) {
     const { match, next } = await searchLogs(
       "dusk-evm",
       {
-        address: config.duskEvm.l2StandardBridgeAddress,
+        address: config.duskEvm.predeploys.l2StandardBridge,
         topics: [
           ETH_BRIDGE_FINALIZED_TOPIC,
           sender ? pad(duskAccountEvmAddress(sender).toLowerCase()) : null,

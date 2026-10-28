@@ -4,7 +4,7 @@
 // and how long the route takes on this network; no balances, no network
 // requests.
 
-import { getAddress } from "viem";
+import { formatEvmAddress, shortAccount } from "@dusk-network/networks/format";
 
 import { claimText } from "./claim-date.js";
 import {
@@ -40,14 +40,13 @@ export function explorerTxUrl(cfg, network, hash) {
   return explorer ? `${explorer.replace(/\/+$/u, "")}/tx/${withPrefix(hash)}` : null;
 }
 
-/** "0xd63b…8DF4" for EVM addresses, with their checksum's capitals; "rz2gFT…3VGXyt" for Dusk accounts and hashes. */
+/**
+ * As every Dusk app shortens them: "0xd63b…8DF4" for EVM addresses, with
+ * their checksum's capitals; "rz2gFT…3VGXyt" for Dusk accounts and hashes.
+ */
 export function short(value) {
   const text = String(value ?? "");
-  if (/^0x[0-9a-f]{40}$/iu.test(text)) {
-    const address = getAddress(text.toLowerCase());
-    return `${address.slice(0, 6)}…${address.slice(-4)}`;
-  }
-  return text.length > 14 ? `${text.slice(0, 6)}…${text.slice(-6)}` : text;
+  return /^0x[0-9a-f]{40}$/iu.test(text) ? formatEvmAddress(text, { short: true }) : shortAccount(text);
 }
 
 /** What every page says when you reject a request in your wallet: never in red, it's your choice. */
@@ -131,9 +130,9 @@ function claimTiming(entry) {
 
 const REJECTED_PROOF = "The proof was rejected. Prove again once DuskEVM reports a new output.";
 
-function withdrawalSteps(entry, cfg, { account, name, now, time: usual, timeZone, year }) {
+function withdrawalSteps(entry, cfg, { account, locale, name, now, time: usual, timeZone, year }) {
   const stage = entry.stage ?? "submitted";
-  const time = (ms) => (ms ? formatDateTime(ms, { timeZone, year }) : "");
+  const time = (ms) => (ms ? formatDateTime(ms, { locale, now, timeZone, year }) : "");
   // The current stage decides: a proof the Portal rejected leaves the
   // withdrawal ready to prove again, whatever proof times are kept.
   const proved = ["proven_waiting", "ready_to_finalize", "finalize_submitted", "finalized"].includes(stage);
@@ -206,8 +205,8 @@ function withdrawalSteps(entry, cfg, { account, name, now, time: usual, timeZone
 /** A proven withdrawal whose date isn't read yet: "7 days after the proof at the soonest". */
 const afterTheProof = (time) => (time?.maturity ? `${durationWords(time.maturity)} after the proof at the soonest` : "");
 
-function sourceSteps(entry, route, cfg, { timeZone, year }) {
-  const time = (ms) => (ms ? formatDateTime(ms, { timeZone, year }) : "");
+function sourceSteps(entry, route, cfg, { locale, now, timeZone, year }) {
+  const time = (ms) => (ms ? formatDateTime(ms, { locale, now, timeZone, year }) : "");
   const from = networkName(cfg, route.from.id);
   const to = networkName(cfg, route.to.id);
   const failed = entry.status === "failed";
@@ -273,19 +272,20 @@ function titleFor(entry, route, cfg, amount) {
  * @param {object} options.route the entry's route
  * @param {number} [options.now]
  * @param {string} [options.timeZone] for tests; the viewer's own otherwise
+ * @param {string} [options.locale] for tests: whose clock times are written on; the viewer's otherwise
  * @param {boolean} [options.year] dates as records: with the year
  * @param {string|null} [options.submitter] Dusk Wallet's account, as the Portal knows provers
  * @param {string} [options.account] the connected Dusk account
  * @param {string} [options.name] its .dusk name, where it has one
  * @param {object} [options.timing] what `routeTime` reads the route's time from
  */
-export function transferView(entry, { account = "", cfg, name = "", now = Date.now(), route, submitter = null, timeZone, timing, year = false }) {
+export function transferView(entry, { account = "", cfg, locale, name = "", now = Date.now(), route, submitter = null, timeZone, timing, year = false }) {
   const status = entry.status === "completed" || entry.status === "failed" ? entry.status : "pending";
   const amount = amountOf(entry);
   const withdrawal = route.mode === "duskevm-withdrawal";
   // How long the route takes on this network, as every page says it.
   const time = routeTime(route, cfg, { ...timing, now });
-  const options = { account, name, now, time, timeZone, year };
+  const options = { account, locale, name, now, time, timeZone, year };
   const steps = (withdrawal ? withdrawalSteps(entry, cfg, options) : sourceSteps({ ...entry, status }, route, cfg, options)).map(
     (item) => ({ ...item, href: item.hash && item.network ? explorerTxUrl(cfg, item.network, item.hash) : null }),
   );
@@ -302,12 +302,12 @@ export function transferView(entry, { account = "", cfg, name = "", now = Date.n
       const change = proof ? clockChangeBetween(proof, timing.at, zone) : null;
       countdown = {
         at: timing.at,
-        atText: formatDateTime(timing.at, { timeZone, year }),
+        atText: formatDateTime(timing.at, { locale, now, timeZone, year }),
         clockNote: clockChangeNote(change, { now, timeZone: zone }),
         exact: timing.exact,
         left: durationWords(Math.max(0, (timing.at - now) / 1_000)),
         // "Claim from …", "Claim from about …", or, late, "Waiting for DuskEVM to settle this proof. …"
-        line: claimText(timing, (ms) => formatDateTime(ms, { timeZone, year })),
+        line: claimText(timing, (ms) => formatDateTime(ms, { locale, now, timeZone, year })),
         overdue: timing.overdue,
       };
     }
@@ -389,8 +389,8 @@ function trackerLabel(item, entry, now) {
 }
 
 /** The line under a transfer in My transfers. */
-export function transferSubline(view, entry, route, cfg, { account = "", name = "", now = Date.now(), timeZone } = {}) {
-  const time = (ms) => formatDateTime(ms, { timeZone });
+export function transferSubline(view, entry, route, cfg, { account = "", locale, name = "", now = Date.now(), timeZone } = {}) {
+  const time = (ms) => formatDateTime(ms, { locale, now, timeZone });
   if (view.status === "failed") return view.note || "This transfer didn't go through.";
   if (route.mode === "duskevm-withdrawal") {
     const stage = entry.stage ?? "submitted";

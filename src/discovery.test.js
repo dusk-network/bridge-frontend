@@ -5,7 +5,11 @@ import { encodeDuskExternalAssetRecipient } from "@dusk/evm-sdk";
 import { encodeAbiParameters, encodeFunctionData, pad, parseAbi } from "viem";
 
 import { decodeBase58 } from "./base58.js";
-import { MAINNET_BSC_BRIDGE_ACCOUNT, TESTNET_REGGIO_BRIDGE_ACCOUNT } from "./config.js";
+import { networks } from "@dusk-network/networks";
+
+// Two accounts the networks' files name: the BSC and the Sepolia bridge accounts.
+const MAINNET_BSC_BRIDGE_ACCOUNT = networks.mainnet.routes.services[0].account;
+const TESTNET_REGGIO_BRIDGE_ACCOUNT = networks.testnet.routes.services[0].account;
 import {
   createDiscovery,
   entryFromHistory,
@@ -29,7 +33,7 @@ const hex = (text) => Buffer.from(text).toString("hex");
 const h = (n) => n.toString(16).padStart(64, "0");
 
 const cfg = {
-  duskEvm: { enabled: true, l1StandardBridgeContractId: BRIDGE, l2StandardBridgeAddress: "0x4200000000000000000000000000000000000010" },
+  duskEvm: { enabled: true, l1StandardBridgeContractId: BRIDGE, predeploys: { l2StandardBridge: "0x4200000000000000000000000000000000000010" } },
   evmNetworks: { ethereum: { migrationContract: MIGRATOR } },
   migrations: ["ethereum"],
   profile: "testnet",
@@ -216,7 +220,7 @@ test("withdrawals are found by the EVM address, a window at a time, from the new
     assert.equal(topics[1], pad(EVM));
     return logs.filter((log) => Number(log.blockNumber) >= from && Number(log.blockNumber) <= to);
   };
-  const bridge = cfg.duskEvm.l2StandardBridgeAddress;
+  const bridge = cfg.duskEvm.predeploys.l2StandardBridge;
   const first = await syncWithdrawals({ address: EVM, bridge, maxRequests: 5, rpc });
   assert.deepEqual(first.found.map((entry) => [entry.hash, entry.destination, entry.amountWei]), [
     [`0x${h(1)}`, ACCOUNT, "2000000000000000000"],

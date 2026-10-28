@@ -4,7 +4,11 @@ import test from "node:test";
 import { compressedDuskBlsPublicKeyToRaw, encodeDuskExternalAssetRecipient } from "@dusk/evm-sdk";
 
 import { decodeBase58, encodeBase58 } from "./base58.js";
-import { MAINNET_BSC_BRIDGE_ACCOUNT, TESTNET_REGGIO_BRIDGE_ACCOUNT } from "./config.js";
+import { networks } from "@dusk-network/networks";
+
+// Two accounts the networks' files name: the BSC and the Sepolia bridge accounts.
+const MAINNET_BSC_BRIDGE_ACCOUNT = networks.mainnet.routes.services[0].account;
+const TESTNET_REGGIO_BRIDGE_ACCOUNT = networks.testnet.routes.services[0].account;
 import { rawKeyToDuskAccount, withdrawalRecipientAccount } from "./dusk-recipient.js";
 
 const ACCOUNTS = [

@@ -158,7 +158,7 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
     ? createChainTimes({
         key: `dusk-bridge:times:v1:${cfg.profile}:${cfg.duskEvm.optimismPortalContractId}`,
         read: {
-          deposit: () => readDepositLag({ node, rpcBatch }),
+          deposit: () => readDepositLag({ l1Block: cfg.duskEvm.predeploys.l1Block, node, rpcBatch }),
           withdrawal: () => withdrawals.loadTiming(),
         },
       })

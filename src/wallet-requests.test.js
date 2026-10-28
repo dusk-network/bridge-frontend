@@ -9,7 +9,8 @@ globalThis.__DUSK_BRIDGE_CONFIG__ = {
   VITE_DUSKEVM_L1_STANDARD_BRIDGE_CONTRACT_ID: "11".repeat(32),
   VITE_DUSKEVM_OPTIMISM_PORTAL_CONTRACT_ID: "22".repeat(32),
 };
-const { config, TESTNET_REGGIO_BRIDGE_ACCOUNT } = await import("./config.js");
+const { config } = await import("./config.js");
+const { networks } = await import("@dusk-network/networks");
 const { useDuskWallet } = await import("./dusk-wallet.js");
 const { submitServiceTransfer } = await import("./service-transfer.js");
 const { decodeDepositArgs, submitDuskEvmDeposit } = await import("./dusk-deposit.js");
@@ -58,7 +59,8 @@ test("a Dusk → Sepolia transfer memos the typed destination to the bridge acco
   assert.equal(params.memo, getAddress(TYPED));
   assert.equal(to, params.memo);
   assert.equal(params.to, config.service.account);
-  assert.equal(params.to, TESTNET_REGGIO_BRIDGE_ACCOUNT);
+  // The Sepolia bridge account, as the network's file names it.
+  assert.equal(params.to, networks.testnet.routes.services[0].account);
   assert.equal(params.amount, "2000000000");
   assert.equal(params.privacy, "public");
 });

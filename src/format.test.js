@@ -8,8 +8,11 @@ import {
   durationWords,
   formatDateTime,
   formatDusk,
+  formatExactFee,
   formatFee,
   formatLux,
+  formatMaxFee,
+  formatTypicalFee,
   zoneOffsetMinutes,
 } from "./format.js";
 
@@ -33,12 +36,28 @@ test("fees keep two significant digits and never understate a maximum", () => {
   assert.equal(aboutFee(15_000_000n, 18, "ETH"), "less than 0.000001 ETH");
 });
 
-test("dates carry the weekday and the time zone", () => {
+test("dates read as in every Dusk app: English words on the viewer's clock, with the zone", () => {
   const claim = Date.UTC(2026, 9, 31, 12, 38);
-  assert.equal(formatDateTime(claim, { timeZone: AMS }), "Sat 31 Oct, 13:38 CET");
-  assert.equal(formatDateTime(Date.UTC(2026, 9, 24, 12, 38), { timeZone: AMS }), "Sat 24 Oct, 14:38 CEST");
-  assert.equal(formatDateTime(claim, { timeZone: "UTC", year: true }), "Sat 31 Oct 2026, 12:38 UTC");
-  assert.equal(formatDateTime(claim, { seconds: true, timeZone: AMS }), "Sat 31 Oct, 13:38:00 CET");
+  const now = Date.UTC(2026, 9, 28, 9);
+  const gb = { locale: "en-GB", now, timeZone: AMS };
+  // A list: today, yesterday, or the day; a record: the day in full, with the year.
+  assert.equal(formatDateTime(claim, gb), "31 Oct, 13:38 CET");
+  assert.equal(formatDateTime(Date.UTC(2026, 9, 24, 12, 38), gb), "24 Oct, 14:38 CEST");
+  assert.equal(formatDateTime(now, gb), "Today, 10:00 CET");
+  assert.equal(formatDateTime(now - 86_400_000, gb), "Yesterday, 10:00 CET");
+  assert.equal(formatDateTime(claim, { ...gb, timeZone: "UTC", year: true }), "Sat 31 Oct 2026, 12:38 UTC");
+  assert.equal(formatDateTime(claim, { ...gb, seconds: true }), "31 Oct, 13:38:00 CET");
+  // The viewer's clock; the words stay English: a Dutch viewer sees no "za 31 okt".
+  assert.equal(formatDateTime(claim, { ...gb, locale: "en-US", year: true }), "Sat 31 Oct 2026, 1:38 PM CET");
+  assert.equal(formatDateTime(claim, { ...gb, locale: "nl-NL", year: true }), "Sat 31 Oct 2026, 13:38 CET");
+});
+
+test("Dusk fees are rounded up where they're the most a step costs, to the nearest as they usually are, and exact once paid", () => {
+  assert.deepEqual([0n, 2_500_000n, 5_000_000n, 50_519_542n, 105_000_001n].map(formatMaxFee), ["0", "0.0025", "0.005", "0.0506", "0.1051"]);
+  // Under 0.01 DUSK, two significant digits.
+  assert.equal(formatMaxFee(49_999n), "0.00005");
+  assert.deepEqual([1_850_000n, 1_986_599n, 2_209_505n].map(formatTypicalFee), ["0.0019", "0.002", "0.0022"]);
+  assert.deepEqual([1_986_599n, 51_000_000n, 1_000_000_000_000n].map(formatExactFee), ["0.001986599", "0.051", "1,000"]);
 });
 
 test("seven days across the October clock change say so", () => {

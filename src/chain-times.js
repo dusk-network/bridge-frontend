@@ -2,7 +2,6 @@
 // network: read when a page asks, at most every 10 minutes, and kept in this
 // browser for a day, so a page shows it at once on the next visit.
 
-const L1_BLOCK = "0x4200000000000000000000000000000000000015";
 /** `number()` on DuskEVM's L1Block predeploy: the Dusk block it last took in. */
 const L1_BLOCK_NUMBER = "0x8381f58a";
 
@@ -13,12 +12,13 @@ const MAX_AGE_MS = 86_400_000;
  * How far DuskEVM trails Dusk, in seconds: from Dusk's time for the block
  * DuskEVM last took in, to DuskEVM's latest block. A deposit arrives about
  * this long after its Dusk block. The time DuskEVM itself keeps for that
- * block runs behind Dusk's, so Dusk's own is read.
+ * block runs behind Dusk's, so Dusk's own is read. `l1Block` is the
+ * predeploy, as DuskEVM's network file lists it.
  */
-export async function readDepositLag({ node, rpcBatch }) {
+export async function readDepositLag({ l1Block, node, rpcBatch }) {
   const [head, origin] = await rpcBatch("dusk-evm", [
     { method: "eth_getBlockByNumber", params: ["latest", false] },
-    { method: "eth_call", params: [{ data: L1_BLOCK_NUMBER, to: L1_BLOCK }, "latest"] },
+    { method: "eth_call", params: [{ data: L1_BLOCK_NUMBER, to: l1Block }, "latest"] },
   ]);
   if (!head?.timestamp || !origin || origin === "0x") throw new Error("DuskEVM didn't say which Dusk block it's on.");
   const data = await node.query(`block(height: ${BigInt(origin)}) { header { timestamp } }`);

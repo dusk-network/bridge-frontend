@@ -7,8 +7,6 @@
 // The wallet only signs and sends.
 
 import {
-  L2_STANDARD_BRIDGE_ADDRESS,
-  L2_TO_L1_MESSAGE_PASSER_ADDRESS,
   parseMessagePassedReceipt,
   hashWithdrawal as sdkHashWithdrawal,
   serializeOutputRootProofForDuskAbi,
@@ -27,6 +25,7 @@ import {
 } from "viem";
 
 import { GAME_STATUS, claimFrom, contractClock, contractNow, wallTime } from "./claim-date.js";
+import { DUSKEVM_PREDEPLOYS } from "./config.js";
 import { MAX_BATCH } from "./contract-reader.js";
 import { withdrawalRecipientAccount } from "./dusk-recipient.js";
 import { withdrawalGasLimit } from "./gas.js";
@@ -34,8 +33,8 @@ import { withdrawalGasLimit } from "./gas.js";
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 // Every message from DuskEVM to Dusk passes the same contract. A withdrawal of
 // DUSK is the L2 bridge's own `finalizeBridgeETH`, sent through the L2
-// messenger (OP-stack predeploys).
-const L2_CROSS_DOMAIN_MESSENGER = "0x4200000000000000000000000000000000000007";
+// messenger (OP-stack predeploys, from DuskEVM's network file).
+const { l2CrossDomainMessenger, l2StandardBridge, l2ToL1MessagePasser } = DUSKEVM_PREDEPLOYS;
 
 /** Why a DuskEVM transaction isn't followed, proved or claimed as a withdrawal. */
 export const NOT_A_DUSK_WITHDRAWAL = "That DuskEVM transaction isn't a DUSK withdrawal.";
@@ -196,7 +195,7 @@ export function parseWithdrawalReceipt(receipt) {
     if (parsed.blockNumber === undefined)
       throw new Error("Withdrawal receipt is missing its L2 block number.");
     if (
-      String(parsed.withdrawal.sender).toLowerCase() !== L2_CROSS_DOMAIN_MESSENGER ||
+      String(parsed.withdrawal.sender).toLowerCase() !== l2CrossDomainMessenger.toLowerCase() ||
       !withdrawalDetails(parsed.withdrawal)
     )
       throw new Error(NOT_A_DUSK_WITHDRAWAL);
@@ -223,7 +222,7 @@ export function withdrawalDetails(withdrawal) {
     const relay = decodeFunctionData({ abi: RELAY_ABI, data: withdrawal.data });
     if (relay.functionName !== "relayMessage") return null;
     const [, sender, , relayValue, , message] = relay.args;
-    if (String(sender).toLowerCase() !== L2_STANDARD_BRIDGE_ADDRESS.toLowerCase()) return null;
+    if (String(sender).toLowerCase() !== l2StandardBridge.toLowerCase()) return null;
     const inner = decodeFunctionData({ abi: RELAY_ABI, data: message });
     if (inner.functionName !== "finalizeBridgeETH") return null;
     const [from, , amountWei, extraData] = inner.args;
@@ -477,7 +476,7 @@ export function createWithdrawals(deps) {
   async function getWithdrawalProof(withdrawalHash, blockNumber) {
     const key = withdrawalStorageKey(withdrawalHash);
     const proof = await deps.l2Rpc("eth_getProof", [
-      L2_TO_L1_MESSAGE_PASSER_ADDRESS,
+      l2ToL1MessagePasser,
       [key],
       toHex(blockNumber),
     ]);

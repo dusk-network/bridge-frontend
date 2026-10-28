@@ -9,7 +9,11 @@ import {
   toHex,
 } from "viem";
 
-import { MAINNET_BSC_BRIDGE_ACCOUNT, TESTNET_REGGIO_BRIDGE_ACCOUNT } from "./config.js";
+import { networks } from "@dusk-network/networks";
+
+// Two accounts the networks' files name: the BSC and the Sepolia bridge accounts.
+const MAINNET_BSC_BRIDGE_ACCOUNT = networks.mainnet.routes.services[0].account;
+const TESTNET_REGGIO_BRIDGE_ACCOUNT = networks.testnet.routes.services[0].account;
 import { encodeDepositArgs } from "./dusk-deposit.js";
 import { createScheduler, createTracking, duskAccountEvmAddress, orderAmongAlike, takenByAnother } from "./tracking.js";
 import { NOT_A_DUSK_WITHDRAWAL } from "./withdrawals.js";
@@ -24,7 +28,7 @@ const cfg = {
   dusk: {},
   duskEvm: {
     l1StandardBridgeContractId: "11".repeat(32),
-    l2StandardBridgeAddress: "0x4200000000000000000000000000000000000010",
+    predeploys: { l2StandardBridge: "0x4200000000000000000000000000000000000010" },
     name: "DuskEVM Testnet",
   },
   evmNetworks: {
@@ -409,7 +413,7 @@ test("a deposit is followed to its DuskEVM credit through the bridge event when 
       throw Object.assign(new Error("Method not found"), { code: -32601 });
     },
     "dusk-evm:eth_getLogs": ([filter]) => {
-      assert.equal(filter.address, cfg.duskEvm.l2StandardBridgeAddress);
+      assert.equal(filter.address, cfg.duskEvm.predeploys.l2StandardBridge);
       assert.deepEqual(filter.topics, [
         finalized,
         pad(duskAccountEvmAddress(SENDER).toLowerCase()),

@@ -18,7 +18,8 @@ const PROVEN_AT = 46_877_440n;
 const GAME = Object.freeze({ createdAt: 46_876_050n, resolvedAt: 0n, status: 0 });
 const iso = (ms) => new Date(ms).toISOString().replace(".000", "");
 const AMS = "Europe/Amsterdam";
-const when = (ms) => formatDateTime(ms, { timeZone: AMS });
+// On a 24-hour clock, as of the examples' day (28 Oct 2026): a later day reads "2 Nov, 04:20 CET".
+const when = (ms) => formatDateTime(ms, { locale: "en-GB", now: Date.UTC(2026, 9, 28), timeZone: AMS });
 
 test("the worked example: claimable on Mon 2 Nov, 03:20 to 03:32 UTC", () => {
   // In progress: the earliest, the proof's maturity, as an estimate.
@@ -31,8 +32,8 @@ test("the worked example: claimable on Mon 2 Nov, 03:20 to 03:32 UTC", () => {
   assert.deepEqual([139n, 161n, 205n].map((blocks) => iso(resolvedAfter(blocks).at)), ["2026-11-02T03:20:39Z", "2026-11-02T03:24:19Z", "2026-11-02T03:31:39Z"]);
   assert.equal(resolvedAfter(161n).exact, true);
   // As the web wallet's History said it, but now from the chain: 04:20 CET.
-  assert.equal(claimText(now, when), "Claim from about Mon 2 Nov, 04:20 CET");
-  assert.equal(claimText(resolvedAfter(161n), when), "Claim from Mon 2 Nov, 04:24 CET");
+  assert.equal(claimText(now, when), "Claim from about 2 Nov, 04:20 CET");
+  assert.equal(claimText(resolvedAfter(161n), when), "Claim from 2 Nov, 04:24 CET");
 });
 
 test("a resolved game: exact, the later of the proof's maturity and the game's finality", () => {
@@ -44,7 +45,7 @@ test("a resolved game: exact, the later of the proof's maturity and the game's f
   const proveNow = claimFrom({ game: { createdAt: 45_250_000n, resolvedAt: 45_555_010n, status: 2 }, timing: TIMING, tip: TIP });
   assert.equal(proveNow.at, Number(TIP.timestamp + TIMING.maturitySeconds) * 1_000);
   // The tip is 28 Oct, 03:09:49 UTC.
-  assert.equal(proveNowText(proveNow, when), "If you prove now, you can claim from Wed 4 Nov, 04:09 CET");
+  assert.equal(proveNowText(proveNow, when), "If you prove now, you can claim from 4 Nov, 04:09 CET");
 });
 
 test("an unresolved game: the earliest it can be final, as an estimate", () => {
@@ -74,7 +75,7 @@ test("an overdue game: unresolved more than an hour past its clock, claimable at
   assert.equal(overdue.exact, false);
   // It could resolve now: final 3.5 days from now, after the maturity.
   assert.equal(overdue.at, Number(at(361n).timestamp + TIMING.finalitySeconds) * 1_000);
-  assert.equal(claimText(overdue, when), "Waiting for DuskEVM to settle this proof. Claim from Mon 2 Nov, 04:57 CET at the soonest.");
+  assert.equal(claimText(overdue, when), "Waiting for DuskEVM to settle this proof. Claim from 2 Nov, 04:57 CET at the soonest.");
 });
 
 test("a master-style deployment: block timestamps, compared strictly, so a second later", () => {

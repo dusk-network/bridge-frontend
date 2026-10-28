@@ -179,7 +179,8 @@ test("a deposit lists Dusk Wallet's bridge window: what it does, the fee and the
   assert.deepEqual([valueOf(lines, "From").value, valueOf(lines, "From").suffix], ["21n5nc…fMMLNz", "Public"]);
   assert.equal(valueOf(lines, "Network fee").value, "up to 0.005 DUSK");
   assert.equal(valueOf(lines, "Total").value, "up to 0.105 DUSK");
-  assert.deepEqual([valueOf(lines, "Contract").value, valueOf(lines, "Contract").full], ["0x2257e5…eea1b31d", `0x${DUSKEVM.VITE_DUSKEVM_L1_STANDARD_BRIDGE_CONTRACT_ID}`]);
+  // A Dusk contract without 0x, as the window writes it (wallet#150).
+  assert.deepEqual([valueOf(lines, "Contract").value, valueOf(lines, "Contract").full], ["2257e5f8…eea1b31d", DUSKEVM.VITE_DUSKEVM_L1_STANDARD_BRIDGE_CONTRACT_ID]);
   assert.equal(valueOf(lines, "Call data").value, "40 bytes · sha256=2f64b19f5ac0…731c7c2a");
   assert.equal(valueOf(lines, "Call data").note, "Older Dusk Wallet versions show the call as bytes; check the sha256.");
   assert.equal(valueOf(lines, "Deposit").value, "0.1 DUSK");
@@ -249,7 +250,7 @@ test("a proof or claim lists what the withdrawal pays, to whom, and who sent it"
   // A maximum rounds up past 4 decimals, so it never reads lower than it can be.
   assert.equal(valueOf(prove, "Network fee").value, "up to 0.0506 DUSK");
   assert.equal(valueOf(prove, "Total").value, "up to 0.0506 DUSK");
-  assert.equal(valueOf(prove, "Contract").value, "0x14eeb3…a93fb1b9");
+  assert.equal(valueOf(prove, "Contract").value, "14eeb3d4…a93fb1b9");
   assert.equal(valueOf(prove, "Call data").value, "3 bytes · sha256=039058c6f2c0…011cfb81");
 
   // A claim for a contract, and an amount finer than a Lux, read as the window reads them.
@@ -323,7 +324,7 @@ test("a transfer to the bridge's account lists Dusk Wallet's bridge window: wher
 test("fees and totals read as Dusk Wallet writes them", () => {
   // A maximum: exact to 4 decimals, rounded up past them, trailing zeros trimmed.
   assert.deepEqual([0n, 49_999n, 50_000n, 2_500_000n, 5_000_000n, 105_000_000n, 1_000_010_000n, 12_345_678_912_345n].map(walletFee), [
-    "0 DUSK", "0.0001 DUSK", "0.0001 DUSK", "0.0025 DUSK", "0.005 DUSK", "0.105 DUSK", "1.0001 DUSK", "12,345.679 DUSK",
+    "0 DUSK", "0.00005 DUSK", "0.00005 DUSK", "0.0025 DUSK", "0.005 DUSK", "0.105 DUSK", "1.0001 DUSK", "12,345.679 DUSK",
   ]);
   assert.equal(middle("short", 6, 6), "short");
 });
@@ -343,11 +344,12 @@ test("a receipt is a record without balances, with both hashes and its own link"
     status: "completed",
   };
   const url = `https://bridge.example.org/#/transfer/${"38".repeat(32)}`;
-  const model = receiptModel(entry, { cfg: testnet, route: T["duskevm-deposit"], timeZone: "Europe/Amsterdam", url });
+  const model = receiptModel(entry, { cfg: testnet, locale: "en-GB", route: T["duskevm-deposit"], timeZone: "Europe/Amsterdam", url });
   assert.equal(model.view.title, "25 DUSK arrived on DuskEVM");
   assert.equal(model.caption, "Arrived Mon 26 Oct 2026, 10:31 CET.");
   assert.deepEqual(model.details.map((row) => row.label), ["Amount", "Network fee paid", "From, on Dusk", "To, on DuskEVM", "Dusk transaction", "DuskEVM transaction", "Sent"]);
-  assert.equal(model.details[1].value, "0.002 DUSK on Dusk");
+  // A record: the fee as paid, to the last decimal.
+  assert.equal(model.details[1].value, "0.001986599 DUSK on Dusk");
   const html = receiptPage(model);
   assert.ok(html.includes(`<code class="mono">${"38".repeat(32)}</code>`));
   assert.ok(html.includes(`<code class="mono">0x${"a1".repeat(32)}</code>`));
@@ -389,11 +391,11 @@ test("My transfers groups the connected accounts' transfers and offers the next 
     { amountLux: "5000000000", hash: "03".repeat(32), id: "c", parties: ["someone-else"], routeId: "dusk-to-dusk-evm", status: "completed" },
     { amountLux: "5000000000", followed: true, hash: "04".repeat(32), id: "d", parties: [], routeId: "dusk-to-ethereum", status: "pending" },
   ];
-  const model = transfersModel(entries, { accounts: [ACCOUNT, EVM], cfg: testnet, now: Date.UTC(2026, 9, 26, 10), routeOf, timeZone: "Europe/Amsterdam" });
+  const model = transfersModel(entries, { accounts: [ACCOUNT, EVM], cfg: testnet, locale: "en-GB", now: Date.UTC(2026, 9, 26, 10), routeOf, timeZone: "Europe/Amsterdam" });
   assert.equal(model.needs, 1);
   assert.deepEqual(Object.fromEntries(Object.entries(model.groups).map(([key, rows]) => [key, rows.map((row) => row.id)])), { done: ["b"], failed: [], needs: ["a"], progress: ["d"] });
   const claim = model.groups.needs[0];
-  assert.equal(claim.subline, "Ready to claim since Sat 24 Oct, 02:00 CEST");
+  assert.equal(claim.subline, "Ready to claim since 24 Oct, 02:00 CEST");
   assert.equal(claim.action.kind, "finalize");
   assert.equal(claim.href, `#/transfer/0x${"01".repeat(32)}`);
   const html = activityPanel({ empty: "", groups: model.groups, lede: "x", more: false, syncText: "" });
@@ -406,14 +408,14 @@ test("each transfer in My transfers says whom it pays and its transaction, so eq
   // Discovered from the archive: the DuskEVM recipient in lower case, the hash without 0x.
   const deposit = { amountLux: "500000000", destination: SHOT.toLowerCase(), destinationAt: Date.UTC(2026, 9, 27, 5, 52), hash: `ac6b2f${"9".repeat(52)}16bc24`, id: "d", parties: [ACCOUNT], routeId: "dusk-to-dusk-evm", status: "completed" };
   const withdrawal = { amountLux: "1008000000000", destination: ACCOUNT, hash: `0x04a8a8${"7".repeat(52)}1b3213`, id: "w", parties: [ACCOUNT], routeId: "dusk-evm-to-dusk", stage: "ready_to_prove", status: "pending" };
-  const model = transfersModel([deposit, withdrawal], { account: ACCOUNT, accounts: [ACCOUNT], cfg: testnet, name: "alice.dusk", now: Date.UTC(2026, 9, 28), routeOf, timeZone: "Europe/Amsterdam" });
+  const model = transfersModel([deposit, withdrawal], { account: ACCOUNT, accounts: [ACCOUNT], cfg: testnet, locale: "en-GB", name: "alice.dusk", now: Date.UTC(2026, 9, 28), routeOf, timeZone: "Europe/Amsterdam" });
   const [done] = model.groups.done;
   // The address with its checksum's capitals, as the wallet writes it.
   assert.deepEqual([done.to, done.hash], [{ address: "0x96BA…893e" }, "ac6b2f…16bc24"]);
   // Your own account by its .dusk name.
   assert.deepEqual([model.groups.needs[0].to, model.groups.needs[0].hash], [{ name: "alice.dusk" }, "0x04a8…1b3213"]);
   const html = activityPanel({ empty: "", groups: model.groups, lede: "x", more: false, syncText: "" });
-  assert.match(html, /<div class="t2">Arrived Tue 27 Oct, 06:52 CET<\/div><div class="t3">To <code class="mono">0x96BA…893e<\/code> · <code class="mono">ac6b2f…16bc24<\/code><\/div>/u);
+  assert.match(html, /<div class="t2">Arrived Yesterday, 06:52 CET<\/div><div class="t3">To <code class="mono">0x96BA…893e<\/code> · <code class="mono">ac6b2f…16bc24<\/code><\/div>/u);
   assert.match(html, /<div class="t3">To alice\.dusk · <code class="mono">0x04a8…1b3213<\/code><\/div>/u);
 });
 
@@ -444,14 +446,15 @@ test("the Contracts sheet lists every address in full, per route, with an operat
     testnet.evmNetworks.ethereum.migrationContract,
     testnet.evmNetworks.ethereum.tokenContract,
     testnet.service.account,
-    // Dusk contracts as Dusk Wallet writes them: 0x and all 64 hex characters, copied the same.
-    `0x${testnet.duskEvm.l1StandardBridgeContractId}`,
-    `0x${testnet.duskEvm.optimismPortalContractId}`,
-    `0x${testnet.duskEvm.disputeGameFactoryContractId}`,
-    `0x${testnet.duskEvm.anchorStateRegistryContractId}`,
+    // Dusk contracts as every Dusk app writes them: all 64 hex characters without 0x, copied the same.
+    testnet.duskEvm.l1StandardBridgeContractId,
+    testnet.duskEvm.optimismPortalContractId,
+    testnet.duskEvm.disputeGameFactoryContractId,
+    testnet.duskEvm.anchorStateRegistryContractId,
+    // DuskEVM's predeploys, from its network's file.
     "0x4200000000000000000000000000000000000010",
     "0x4200000000000000000000000000000000000016",
-    `0x${testnet.multicall.contractId}`,
+    testnet.multicall.contractId,
   ]) {
     assert.ok(html.includes(`<code class="mono">${value}</code>`), value);
     assert.ok(html.includes(`data-copy="${value}"`), value);
@@ -547,10 +550,10 @@ test("a proof's review says it moves no DUSK and what it costs; a claim, where t
     notYours: "This withdrawal pays 25z9o6…5Etftt, not alice.dusk.",
   });
   // Once the request is ready, the date a proof made now can be claimed from: exact against a resolved game.
-  const when = (ms) => formatDateTime(ms, { timeZone: "Europe/Amsterdam" });
+  const when = (ms) => formatDateTime(ms, { locale: "en-GB", now: Date.UTC(2026, 9, 28), timeZone: "Europe/Amsterdam" });
   const at = Date.UTC(2026, 10, 9, 2, 20);
-  assert.equal(actionLead("prove", other, { claim: { at, exact: true }, maturity: 604_800, maxLux: 1n, when }).line, "No DUSK moves now. If you prove now, you can claim from Mon 9 Nov, 03:20 CET.");
-  assert.equal(actionLead("prove", other, { claim: { at, exact: false }, maturity: 604_800, maxLux: 1n, when }).line, "No DUSK moves now. If you prove now, you can claim from about Mon 9 Nov, 03:20 CET.");
+  assert.equal(actionLead("prove", other, { claim: { at, exact: true }, maturity: 604_800, maxLux: 1n, when }).line, "No DUSK moves now. If you prove now, you can claim from 9 Nov, 03:20 CET.");
+  assert.equal(actionLead("prove", other, { claim: { at, exact: false }, maturity: 604_800, maxLux: 1n, when }).line, "No DUSK moves now. If you prove now, you can claim from about 9 Nov, 03:20 CET.");
   const claim = actionLead("finalize", { destination: ACCOUNT }, { account: ACCOUNT, amountLux, maxLux: 51_000_000n });
   assert.deepEqual(claim, { amount: "1,008", chain: "dusk", label: "You claim", line: "To 21n5nc…fMMLNz on Dusk · costs up to 0.051 DUSK", notYours: "" });
   assert.equal(

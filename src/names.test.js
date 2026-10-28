@@ -61,10 +61,11 @@ test("the bridge has three routes: BSC both ways, Ethereum one way, and DuskEVM"
       ["ethereum", "Ethereum → Dusk", ["ethereum-to-dusk"]],
     ],
   );
-  const withDuskEvm = profile("mainnet", { ...DUSKEVM, VITE_DUSKEVM_CHAIN_ID: "7", VITE_DUSKEVM_EXPLORER_URL: "https://x.example", VITE_DUSKEVM_L1_BRIDGE_RPC_URL: "https://x.example/l1", VITE_DUSKEVM_RPC_URL: "https://x.example" });
+  // DuskEVM, where the network's file has it: testnet.
+  const withDuskEvm = profile("testnet", DUSKEVM);
   assert.deepEqual(
     bridgeTasks(withDuskEvm, buildRoutes(withDuskEvm)).map((task) => task.title),
-    ["BNB Smart Chain ↔ Dusk", "Ethereum → Dusk", "Dusk ↔ DuskEVM"],
+    ["Ethereum (Sepolia) ↔ Dusk", "Dusk ↔ DuskEVM"],
   );
   // A link names a route by its ID, as one of the three routes, or as earlier links did.
   const opens = (name) => linkedRoute(name, tasks, routes)?.id ?? null;

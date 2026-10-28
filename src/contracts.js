@@ -3,11 +3,11 @@
 // explorer has a page, grouped by the three routes. Who runs them is said
 // once; a route another operator runs says so; nothing here is inferred.
 
+import { formatContractId } from "@dusk-network/networks/format";
+
 import { buildRoutes } from "./bridge-routes.js";
 import { NAME_FILE_HOSTS } from "./dusk-names.js";
 import { bridgeTasks, networkNames, notRunning, tokenName } from "./names.js";
-
-export const L2_TO_L1_MESSAGE_PASSER = "0x4200000000000000000000000000000000000016";
 
 const trim = (url) => String(url ?? "").replace(/\/+$/u, "");
 
@@ -30,11 +30,11 @@ const row = (cfg, network, label, value, note = "") => ({
 });
 
 /**
- * A Dusk contract, its ID written as Dusk Wallet writes it: 0x and the full
- * 64 hex characters, lower case. The copy button copies the same.
+ * A Dusk contract, its ID as every Dusk app writes one: the full 64 hex
+ * characters, lower case, without 0x, so it isn't taken for an EVM address.
+ * The copy button copies the same.
  */
-export const duskContractId = (id) => `0x${String(id ?? "").replace(/^0x/iu, "").toLowerCase()}`;
-const contractRow = (cfg, label, id, note = "") => row(cfg, "dusk", label, duskContractId(id), note);
+const contractRow = (cfg, label, id, note = "") => row(cfg, "dusk", label, formatContractId(id), note);
 
 /**
  * Who runs the bridge, said once: the operator every route shares, or ""
@@ -122,8 +122,8 @@ export function contractGroups(cfg) {
         ...(cfg.duskEvm.anchorStateRegistryContractId
           ? [contractRow(cfg, "Anchor state registry on Dusk", cfg.duskEvm.anchorStateRegistryContractId, "Says which dispute games the portal takes.")]
           : []),
-        row(cfg, "dusk-evm", "Bridge on DuskEVM", cfg.duskEvm.l2StandardBridgeAddress),
-        row(cfg, "dusk-evm", "Message passer on DuskEVM", L2_TO_L1_MESSAGE_PASSER),
+        row(cfg, "dusk-evm", "Bridge on DuskEVM", cfg.duskEvm.predeploys.l2StandardBridge),
+        row(cfg, "dusk-evm", "Message passer on DuskEVM", cfg.duskEvm.predeploys.l2ToL1MessagePasser),
       ],
       title: `${names.dusk} ↔ ${names["dusk-evm"]}`,
     });

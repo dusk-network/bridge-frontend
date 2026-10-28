@@ -1,9 +1,9 @@
+import { formatEvmAddress } from "@dusk-network/networks/format";
 import {
   createPublicClient,
   createWalletClient,
   custom,
   defineChain,
-  getAddress,
   http,
 } from "viem";
 import { config } from "./config.js";
@@ -34,7 +34,7 @@ export function walletNameOf(candidate) {
 /** The account with its EIP-55 checksum, as every address on the page is written; wallets often give it in lower case. */
 const checksummed = (value) => {
   try {
-    return getAddress(value);
+    return formatEvmAddress(value);
   } catch {
     return value;
   }

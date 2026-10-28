@@ -1,14 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { networks } from "@dusk-network/networks";
+
 import { buildRoutes } from "./bridge-routes.js";
 import { decodeBase58 } from "./base58.js";
-import {
-  MAINNET_BSC_BRIDGE_ACCOUNT,
-  MAINNET_ETHEREUM_PAYOUT_ACCOUNT,
-  TESTNET_REGGIO_BRIDGE_ACCOUNT,
-  loadConfig,
-} from "./config.js";
+import { loadConfig } from "./config.js";
+
+// The accounts the networks' files name: the Dusk → BSC bridge account, which
+// pays out BSC's migrations too, Ethereum's migration payer, and Sepolia's
+// bridge account.
+const MAINNET_BSC_BRIDGE_ACCOUNT = networks.mainnet.routes.services[0].account;
+const MAINNET_ETHEREUM_PAYOUT_ACCOUNT = networks.mainnet.routes.migrations.find((route) => route.chain === "ethereum").payoutAccount;
+const TESTNET_REGGIO_BRIDGE_ACCOUNT = networks.testnet.routes.services[0].account;
 
 const TESTNET_DUSKEVM = Object.freeze({
   VITE_DUSKEVM_DISPUTE_GAME_FACTORY_CONTRACT_ID: "33".repeat(32),
@@ -28,11 +32,21 @@ function withConfig(values) {
 
 const TESTNET_HOSTS = /testnet|sepolia/iu;
 
-test("the mainnet profile hides DuskEVM until its contracts are configured", () => {
+test("the mainnet profile has no DuskEVM until its network's file does", () => {
   const { cfg, routes } = withConfig({ VITE_BRIDGE_PROFILE: "mainnet" });
 
   assert.equal(cfg.duskEvm.enabled, false);
   assert.ok(cfg.duskEvm.missing.includes("VITE_DUSKEVM_L1_STANDARD_BRIDGE_CONTRACT_ID"));
+  // Contract IDs and endpoints alone don't bring it: the file has no DuskEVM routes on mainnet.
+  const set = withConfig({
+    VITE_BRIDGE_PROFILE: "mainnet",
+    ...TESTNET_DUSKEVM,
+    VITE_DUSKEVM_CHAIN_ID: "745",
+    VITE_DUSKEVM_EXPLORER_URL: "https://explorer.example",
+    VITE_DUSKEVM_RPC_URL: "https://rpc.example",
+  });
+  assert.equal(set.cfg.duskEvm.enabled, false);
+  assert.equal(set.routes.length, 3);
   assert.deepEqual(
     routes.map(({ id }) => id),
     ["ethereum-to-dusk", "bsc-to-dusk", "dusk-to-bsc"],
@@ -68,6 +82,8 @@ test("the testnet profile stays on Dusk testnet, Sepolia and DuskEVM testnet", (
     VITE_BRIDGE_PROFILE: "testnet",
     ...TESTNET_DUSKEVM,
   });
+  // A deployment's own contract IDs stand in for the file's.
+  assert.equal(cfg.duskEvm.l1StandardBridgeContractId, "11".repeat(32));
 
   assert.equal(cfg.dusk.chainId, "dusk:2");
   assert.equal(cfg.duskEvm.enabled, true);
@@ -135,7 +151,8 @@ test("the Ethereum and BSC routes follow the configured networks", () => {
   });
   assert.deepEqual(testnet.cfg.migrations, ["ethereum"]);
 
-  // BSC's testnet added by its own settings pays in tBNB, not ETH.
+  // A chain the network's file has no route to can't be added by settings:
+  // the routes are the file's.
   const bscTestnet = withConfig({
     VITE_BRIDGE_PROFILE: "testnet",
     VITE_BSC_CHAIN_ID: "97",
@@ -145,9 +162,12 @@ test("the Ethereum and BSC routes follow the configured networks", () => {
     VITE_BSC_TOKEN_CONTRACT: "0x3297000000000000000000000000000000000002",
     VITE_MIGRATION_NETWORKS: "ethereum,bsc",
   });
-  assert.equal(bscTestnet.cfg.evmNetworks.bsc.currency.symbol, "tBNB");
+  assert.deepEqual([...bscTestnet.cfg.migrations], ["ethereum"]);
+  assert.equal(bscTestnet.cfg.evmNetworks.bsc, undefined);
   assert.equal(bscTestnet.cfg.evmNetworks.ethereum.currency.symbol, "ETH");
   assert.equal(withConfig({ VITE_BRIDGE_PROFILE: "mainnet" }).cfg.evmNetworks.bsc.currency.symbol, "BNB");
+  // The deployment's own endpoint for one of the file's chains stands.
+  assert.equal(withConfig({ VITE_BRIDGE_PROFILE: "mainnet", VITE_BSC_RPC_URL: "https://bsc.example" }).cfg.evmNetworks.bsc.rpcUrl, "https://bsc.example");
 });
 
 test("the gas bound, fee and multicall come from config", () => {
@@ -222,4 +242,22 @@ test("routes can be shown as not running, by one switch", () => {
   assert.deepEqual([...withConfig({ VITE_BRIDGE_PROFILE: "mainnet", VITE_PAUSED_ROUTES: "dusk-to-bsc" }).cfg.pausedRoutes], ["dusk-to-bsc"]);
   // Paused routes stay: their transfers are still followed.
   assert.equal(withConfig({ VITE_BRIDGE_PROFILE: "testnet" }).routes.filter((route) => route.paused).length, 2);
+});
+
+test("a profile takes everything from its network's file: testnet runs DuskEVM with no settings at all", () => {
+  const { cfg, routes } = withConfig({ VITE_BRIDGE_PROFILE: "testnet" });
+  const evm = networks.testnet.duskEvm;
+  assert.equal(cfg.duskEvm.enabled, true);
+  assert.deepEqual(
+    [cfg.duskEvm.l1StandardBridgeContractId, cfg.duskEvm.optimismPortalContractId, cfg.duskEvm.disputeGameFactoryContractId, cfg.duskEvm.anchorStateRegistryContractId],
+    ["l1_standard_bridge", "optimism_portal", "dispute_game_factory", "anchor_state_registry"].map((name) => evm.contracts[name].contractId),
+  );
+  assert.deepEqual(cfg.duskEvm.predeploys, evm.predeploys);
+  assert.deepEqual([cfg.duskEvm.chainId, cfg.duskEvm.rpcUrl, cfg.duskEvm.l1BridgeRpcUrl, cfg.duskEvm.depositSeconds], [745, evm.rpcUrl, "https://rpc.testnet.evm.dusk.network/l1", 60]);
+  assert.deepEqual({ ...cfg.duskEvm.optimismPortalDriver }, { sha256: evm.drivers.optimismPortal.sha256, url: "/drivers/optimism_portal_dd_opt.wasm" });
+  assert.deepEqual(routes.map((route) => route.id), ["ethereum-to-dusk", "dusk-to-ethereum", "dusk-to-dusk-evm", "dusk-evm-to-dusk"]);
+  // Its chains, accounts and fee are the file's too.
+  assert.equal(cfg.evmNetworks.ethereum.migrationContract, networks.testnet.routes.migrations[0].contract);
+  assert.deepEqual([cfg.service.account, cfg.service.feeLux], [TESTNET_REGGIO_BRIDGE_ACCOUNT, 1_000_000_000n]);
+  assert.equal(cfg.dusk.explorerUrl, networks.testnet.apps.explorer);
 });
