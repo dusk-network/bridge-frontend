@@ -357,9 +357,9 @@ test("a payout counts as a migration only when its memo names a migration of tha
   // Settled payouts aren't asked about again.
   await verifyPayouts(records, { account: ACCOUNT, cfg, rpcBatch: async () => assert.fail("asked twice") });
 
-  // With the payout account known, the same transfer from anyone else doesn't count.
+  // With the chain's payout account known, the same transfer from anyone else doesn't count.
   const fromOther = [{ amountLux: "1000000000000", hash: h(11), kind: "payout", payer: ACCOUNT, sourceHash: hashOf("aa") }];
-  await verifyPayouts(fromOther, { account: ACCOUNT, cfg: { ...cfg, migrationPayoutAccount: OTHER }, rpcBatch: async (network, calls) => calls.map(({ params }) => txs[params[0]]) });
+  await verifyPayouts(fromOther, { account: ACCOUNT, cfg: { ...cfg, evmNetworks: { ethereum: { ...cfg.evmNetworks.ethereum, payoutAccount: OTHER } } }, rpcBatch: async (network, calls) => calls.map(({ params }) => txs[params[0]]) });
   assert.equal(fromOther[0].rejected, true);
 });
 

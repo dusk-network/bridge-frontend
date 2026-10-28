@@ -6,10 +6,10 @@
 
 import { entryId, readActivity, recordActivity, saveActivity, updateActivity, useActivityNetwork } from "./activity.js";
 import { bridgeRoutes, getBridgeRoute } from "./bridge-routes.js";
-import { cardRoute, choosePair, flipRoute, followsWallets, fromChoices, primaryButton, routeBetween, toChoices } from "./bridge-card.js";
+import { cardRoute, choosePair, entryRoutes, flipRoute, followsWallets, fromChoices, primaryButton, routeBetween, toChoices } from "./bridge-card.js";
 import { claimReminder } from "./calendar.js";
 import { config } from "./config.js";
-import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
+import { bridgeOperator, contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
 import { followAfterDiscovery, mergeTransfer, mergeTransfers, partyKey } from "./discovery.js";
 import { createDiscoveryRuns } from "./discovery-runs.js";
 import { depositRequest, submitDuskEvmDeposit } from "./dusk-deposit.js";
@@ -20,7 +20,7 @@ import { connectEvmWallet, getEvmState, initializeEvmWallet, subscribeEvmWallet 
 import { createFormReads } from "./form-reads.js";
 import { formatDusk, formatLux, formatUnitsGrouped } from "./format.js";
 import { approveMigration, submitMigration } from "./legacy-migration.js";
-import { bridgeTasks, networkName, networkNames } from "./names.js";
+import { bridgeTasks, linkedRoute, networkName, networkNames, notRunning, routeUnits, tokenName } from "./names.js";
 import {
   actionLead,
   actionPrivacy,
@@ -231,11 +231,15 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         terms: cfg.links.terms,
       },
       officialSite: cfg.links.sites[cfg.profile],
-      operators: [
-        cfg.migrations.length && cfg.operators.migration ? { name: cfg.operators.migration, route: "moving old DUSK" } : null,
-        cfg.service && cfg.operators.service ? { name: cfg.operators.service, route: `Dusk to ${networkName(cfg, cfg.service.network)}` } : null,
-        cfg.duskEvm.enabled && cfg.operators.duskEvm ? { name: cfg.operators.duskEvm, route: "DuskEVM" } : null,
-      ].filter(Boolean),
+      // Who runs the bridge, once; by route only where they differ.
+      operator: bridgeOperator(cfg),
+      operators: bridgeOperator(cfg)
+        ? []
+        : [
+            cfg.migrations.length && cfg.operators.migration ? { name: cfg.operators.migration, route: "migrations to Dusk" } : null,
+            cfg.service && cfg.operators.service ? { name: cfg.operators.service, route: `Dusk to ${networkName(cfg, cfg.service.network)}` } : null,
+            cfg.duskEvm.enabled && cfg.operators.duskEvm ? { name: cfg.operators.duskEvm, route: "DuskEVM" } : null,
+          ].filter(Boolean),
     });
   }
 
@@ -272,7 +276,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const { page } = state.page;
     if (page === "transfer") return receiptHtml();
     if (page === "lookup") return lookupPage(state.lookup);
-    if (page === "move" && !taskFor(state.page.task)) return unavailablePage({ title: unavailableTitle(state.page.task) });
+    if (page === "move" && !linkFor(state.page.task)) return unavailablePage({ title: unavailableTitle(state.page.task) });
     // The card: its Bridge tab, or its Activity tab for My transfers.
     return cardHtml(page === "transfers" ? "activity" : "bridge");
   }
@@ -281,13 +285,12 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   // The form
   // -------------------------------------------------------------------------
 
-  function taskFor(id) {
-    return tasks.find((task) => task.id === id) ?? null;
-  }
+  /** The route a link names: by its ID, one of the three routes, or an earlier name. */
+  const linkFor = (name) => linkedRoute(name, tasks, routes);
 
-  /** Why a task link opens no card: DuskEVM not on this network yet, or no such task here. */
+  /** Why a link opens no card: DuskEVM not on this network yet, or no such route here. */
   const unavailableTitle = (id) =>
-    ["to-duskevm", "from-duskevm"].includes(id) && !cfg.duskEvm.enabled
+    ["duskevm", "to-duskevm", "from-duskevm", "dusk-to-dusk-evm", "dusk-evm-to-dusk"].includes(id) && !cfg.duskEvm.enabled
       ? `${names["dusk-evm"]} isn't on ${names.badge} yet`
       : `This bridge doesn't offer that on ${names.badge}`;
 
@@ -297,7 +300,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
    * whatever pair was picked. A link to a task that isn't here opens none.
    */
   function ensureCard(page = state.page) {
-    const task = page?.page === "move" ? taskFor(page.task) : null;
+    const linked = page?.page === "move" ? linkFor(page.task) : null;
     if (!state.form) {
       const route = cardRoute(page, tasks, routes, { dusk: Boolean(duskAccount()), evm: Boolean(evmAccount()) });
       if (!route) return null;
@@ -307,13 +310,13 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         // What each .dusk name typed as the recipient pointed to when looked up.
         lookups: {},
         menu: null,
-        pairChosen: Boolean(task),
+        pairChosen: Boolean(linked),
         recipientEditing: false,
         recipientInput: "",
         routeId: route.id,
         routeOpen: false,
       };
-    } else if (task) setPair(task.routes[0]);
+    } else if (linked) setPair(linked);
     return state.form;
   }
 
@@ -433,7 +436,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   /** The card's networks to choose from, with DuskEVM shown as not live yet where it isn't. */
   function networkChoices(side, route) {
     const nameOf = (id) => networkName(cfg, id);
-    const choices = side === "from" ? fromChoices(routes, route.from.id, nameOf) : toChoices(routes, route.from.id, route.to.id, nameOf);
+    const paused = notRunning(cfg);
+    const choices = side === "from" ? fromChoices(routes, route.from.id, nameOf, paused) : toChoices(routes, route.from.id, route.to.id, nameOf, paused);
     const listed = choices.map((choice) => ({
       ...choice,
       name: nameOf(choice.id),
@@ -450,7 +454,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const reads = formReads.reads;
     const walletName = evmWalletName(state.evmState);
     const phoneOnly = isPhone() && !duskState().installed;
-    const unit = route.mode === "migration" ? "old DUSK" : "DUSK";
+    // ERC20 or BEP20 DUSK on Ethereum and BNB Smart Chain, DUSK on Dusk and DuskEVM.
+    const { receive: receiveUnit, send: unit } = routeUnits(route);
     // What the source holds: the public balance on Dusk, the wallet's on an EVM chain.
     const holdings = route.signer === "dusk" ? reads.duskBalance : route.mode === "migration" ? reads.migration?.balanceWei : reads.l2?.balanceWei;
     const balance =
@@ -491,7 +496,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       resolved,
     };
     let notice = null;
-    if (route.signer === "dusk" && phoneOnly)
+    if (route.paused) notice = { html: `${html(notRunning(cfg))}.`, icon: "info" };
+    else if (route.signer === "dusk" && phoneOnly)
       notice = {
         actions: `<div class="btn-row"><button type="button" class="btn sec sm" data-copy="${html(globalThis.location?.href ?? "")}" aria-label="Copy this page's link">Copy link</button>${globalThis.navigator?.share ? '<button type="button" class="btn sec sm" data-action="share">Share link</button>' : ""}</div>`,
         html: "This needs Dusk Wallet on a computer.",
@@ -518,6 +524,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       button: { ...button, href: DUSK_WALLET_URL },
       canFlip: Boolean(flipRoute(routes, route)),
       canMax: quote.maxLux !== null && quote.maxLux !== undefined && quote.maxLux > 0n,
+      // DUSK on Ethereum or BNB Smart Chain, for whoever doesn't know to pick it as From.
+      entry: entryRoutes(routes, route).map((item) => ({ href: `#/move/${item.id}`, name: networkName(cfg, item.from.id) })),
       error: state.form.error,
       from: { balance, balanceLabel: route.signer === "dusk" ? "Public balance" : "Balance", net: netOf(route.from.id) },
       fromChoices: state.form.menu === "from" ? networkChoices("from", route) : [],
@@ -531,7 +539,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       }),
       quote,
       receive: quote.receiveLux !== null && quote.receiveLux > 0n ? formatLux(quote.receiveLux) : "",
-      receiveUnit: "DUSK",
+      receiveUnit,
       routeLine: routeLine(route, cfg, { gasPrice: duskGasPrice(), timing: timing() }),
       routeOpen: state.form.routeOpen,
       steps: routeSteps(route, quote),
@@ -579,7 +587,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     }
   }
 
-  const isCardPage = () => state.page.page === "home" || (state.page.page === "move" && Boolean(taskFor(state.page.task)));
+  const isCardPage = () => state.page.page === "home" || (state.page.page === "move" && Boolean(linkFor(state.page.task)));
 
   /** Balances and prices for the form's route, from the node and the chains. */
   function loadReads() {
@@ -846,7 +854,13 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   function renderSheet() {
     if (state.sheet === "contracts") {
       dialog.className = "sheet wide";
-      dialog.innerHTML = contractsSheet({ badge: names.badge, groups: contractGroups(cfg), servers: serversLine(cfg) });
+      dialog.innerHTML = contractsSheet({
+        badge: names.badge,
+        groups: contractGroups(cfg),
+        links: { privacy: cfg.links.privacy, terms: cfg.links.terms },
+        operator: bridgeOperator(cfg),
+        servers: serversLine(cfg),
+      });
     } else if (state.sheet === "network") {
       const other = cfg.profile === "testnet" ? "mainnet" : "testnet";
       dialog.className = "sheet narrow";
@@ -941,7 +955,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       receive: {
         amount: formatLux(quote.receiveLux ?? lux),
         chain: route.to.id,
-        unit: "DUSK",
+        unit: routeUnits(route).receive,
         where: `${to} · ${
           route.to.kind === "dusk" && destination === duskAccount() && duskName()
             ? duskName()
@@ -954,7 +968,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       send: {
         amount: amountText,
         chain: route.from.id,
-        unit: route.mode === "migration" ? "old DUSK" : "DUSK",
+        unit: routeUnits(route).send,
         where: `${from} · ${route.signer === "dusk" ? duskName() || short(duskAccount()) : short(evmAccount())}`,
       },
       signer: { account: signerNow(route.signer), wallet: route.signer },
@@ -970,11 +984,11 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       const steps = [];
       if (needsApproval)
         steps.push({
-          confirmLabel: `Approve ${amountText} old DUSK in ${walletName === "your EVM wallet" ? "your wallet" : walletName}`,
+          confirmLabel: `Approve ${amountText} ${tokenName(network)} in ${walletName === "your EVM wallet" ? "your wallet" : walletName}`,
           lines: approveLines({ amountLux: lux, cfg, fee: fee(migration.gas?.approve), network }),
-          title: `Approve exactly ${amountText} old DUSK`,
+          title: `Approve exactly ${amountText} ${tokenName(network)}`,
           walletName,
-          what: `Lets the Dusk migration contract take <b>exactly ${html(amountText)} old DUSK</b> from <code class="mono">${html(short(evmAccount()))}</code>.`,
+          what: `Lets the Dusk migration contract take <b>exactly ${html(amountText)} ${html(tokenName(network))}</b> from <code class="mono">${html(short(evmAccount()))}</code>.`,
           when: "Now",
         });
       steps.push({
@@ -982,7 +996,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         lines: migrateLines({ amountLux: lux, cfg, duskAccount: destination, fee: fee(migration.gas?.migrate), network }),
         title: "Migrate",
         walletName,
-        what: `Locks the old DUSK in the migration contract. The bridge then pays <b>${html(amountText)} DUSK</b> to <code class="mono">${html(short(destination))}</code> on Dusk.`,
+        what: `Locks the ${html(tokenName(network))} in the migration contract. The bridge then pays <b>${html(amountText)} DUSK</b> to <code class="mono">${html(short(destination))}</code> on Dusk.`,
         when: needsApproval ? "After step 1" : "Now",
       });
       reviews.start({
@@ -990,7 +1004,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         after: needsApproval ? "Step 2 opens when the approval is confirmed." : "",
         current: 0,
         steps,
-        sub: `Old DUSK on ${from} to Dusk${steps.length === 2 ? ` · ${walletName === "your EVM wallet" ? "your wallet" : walletName} asks you twice` : ""}`,
+        sub: `${tokenName(network)} on ${from} to Dusk${steps.length === 2 ? ` · ${walletName === "your EVM wallet" ? "your wallet" : walletName} asks you twice` : ""}`,
       });
       openSheet("review", opener);
       return;

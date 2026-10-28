@@ -9,7 +9,7 @@
 import { decodeDepositArgs } from "./dusk-deposit.js";
 import { sha256Hex, toHex } from "./data-driver.js";
 import { aboutFee, formatDusk, formatLux, formatMaxFee } from "./format.js";
-import { OldTokenName, networkName } from "./names.js";
+import { networkName, tokenName } from "./names.js";
 import { normalizeEvmAddress } from "./validation.js";
 
 const WEI_PER_LUX = 1_000_000_000n;
@@ -77,23 +77,23 @@ const evmFeeLine = (fee, coin) => ({
   value: fee === null || fee === undefined ? `shown by your wallet, paid in ${coin}` : aboutFee(fee, 18, coin),
 });
 
-/** Approve: the migration contract may take exactly this amount of old DUSK. */
+/** Approve: the migration contract may take exactly this amount of ERC20 or BEP20 DUSK. */
 export function approveLines({ amountLux, cfg, fee, network }) {
   const chain = cfg.evmNetworks[network];
   return [
     chainLine(cfg, network),
-    { address: chain.tokenContract, label: "Token", network, value: OldTokenName(cfg, network) },
+    { address: chain.tokenContract, label: "Token", network, value: tokenName(network) },
     { address: chain.migrationContract, label: "Spender", network, value: "Dusk migration contract" },
     {
       label: "Spending cap",
       note: "Exactly this transfer, no more.",
-      value: `${formatLux(amountLux)} old DUSK`,
+      value: `${formatLux(amountLux)} ${tokenName(network)}`,
     },
     evmFeeLine(fee, chain.currency?.symbol ?? "ETH"),
   ];
 }
 
-/** Migrate: the old DUSK goes into the contract, naming the Dusk account to pay. */
+/** Migrate: the ERC20 or BEP20 DUSK goes into the contract, naming the Dusk account to pay. */
 export function migrateLines({ amountLux, cfg, duskAccount, fee, network }) {
   const chain = cfg.evmNetworks[network];
   const wei = BigInt(amountLux) * WEI_PER_LUX;
@@ -113,7 +113,7 @@ export function migrateLines({ amountLux, cfg, duskAccount, fee, network }) {
       network: "dusk",
       note: "Your Dusk account that receives the DUSK. The contract calls it mainnetDuskAddress on every network.",
     },
-    { label: "Estimated change", value: `−${formatLux(amountLux)} old DUSK` },
+    { label: "Estimated change", value: `−${formatLux(amountLux)} ${tokenName(network)}` },
     evmFeeLine(fee, chain.currency?.symbol ?? "ETH"),
   ];
 }

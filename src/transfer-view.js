@@ -12,7 +12,7 @@ import {
   formatDusk,
   formatShortDay,
 } from "./format.js";
-import { networkName } from "./names.js";
+import { networkName, tokenName } from "./names.js";
 import { aboutTime, lateAfterSeconds, routeTime } from "./route-times.js";
 import { STATUS_WORDS } from "./tracking.js";
 import { withdrawalActionFailure, withdrawalNextAction } from "./withdrawal-lifecycle.js";
@@ -231,16 +231,17 @@ function titleFor(entry, route, cfg, amount) {
     route.mode === "service-transfer" && amount !== null && cfg.service
       ? formatDusk(amount - BigInt(cfg.service.feeLux) > 0n ? amount - BigInt(cfg.service.feeLux) : 0n)
       : text;
-  const old = route.mode === "migration" ? `${amount === null ? "" : `${formatDusk(amount).replace(" DUSK", "")} `}old DUSK` : text;
+  // A migration moves the chain's own DUSK token: "1,000 ERC20 DUSK".
+  const token = route.mode === "migration" ? `${amount === null ? "" : `${formatDusk(amount).replace(" DUSK", "")} `}${tokenName(route.from.id)}` : text;
   if (entry.status === "completed") return `${received} arrived on ${to}`;
   if (entry.status === "failed")
-    return route.mode === "duskevm-withdrawal" ? `The withdrawal failed on ${from}` : `${route.mode === "migration" ? old : text} didn't reach ${to}`;
+    return route.mode === "duskevm-withdrawal" ? `The withdrawal failed on ${from}` : `${token} didn't reach ${to}`;
   if (route.mode === "duskevm-withdrawal") {
     if (entry.stage === "ready_to_finalize" && !entry.pendingAction) return `${text} is ready to claim`;
     if (entry.stage === "ready_to_prove" && !entry.pendingAction) return `Prove your withdrawal of ${text}`;
     return `Moving ${text} from ${from} to ${to}`;
   }
-  if (route.mode === "migration") return `Moving ${old} to ${to}`;
+  if (route.mode === "migration") return `Moving ${token} to ${to}`;
   return `Sending ${text} to ${to}`;
 }
 

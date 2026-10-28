@@ -12,7 +12,7 @@ import {
   WITHDRAWAL_STEP_GAS_TYPICAL,
   withdrawalStepGas,
 } from "./gas.js";
-import { gasCoin, networkName } from "./names.js";
+import { gasCoin, networkName, routeUnits, tokenName } from "./names.js";
 import { routeTime, routeTimeText } from "./route-times.js";
 
 const WEI_PER_LUX = 1_000_000_000n;
@@ -145,7 +145,7 @@ export function buildQuote(route, amount, ctx) {
         key: "receive",
         label: "You receive",
         strong: true,
-        value: receive === null || receive <= 0n ? "—" : `${formatDusk(receive)} on ${to}`,
+        value: receive === null || receive <= 0n ? "—" : `${formatLux(receive)} ${routeUnits(route).receive} on ${to}`,
       },
       ...arrivesRow(route, cfg, ctx.timing),
     );
@@ -164,7 +164,7 @@ export function buildQuote(route, amount, ctx) {
       quote.maxLux = balance / WEI_PER_LUX;
       if (!quote.error && wei !== null && wei > balance) {
         quote.insufficient = true;
-        quote.error = `That's more than the ${formatUnitsGrouped(balance, 18, 9)} old DUSK in this wallet.`;
+        quote.error = `That's more than the ${formatUnitsGrouped(balance, 18, 9)} ${tokenName(route.from.id)} in this wallet.`;
       }
     }
     const needsApproval = wei === null || BigInt(ctx.allowanceWei ?? 0n) < wei;
@@ -176,7 +176,7 @@ export function buildQuote(route, amount, ctx) {
     quote.evmFeeWei = evmFee;
     quote.steps = steps;
     rows.push(
-      { key: "send", label: "You send", value: lux === null ? "—" : `${formatLux(lux)} old DUSK` },
+      { key: "send", label: "You send", value: lux === null ? "—" : `${formatLux(lux)} ${tokenName(route.from.id)}` },
       {
         detail: steps === 2 ? "two wallet steps" : "one wallet step",
         key: "fee",

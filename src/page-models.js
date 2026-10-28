@@ -5,7 +5,7 @@
 import { explorerAddressUrl } from "./contracts.js";
 import { groupTransfers, shownFor } from "./discovery.js";
 import { aboutFee, formatDateTime, formatDusk, formatFee, formatLux, formatMaxFee, formatUnitsGrouped } from "./format.js";
-import { gasCoin, networkName, networkNames, routeTitle } from "./names.js";
+import { gasCoin, networkName, networkNames, routeTitle, tokenName } from "./names.js";
 import { transferHref } from "./permalink.js";
 import { buildQuote, routeDuskFees, stepFeeText, withdrawalStepMax } from "./quote.js";
 import { aboutTime, routeTime, routeTimeText } from "./route-times.js";
@@ -81,7 +81,7 @@ export function reviewChecks(route, { cfg, destination, duskAccount, evm, quote,
     const migration = reads.migration ?? {};
     if (migration.balanceWei !== null && migration.balanceWei !== undefined)
       checks.push({
-        html: `You have <b class="num">${html(formatUnitsGrouped(migration.balanceWei, 18, 4))} old DUSK</b> at <code class="mono">${html(short(evm?.account))}</code> on ${html(from)}`,
+        html: `You have <b class="num">${html(formatUnitsGrouped(migration.balanceWei, 18, 4))} ${html(tokenName(route.from.id))}</b> at <code class="mono">${html(short(evm?.account))}</code> on ${html(from)}`,
         ok: lux * WEI_PER_LUX <= migration.balanceWei,
       });
     if (migration.gasCoinWei !== null && migration.gasCoinWei !== undefined)
@@ -153,7 +153,7 @@ export function availableLine(route, maxLux) {
   if (maxLux === null || maxLux === undefined) return { available: "", availableLabel: "", canMax: false };
   const migration = route.mode === "migration";
   return {
-    available: migration ? `${formatLux(maxLux, 4)} old DUSK` : formatDusk(maxLux, 4),
+    available: migration ? `${formatLux(maxLux, 4)} ${tokenName(route.from.id)}` : formatDusk(maxLux, 4),
     availableLabel: migration ? "Available" : "Available after fees",
     canMax: maxLux > 0n,
   };
@@ -220,7 +220,7 @@ export function receiptModel(entry, { cfg, gasPrice = 1n, now = Date.now(), own 
   const sourceNetwork = route.from.kind === "dusk" ? "dusk" : route.from.id;
   const destinationNetwork = route.to.kind === "dusk" ? "dusk" : route.to.id;
   const details = [];
-  if (view.amount !== null) details.push({ label: route.mode === "migration" ? "You sent" : "Amount", value: route.mode === "migration" ? `${formatLux(view.amount)} old DUSK` : formatDusk(view.amount) });
+  if (view.amount !== null) details.push({ label: route.mode === "migration" ? "You sent" : "Amount", value: route.mode === "migration" ? `${formatLux(view.amount)} ${tokenName(route.from.id)}` : formatDusk(view.amount) });
   if (route.mode === "service-transfer" && view.amount !== null) {
     details.push({ label: "Bridge fee", value: formatDusk(cfg.service.feeLux) });
     details.push({ label: "You receive", value: formatDusk(view.amount - BigInt(cfg.service.feeLux) > 0n ? view.amount - BigInt(cfg.service.feeLux) : 0n) });

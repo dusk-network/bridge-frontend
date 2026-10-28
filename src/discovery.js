@@ -190,7 +190,6 @@ function paysAsMigrated(record, tx, account, payer) {
 export async function verifyPayouts(records, { account, cfg, rpcBatch }) {
   const open = records.filter((record) => record.kind === "payout" && !record.routeId && !record.rejected);
   if (!open.length) return [];
-  const payer = cfg.migrationPayoutAccount || null;
   const settled = new Set();
   const unknown = new Set();
   const changed = [];
@@ -217,7 +216,8 @@ export async function verifyPayouts(records, { account, cfg, rpcBatch }) {
       }
       if (!tx || String(tx.to ?? "").toLowerCase() !== contract) return;
       settled.add(record.hash);
-      if (paysAsMigrated(record, tx, account, payer))
+      // Only the chain's payout account pays its migrations, where it's known.
+      if (paysAsMigrated(record, tx, account, cfg.evmNetworks[network].payoutAccount || null))
         Object.assign(record, { routeId: `${network}-to-dusk`, sender: String(tx.from ?? "").toLowerCase() });
       else record.rejected = true;
       changed.push(record);

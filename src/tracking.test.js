@@ -159,8 +159,8 @@ test("only the migrated amount counts as a payout, and only from the payout acco
   assert.equal(paid.status, "completed");
   assert.equal(paid.destinationHash, "02".repeat(32));
 
-  // With the payout account known, the same amount from anyone else doesn't count.
-  const known = { ...cfg, migrationPayoutAccount: PAYER };
+  // With the chain's payout account known, the same amount from anyone else doesn't count.
+  const known = { ...cfg, evmNetworks: { ethereum: { ...cfg.evmNetworks.ethereum, payoutAccount: PAYER } } };
   assert.equal((await tracking(known).refresh(entry, ROUTES.migration)).status, "pending");
   payouts.push(payout("03".repeat(32), { sender: PAYER, value: "3000000000" }));
   assert.equal((await tracking(known).refresh(entry, ROUTES.migration)).destinationHash, "03".repeat(32));

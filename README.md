@@ -21,24 +21,40 @@ remain a narrowly scoped wallet and signer.
 ## Routes
 
 One deployment serves one network (`VITE_BRIDGE_PROFILE`), and every route
-stays on that network's counterparts.
+stays on that network's counterparts. There are three routes:
+
+- **BNB Smart Chain ↔ Dusk**, both ways: BEP20 DUSK migrates to Dusk, and
+  DUSK sent to the bridge account is paid out as BEP20 DUSK;
+- **Ethereum → Dusk**, one way, since the ERC20 contract can't mint: ERC20
+  DUSK migrates to Dusk;
+- **Dusk ↔ DuskEVM**, both ways, with DuskEVM's own deposit and withdrawal.
 
 | Mainnet | Testnet |
 | --- | --- |
-| Ethereum → Dusk | Ethereum (Sepolia) → Dusk |
 | BNB Smart Chain → Dusk | |
-| Dusk → BNB Smart Chain | Dusk → Ethereum (Sepolia) |
+| Dusk → BNB Smart Chain | |
+| Ethereum → Dusk | Ethereum (Sepolia) → Dusk, not running |
+| | Dusk → Ethereum (Sepolia), not running |
 | Dusk → DuskEVM, once configured | Dusk → DuskEVM |
 | DuskEVM → Dusk, once configured | DuskEVM → Dusk |
 
 Each chain has one name per network: Dusk and DuskEVM keep theirs next to the
-network badge, and the old-token chains name their testnet in brackets.
+network badge, and Ethereum and BNB Smart Chain name their testnet in
+brackets. DUSK on them is named by its token standard: ERC20 DUSK and BEP20
+DUSK.
 
-The old-token migration contracts and the operated Dusk → BSC account are
-pinned to the values used by the Dusk Web Wallet and documentation. DuskEVM
-routes appear only when its contract IDs and endpoints are configured; mainnet
-has none until DuskEVM mainnet is live. The testnet old-token routes need the
-Messina and Reggio testnet workers running to settle.
+The migration contracts and the operated Dusk → BSC account are pinned to the
+values used by the Dusk Web Wallet and documentation, and so are the accounts
+that pay out each chain's migrations on mainnet: `2427XSRs…` for Ethereum, and
+for BSC the Dusk → BSC bridge account. DuskEVM routes appear only when its
+contract IDs and endpoints are configured; mainnet has none until DuskEVM
+mainnet is live.
+
+Nothing has been paid out on the testnet Sepolia routes since 11 Feb 2026, so
+they're shown as not running: listed, disabled, and never opened unless a link
+names one. `VITE_PAUSED_ROUTES` lists the routes shown that way (testnet:
+`ethereum-to-dusk,dusk-to-ethereum`); `none` runs them again. Transfers already
+sent on a paused route are still followed.
 
 The app supports:
 
@@ -52,8 +68,9 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
 
 ## Pages
 
-- **Start**: the tasks, each with its time and cost, and on a phone without
-  Dusk Wallet whether it works there.
+- **Start**: the bridge card, with each route's time and cost, and on a phone
+  without Dusk Wallet whether it works there. Under it, for DUSK on Ethereum or
+  BNB Smart Chain, a link per chain that opens its route to Dusk.
 - **A task**: the amount, where it goes, and the quote: what you send, the
   network fee as a maximum and its usual cost, the bridge fee, what you
   receive and when. One line says what becomes public.
@@ -99,8 +116,9 @@ receipt link or a looked-up hash opens the same transfer on any device.
 - **Migrations** complete when the Dusk payout appears: Messina pays out the
   migrated amount with the migration's transaction hash as the memo
   (`transactionsByMemo`). Anyone can send a transfer with that memo, so only
-  the exact amount counts, and only from `VITE_MIGRATION_PAYOUT_ACCOUNT` when
-  it's set.
+  the exact amount counts, and only from the chain's payout account where one
+  is known (the mainnet defaults, `VITE_ETHEREUM_PAYOUT_ACCOUNT`,
+  `VITE_BSC_PAYOUT_ACCOUNT`, or `VITE_MIGRATION_PAYOUT_ACCOUNT` for both).
 - **Dusk → BSC** completes when the bridge pays the memo address: an ERC-20
   `Transfer` of the amount minus the fee, found with `eth_getLogs`.
 - **Deposits** complete on their DuskEVM credit. Where the adapter's L1 RPC
@@ -170,14 +188,18 @@ VITE_DUSKEVM_DISPUTE_GAME_FACTORY_CONTRACT_ID=<from the address book>
 
 `.env.example` lists the testnet values in use today.
 
+The footer and About this page say the bridge is operated by Dusk, and link
+Dusk's Terms of use and Privacy policy, as the explorer does. A deployment can
+name its own (`VITE_TERMS_URL`, `VITE_PRIVACY_URL`), or another operator for a
+route (`VITE_MIGRATION_OPERATOR`, `VITE_SERVICE_OPERATOR`,
+`VITE_DUSKEVM_OPERATOR`), which the Contracts sheet and the footer then name.
+
 Some page content appears only when configured, since none of it is guessed:
-the support contact (`VITE_SUPPORT_URL`, `VITE_SUPPORT_LABEL`), the other
+a support contact (`VITE_SUPPORT_URL`, `VITE_SUPPORT_LABEL`), the other
 network's bridge site (`VITE_MAINNET_BRIDGE_URL`, `VITE_TESTNET_BRIDGE_URL`),
-Terms, Privacy and Status links, a guide per route (`VITE_DOCS_MIGRATION_URL`,
+a Status link, and a guide per route (`VITE_DOCS_MIGRATION_URL`,
 `VITE_DOCS_SERVICE_URL`, `VITE_DOCS_DUSKEVM_URL`; the docs' bridge guides
-describe the web wallet's bridge), and the operator named per route in the
-Contracts sheet and the footer (`VITE_MIGRATION_OPERATOR`,
-`VITE_SERVICE_OPERATOR`, `VITE_DUSKEVM_OPERATOR`).
+describe the web wallet's bridge).
 
 The page uses the system's fonts: the Söhne files the mockups used aren't
 licensed for this repository.

@@ -334,10 +334,11 @@ export function createTracking(deps) {
       return failed(`The migration failed on ${name(network)}.`, patch);
     const recipient = patch.destination ?? entry.destination;
     const amountLux = patch.amountLux ?? entry.amountLux;
-    // Messina pays out the migrated amount with the migration's transaction
-    // hash as the memo. Anyone can send a transfer with that memo, so only
-    // the exact amount counts, from the payout account where one is known.
-    const payer = config.migrationPayoutAccount || null;
+    // The bridge pays out the migrated amount with the migration's
+    // transaction hash as the memo. Anyone can send a transfer with that
+    // memo, so only the exact amount counts, from the chain's payout account
+    // where one is known.
+    const payer = config.evmNetworks[network]?.payoutAccount || null;
     const taken = takenDestinations(entry, others);
     const payouts = amountLux === undefined ? [] : await node.transfersByMemo(entry.hash.toLowerCase());
     const payout = payouts.find(

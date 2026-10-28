@@ -93,7 +93,7 @@ test("a payout to another chain says what arrives after the bridge fee", () => {
   );
   const done = transferView({ amountLux: "50000000000", hash: DUSK_HASH, status: "completed" }, { cfg, route: service });
   assert.equal(done.title, "49 DUSK arrived on Ethereum (Sepolia)");
-  assert.equal(transferView({ amountLux: "1000000000000", hash: L2_HASH, status: "pending" }, { cfg, route: migration }).title, "Moving 1,000 old DUSK to Dusk");
+  assert.equal(transferView({ amountLux: "1000000000000", hash: L2_HASH, status: "pending" }, { cfg, route: migration }).title, "Moving 1,000 ERC20 DUSK to Dusk");
 });
 
 test("a withdrawal shows its three steps, their times and the next action", () => {

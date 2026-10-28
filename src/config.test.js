@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { buildRoutes } from "./bridge-routes.js";
+import { decodeBase58 } from "./base58.js";
 import {
   MAINNET_BSC_BRIDGE_ACCOUNT,
+  MAINNET_ETHEREUM_PAYOUT_ACCOUNT,
   TESTNET_REGGIO_BRIDGE_ACCOUNT,
   loadConfig,
 } from "./config.js";
@@ -87,7 +89,7 @@ test("the testnet profile stays on Dusk testnet, Sepolia and DuskEVM testnet", (
   );
 });
 
-test("old-token routes follow the configured networks", () => {
+test("the Ethereum and BSC routes follow the configured networks", () => {
   const none = withConfig({
     VITE_BRIDGE_PROFILE: "mainnet",
     VITE_MIGRATION_NETWORKS: "none",
@@ -153,11 +155,14 @@ test("the gas bound, fee and multicall come from config", () => {
   );
 });
 
-test("links, operators and contacts appear only when configured", () => {
+test("Dusk runs every route, under its own terms and privacy policy, with no support contact unless one is set", () => {
   const bare = withConfig({ VITE_BRIDGE_PROFILE: "mainnet" }).cfg;
   assert.equal(bare.links.support, "");
   assert.equal(bare.links.sites.testnet, "");
-  assert.deepEqual({ ...bare.operators }, { duskEvm: "", migration: "", service: "" });
+  assert.deepEqual({ ...bare.operators }, { duskEvm: "Dusk", migration: "Dusk", service: "Dusk" });
+  // The same as the explorer's footer.
+  assert.equal(bare.links.terms, "https://dusk.network/terms-of-use");
+  assert.equal(bare.links.privacy, "https://dusk.network/privacy-policy");
   // The docs' bridge guides describe the web wallet's bridge: none is linked unless set.
   assert.deepEqual({ ...bare.links.docs }, { duskEvm: "", migration: "", service: "" });
 
@@ -181,4 +186,28 @@ test("no deployment prefills where a migration pays out", async () => {
   assert.equal("defaultDuskRecipient" in cfg, false);
   const { readFile } = await import("node:fs/promises");
   assert.doesNotMatch(await readFile(new URL("../.env.example", import.meta.url), "utf8"), /VITE_DEFAULT_DUSK_RECIPIENT/u);
+});
+
+test("each chain's migrations count only payouts from its own known account", () => {
+  const mainnet = withConfig({ VITE_BRIDGE_PROFILE: "mainnet" }).cfg;
+  assert.equal(mainnet.evmNetworks.ethereum.payoutAccount, MAINNET_ETHEREUM_PAYOUT_ACCOUNT);
+  // BSC's migrations are paid by the account Dusk to BSC transfers go to.
+  assert.equal(mainnet.evmNetworks.bsc.payoutAccount, MAINNET_BSC_BRIDGE_ACCOUNT);
+  for (const account of [MAINNET_ETHEREUM_PAYOUT_ACCOUNT, MAINNET_BSC_BRIDGE_ACCOUNT]) assert.equal(decodeBase58(account).length, 96);
+  // None is known on testnet: any sender's payout of the exact amount counts there.
+  assert.equal(withConfig({ VITE_BRIDGE_PROFILE: "testnet" }).cfg.evmNetworks.ethereum.payoutAccount, "");
+  // One for all chains, one per chain, or none.
+  const one = withConfig({ VITE_BRIDGE_PROFILE: "mainnet", VITE_MIGRATION_PAYOUT_ACCOUNT: TESTNET_REGGIO_BRIDGE_ACCOUNT }).cfg;
+  assert.deepEqual([one.evmNetworks.ethereum.payoutAccount, one.evmNetworks.bsc.payoutAccount], [TESTNET_REGGIO_BRIDGE_ACCOUNT, TESTNET_REGGIO_BRIDGE_ACCOUNT]);
+  const each = withConfig({ VITE_BRIDGE_PROFILE: "mainnet", VITE_BSC_PAYOUT_ACCOUNT: "none" }).cfg;
+  assert.deepEqual([each.evmNetworks.ethereum.payoutAccount, each.evmNetworks.bsc.payoutAccount], [MAINNET_ETHEREUM_PAYOUT_ACCOUNT, ""]);
+});
+
+test("routes can be shown as not running, by one switch", () => {
+  assert.deepEqual([...withConfig({ VITE_BRIDGE_PROFILE: "testnet" }).cfg.pausedRoutes], ["ethereum-to-dusk", "dusk-to-ethereum"]);
+  assert.deepEqual([...withConfig({ VITE_BRIDGE_PROFILE: "testnet", VITE_PAUSED_ROUTES: "none" }).cfg.pausedRoutes], []);
+  assert.deepEqual([...withConfig({ VITE_BRIDGE_PROFILE: "mainnet" }).cfg.pausedRoutes], []);
+  assert.deepEqual([...withConfig({ VITE_BRIDGE_PROFILE: "mainnet", VITE_PAUSED_ROUTES: "dusk-to-bsc" }).cfg.pausedRoutes], ["dusk-to-bsc"]);
+  // Paused routes stay: their transfers are still followed.
+  assert.equal(withConfig({ VITE_BRIDGE_PROFILE: "testnet" }).routes.filter((route) => route.paused).length, 2);
 });

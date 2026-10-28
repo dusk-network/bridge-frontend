@@ -1,6 +1,6 @@
 // Which bridge transfer a pasted or linked transaction hash is, so a receipt
 // link and "Look up a transfer" need nothing but the hash. A few requests at
-// most: the Dusk node for a Dusk hash, then DuskEVM and the old-token chains
+// most: the Dusk node for a Dusk hash, then DuskEVM and the migration chains
 // for an EVM hash, in the order the hash's form suggests.
 
 import { canonicalHash } from "./permalink.js";
