@@ -1,7 +1,7 @@
 // The Contracts sheet: every address and contract ID each route uses, in
 // full, from the deployment's own config, with explorer links where the
-// explorer has a page, grouped by the three routes. Who runs them is said
-// once; a route another operator runs says so; nothing here is inferred.
+// explorer has a page, grouped by the three routes. Nothing here is
+// inferred.
 
 import { formatContractId } from "@dusk-network/networks/format";
 
@@ -38,24 +38,12 @@ const row = (cfg, network, label, value, note = "") => ({
 const contractRow = (label, id, note = "") => ({ href: null, label, network: "dusk", note, value: formatContractId(id) });
 
 /**
- * Who runs the bridge, said once: the operator every route shares, or ""
- * when the routes have different ones (each group then names its own).
- */
-export function bridgeOperator(cfg) {
-  const named = [...new Set(Object.values(cfg.operators ?? {}).filter(Boolean))];
-  return named.length === 1 ? named[0] : "";
-}
-
-/**
  * The sheet's groups: the networks, then one group per route: BNB Smart
  * Chain ↔ Dusk, Ethereum → Dusk and Dusk ↔ DuskEVM.
  */
 export function contractGroups(cfg) {
   const names = networkNames(cfg);
   const groups = [];
-  const shared = bridgeOperator(cfg);
-  // A route run by another operator than the bridge's names it.
-  const operatorOf = (kind) => (cfg.operators?.[kind] && cfg.operators[kind] !== shared ? cfg.operators[kind] : "");
 
   const networks = [{ label: names.dusk, value: cfg.dusk.chainId }];
   networks.push(
@@ -78,7 +66,7 @@ export function contractGroups(cfg) {
       row(cfg, id, tokenName(id), network.tokenContract, migrates && service ? "What the migration takes and the bridge pays out." : migrates ? "What the migration takes." : "What the bridge pays out."),
     ];
     if (migrates)
-      rows.push(row(cfg, id, "Migration contract", network.migrationContract, `Keeps the ${tokenName(id)} it takes. It has no function to send them out.`));
+      rows.push(row(cfg, id, "Migration contract", network.migrationContract));
     if (service)
       rows.push(
         row(
@@ -93,19 +81,10 @@ export function contractGroups(cfg) {
       rows.push(row(cfg, "dusk", "Pays out on Dusk", payer, "Only its transfers count as a migration's payout."));
     if (service?.payoutAddress) rows.push(row(cfg, id, "Pays out from", service.payoutAddress));
     const paused = task.routes.every((route) => route.paused);
-    // Each direction's operator, where they aren't all the bridge's.
-    const runners = [
-      migrates ? { name: operatorOf("migration"), route: `${names[id]} → Dusk` } : null,
-      service ? { name: operatorOf("service"), route: `Dusk → ${names[id]}` } : null,
-    ].filter((runner) => runner?.name);
     groups.push({
       docs: migrates ? cfg.links?.docs?.migration : cfg.links?.docs?.service,
       id: `route-${id}`,
       note: paused ? `${notRunning(cfg)}.` : "",
-      operator:
-        new Set(runners.map((runner) => runner.name)).size === 1 && runners.length === (migrates ? 1 : 0) + (service ? 1 : 0)
-          ? runners[0].name
-          : runners.map((runner) => `${runner.name} for ${runner.route}`).join(" · "),
       rows,
       title: task.title,
     });
@@ -115,9 +94,8 @@ export function contractGroups(cfg) {
     groups.push({
       docs: cfg.links?.docs?.duskEvm,
       id: "duskevm",
-      operator: operatorOf("duskEvm"),
       rows: [
-        contractRow("Bridge contract on Dusk", cfg.duskEvm.l1StandardBridgeContractId, "Takes deposits, and holds the DUSK that is on DuskEVM."),
+        contractRow("Bridge contract on Dusk", cfg.duskEvm.l1StandardBridgeContractId, "Takes deposits."),
         contractRow("Withdrawal portal on Dusk", cfg.duskEvm.optimismPortalContractId, "Checks proofs and releases claims."),
         contractRow("Dispute game factory on Dusk", cfg.duskEvm.disputeGameFactoryContractId),
         ...(cfg.duskEvm.anchorStateRegistryContractId

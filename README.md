@@ -95,8 +95,7 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   and its transaction's short hash. "Look up a transfer" finds a transfer's
   route from its hash alone.
 - **Contracts**: every address and contract ID each route uses, in full,
-  with copy buttons and explorer links, and an operator only where the
-  deployment names one.
+  with copy buttons and explorer links.
 
 A link can open the card on a route: `#/move/<route>`, by its ID
 (`bsc-to-dusk`), by one of the three routes (`bsc`, `ethereum`, `duskevm`), or
@@ -233,12 +232,9 @@ clock, with the zone ("Today, 14:05 CET", records in full: "Wed 28 Oct
 checksum; the most a fee can be rounded up, and the fee a transfer paid
 exact in its receipt's details.
 
-The footer and About this page say the bridge is operated by the network's
-operator, Dusk, and link its Terms of use and Privacy policy, as the explorer
-does. A deployment can
-name its own (`VITE_TERMS_URL`, `VITE_PRIVACY_URL`), or another operator for a
-route (`VITE_MIGRATION_OPERATOR`, `VITE_SERVICE_OPERATOR`,
-`VITE_DUSKEVM_OPERATOR`), which the Contracts sheet and the footer then name.
+The footer and About this page link the Terms of use and Privacy policy the
+network's file names, as the explorer does. A deployment can link its own
+(`VITE_TERMS_URL`, `VITE_PRIVACY_URL`).
 
 Some page content appears only when configured, since none of it is guessed:
 a support contact (`VITE_SUPPORT_URL`, `VITE_SUPPORT_LABEL`), the other

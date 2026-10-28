@@ -429,7 +429,7 @@ test("the top bar names each wallet's account, in the form its wallet writes it,
   assert.doesNotMatch(phone, /\.hdr-r \.wpill > :not\(\.av\) \{ display: none; \}/u);
 });
 
-test("the Contracts sheet lists every address in full, per route, with an operator only when configured", () => {
+test("the Contracts sheet lists every address in full, per route, and names no one as running it", () => {
   const groups = contractGroups(testnet);
   assert.deepEqual(groups.map((group) => group.title), ["Networks", "Ethereum (Sepolia) ↔ Dusk", "Dusk ↔ DuskEVM", "Used to read Dusk"]);
   // The Sepolia routes are listed, as not running.
@@ -439,6 +439,7 @@ test("the Contracts sheet lists every address in full, per route, with an operat
     ["DuskEVM", "chain 745"],
     ["Ethereum (Sepolia)", "chain 11155111"],
   ]);
+  // What the sheet used to name an operator with is passed and ignored.
   const html = contractsSheet({ badge: "Testnet", groups, links: testnet.links, operator: "Dusk" });
   for (const value of [
     testnet.evmNetworks.ethereum.migrationContract,
@@ -458,14 +459,15 @@ test("the Contracts sheet lists every address in full, per route, with an operat
     assert.ok(html.includes(`data-copy="${value}"`), value);
   }
   assert.ok(html.includes(`https://apps.testnet.dusk.network/explorer/accounts/?key=${testnet.service.account}`));
-  // Who runs it, once, with its terms; no route repeats it.
+  // The Terms of use and Privacy policy, and nothing more: no operator, and no contract said to hold or keep DUSK.
   assert.match(
     html,
-    /<p class="about-op"><span>Operated by Dusk<\/span><span class="sep" aria-hidden="true">·<\/span><a href="https:\/\/dusk\.network\/terms-of-use" target="_blank" rel="noreferrer">Terms of use<\/a><span class="sep" aria-hidden="true">·<\/span><a href="https:\/\/dusk\.network\/privacy-policy" target="_blank" rel="noreferrer">Privacy policy<\/a><\/p>/u,
+    /<p class="about-links"><a href="https:\/\/dusk\.network\/terms-of-use" target="_blank" rel="noreferrer">Terms of use<\/a><span class="sep" aria-hidden="true">·<\/span><a href="https:\/\/dusk\.network\/privacy-policy" target="_blank" rel="noreferrer">Privacy policy<\/a><\/p>/u,
   );
-  assert.doesNotMatch(html, /Operated by<\/dt>/u);
+  assert.doesNotMatch(html, /Operated by|Keeps the|no function to send|holds the DUSK/u);
+  assert.equal(groups[1].rows.find((row) => row.label === "Migration contract").note, "");
+  assert.equal(groups[2].rows.find((row) => row.label === "Bridge contract on Dusk").note, "Takes deposits.");
   assert.match(html, /<p class="small t2 gnote">Not running on testnet right now\.<\/p>/u);
-  assert.match(html, /Keeps the ERC20 DUSK it takes\. It has no function to send them out\./u);
   assert.ok(!html.includes(TIMES));
 
   // Mainnet: BSC both ways, its account paying out migrations too; Ethereum one way, with its payer.
@@ -479,11 +481,10 @@ test("the Contracts sheet lists every address in full, per route, with an operat
     ["Pays out on Dusk", mainnet.evmNetworks.ethereum.payoutAccount],
   ]);
 
-  // A route another operator runs names it.
+  // No route names who runs it, whatever a deployment sets.
   const operated = profile("mainnet", { VITE_SERVICE_OPERATOR: "Example B.V." });
-  assert.equal(contractGroups(operated).find((group) => group.id === "route-bsc").operator, "Dusk for BNB Smart Chain → Dusk · Example B.V. for Dusk → BNB Smart Chain");
-  assert.equal(contractGroups(operated).find((group) => group.id === "route-ethereum").operator, "Dusk");
-  assert.match(contractsSheet({ badge: "Mainnet", groups: contractGroups(operated) }), /Operated by<\/dt><dd class="v">Dusk for BNB Smart Chain → Dusk · Example B\.V\. for Dusk → BNB Smart Chain<\/dd>/u);
+  assert.ok(contractGroups(operated).every((group) => !("operator" in group)));
+  assert.doesNotMatch(contractsSheet({ badge: "Mainnet", groups: contractGroups(operated) }), /Operated by|Example B\.V\./u);
   assert.deepEqual(contractGroups(mainnet)[0].rows[1], { label: "DuskEVM", muted: true, value: "not on Mainnet yet" });
   assert.match(networkSheet({ badge: "Mainnet", isTestnet: false, networks: contractGroups(mainnet)[0].rows, otherName: "Testnet", otherSite: "" }), /Real DUSK\. Testnet has its own bridge\./u);
 });
@@ -629,19 +630,16 @@ test("a Dusk review's fees and balance check follow the price its request was bu
   assert.equal(risen.feeRows.find((row) => row.key === "fee").value, "up to 0.01 DUSK");
 });
 
-test("the footer says Dusk operates the bridge, and links its terms of use and privacy policy", () => {
-  const dusk = footer({ links: { privacy: mainnet.links.privacy, terms: mainnet.links.terms }, officialSite: "", operator: "Dusk" });
-  assert.match(dusk, /<a href="https:\/\/dusk\.network\/terms-of-use" target="_blank" rel="noreferrer">Terms of use<\/a><a href="https:\/\/dusk\.network\/privacy-policy" target="_blank" rel="noreferrer">Privacy policy<\/a>/u);
-  assert.match(dusk, /<span class="run-by">Operated by Dusk<\/span><\/footer>/u);
-  assert.doesNotMatch(dusk, /How the bridge works|support/iu);
-  // Routes run by different operators are each named.
-  const named = footer({
-    links: {},
+test("the footer links the terms of use and privacy policy, and names no one as running the bridge", () => {
+  // What the footer used to name operators with is passed and ignored.
+  const dusk = footer({
+    links: { privacy: mainnet.links.privacy, terms: mainnet.links.terms },
     officialSite: "",
-    operators: [{ name: "Example B.V.", route: "Dusk to BNB Smart Chain" }, { name: "Dusk", route: "DuskEVM" }],
+    operator: "Dusk",
+    operators: [{ name: "Example B.V.", route: "Dusk to BNB Smart Chain" }],
   });
-  assert.match(named, /<span class="run-by">Operated by Example B\.V\. for Dusk to BNB Smart Chain · Dusk for DuskEVM<\/span>/u);
-  assert.doesNotMatch(footer({ links: {}, officialSite: "" }), /Operated by/u);
+  assert.match(dusk, /<a href="https:\/\/dusk\.network\/terms-of-use" target="_blank" rel="noreferrer">Terms of use<\/a><a href="https:\/\/dusk\.network\/privacy-policy" target="_blank" rel="noreferrer">Privacy policy<\/a><\/nav><\/footer>/u);
+  assert.doesNotMatch(dusk, /Operated by|run-by|Example B\.V\.|How the bridge works|support/iu);
 });
 
 test("the bridge screen and My transfers each have a page heading", () => {

@@ -91,17 +91,7 @@ export function header(vm) {
   </div></header>`;
 }
 
-/**
- * Who runs the bridge: "Operated by Dusk", or by route where the routes have
- * different operators.
- */
-export function operatedBy({ operator = "", operators = [] } = {}) {
-  if (operator) return `Operated by ${html(operator)}`;
-  const each = operators.map(({ name, route }) => `${html(name)} for ${html(route)}`);
-  return each.length ? `Operated by ${each.join(" · ")}` : "";
-}
-
-/** The terms and privacy notice the bridge is offered under, as links. */
+/** The Terms of use and Privacy policy, as links. */
 const termsLinks = (links) =>
   [
     links.terms ? `<a href="${html(links.terms)}" target="_blank" rel="noreferrer">Terms of use</a>` : "",
@@ -116,8 +106,7 @@ export function footer(vm) {
     ...termsLinks(vm.links),
   ].filter(Boolean);
   const site = vm.officialSite ? `<span>Official site: ${html(vm.officialSite.replace(/^https?:\/\//u, "").replace(/\/$/u, ""))}</span>` : "";
-  const runBy = operatedBy(vm);
-  return `<footer class="foot"><nav aria-label="About the bridge">${links.join("")}</nav>${site}${runBy ? `<span class="run-by">${runBy}</span>` : ""}</footer>`;
+  return `<footer class="foot"><nav aria-label="About the bridge">${links.join("")}</nav>${site}</footer>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -472,17 +461,15 @@ export function contractsSheet(vm) {
             : `<div class="kv"><dt class="k">${html(row.label)}</dt><dd class="v ${row.muted ? "t2" : "mono"}">${html(row.value)}</dd></div>`,
         )
         .join("");
-      const operator = group.operator ? `<div class="kv"><dt class="k">Operated by</dt><dd class="v">${html(group.operator)}</dd></div>` : "";
       const docs = group.docs ? `<a class="lnk" href="${html(group.docs)}" target="_blank" rel="noreferrer">Guide ${icon("ext")}<span class="sr-only"> (opens in a new tab)</span></a>` : "";
       const note = group.note ? `<p class="small t2 gnote">${html(group.note)}</p>` : "";
-      return `<section class="cgroup"><h3 class="gt">${html(group.title)}${docs}</h3>${note}<div class="group ${group.id === "networks" ? "kvs" : "crows"}">${rows}${operator}</div></section>`;
+      return `<section class="cgroup"><h3 class="gt">${html(group.title)}${docs}</h3>${note}<div class="group ${group.id === "networks" ? "kvs" : "crows"}">${rows}</div></section>`;
     })
     .join("");
-  // Who runs it and on what terms, what the page reads from, then the
+  // The Terms of use and Privacy policy, what the page reads from, then the
   // contracts and accounts of each route.
-  const runBy = operatedBy(vm);
   const terms = termsLinks(vm.links ?? {});
-  const about = runBy || terms.length ? `<p class="about-op">${[runBy ? `<span>${runBy}</span>` : "", ...terms].filter(Boolean).join('<span class="sep" aria-hidden="true">·</span>')}</p>` : "";
+  const about = terms.length ? `<p class="about-links">${terms.join('<span class="sep" aria-hidden="true">·</span>')}</p>` : "";
   const servers = vm.servers ? `<section class="cgroup"><h3 class="gt">Servers</h3><p class="card about-servers">${html(vm.servers)}</p></section>` : "";
   return `<div class="sheet-head"><div><h2 id="sheet-title">About this page · ${html(vm.badge)}</h2><p class="sub">Check these against your wallet before you confirm.</p></div><button type="button" class="icon-btn round" data-action="close-sheet" aria-label="Close">${icon("close")}</button></div><div class="sheet-body">${about}${servers}${groups}</div>`;
 }

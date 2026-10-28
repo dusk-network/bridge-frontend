@@ -187,7 +187,8 @@ export function loadConfig() {
       : null;
 
   const multicallId = contractId("VITE_DUSK_MULTICALL_CONTRACT_ID", net.contracts.multicall ?? "");
-  const { operator } = net;
+  // The Terms of use and Privacy policy the network's file links, as on the explorer.
+  const { privacyUrl, termsUrl } = net.operator;
 
   return Object.freeze({
     // Shown only when set: nothing here is guessed.
@@ -199,8 +200,8 @@ export function loadConfig() {
         migration: url("VITE_DOCS_MIGRATION_URL"),
         service: url("VITE_DOCS_SERVICE_URL"),
       }),
-      // The network's operator's, as on the explorer; a deployment can name its own.
-      privacy: url("VITE_PRIVACY_URL", operator.privacyUrl),
+      // A deployment can link its own.
+      privacy: url("VITE_PRIVACY_URL", privacyUrl),
       sites: Object.freeze({
         mainnet: url("VITE_MAINNET_BRIDGE_URL"),
         testnet: url("VITE_TESTNET_BRIDGE_URL"),
@@ -208,13 +209,7 @@ export function loadConfig() {
       status: url("VITE_STATUS_URL"),
       support: url("VITE_SUPPORT_URL"),
       supportLabel: value("VITE_SUPPORT_LABEL", "support"),
-      terms: url("VITE_TERMS_URL", operator.termsUrl),
-    }),
-    // The network's operator runs every route, unless a deployment names another for one.
-    operators: Object.freeze({
-      duskEvm: value("VITE_DUSKEVM_OPERATOR", operator.name),
-      migration: value("VITE_MIGRATION_OPERATOR", operator.name),
-      service: value("VITE_SERVICE_OPERATOR", operator.name),
+      terms: url("VITE_TERMS_URL", termsUrl),
     }),
     dusk,
     duskEvm: duskEvmConfig(net),
