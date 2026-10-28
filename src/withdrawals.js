@@ -3,8 +3,9 @@
 // 25 Oct 2026): rejected-proof naming and per-operation gas. Reads come from
 // the deployment's own Dusk node, batched through Multicall for Dusk: the
 // Portal, the dispute game factory, and each game's hub for when it was
-// created and resolved. The claim date comes from those (`claim-date.js`).
-// The wallet only signs and sends.
+// created and resolved. The claim date comes from those, worked out as every
+// Dusk app does (@dusk-network/networks/duskevm). The wallet only signs and
+// sends.
 
 import {
   parseMessagePassedReceipt,
@@ -12,6 +13,16 @@ import {
   serializeOutputRootProofForDuskAbi,
   serializeWithdrawalForDuskAbi,
 } from "@dusk/evm-sdk";
+import {
+  GAME_STATUS,
+  claimFrom,
+  claimReadiness,
+  contractClock,
+  contractNow,
+  isCandidateGame,
+  isEligibleGame,
+  wallTime,
+} from "@dusk-network/networks/duskevm";
 import {
   bytesToHex,
   decodeFunctionData,
@@ -24,7 +35,6 @@ import {
   toRlp,
 } from "viem";
 
-import { GAME_STATUS, claimFrom, contractClock, contractNow, wallTime } from "./claim-date.js";
 import { DUSKEVM_PREDEPLOYS } from "./config.js";
 import { MAX_BATCH } from "./contract-reader.js";
 import { withdrawalRecipientAccount } from "./dusk-recipient.js";
@@ -449,18 +459,17 @@ export function createWithdrawals(deps) {
     const address = hexToArray(proxy, 20);
     return [hub.call.createdAtForGame(address), hub.call.resolvedAtForGame(address), hub.call.statusForGame(address), maxClock()];
   };
-  const asGame = ([createdAt, resolvedAt, status, maxClock]) => ({
+  const asGame = ([createdAt, resolvedAt, status, maxClockDuration]) => ({
     createdAt: BigInt(createdAt),
-    maxClock: BigInt(maxClock),
+    maxClockDuration: BigInt(maxClockDuration),
     resolvedAt: BigInt(resolvedAt),
     status: Number(status),
   });
 
-  /** The Portal's delays and the game's clock limit, as `claimFrom` takes them. */
-  const claimTiming = (snapshot, game) => ({
-    finalitySeconds: u256ToBigInt(snapshot.disputeGameFinalityDelaySeconds),
-    maturitySeconds: u256ToBigInt(snapshot.proofMaturityDelaySeconds),
-    maxClockSeconds: game.maxClock,
+  /** The Portal's two delays, as `claimFrom` takes them. */
+  const portalDelays = (snapshot) => ({
+    disputeGameFinalityDelaySeconds: u256ToBigInt(snapshot.disputeGameFinalityDelaySeconds),
+    proofMaturityDelaySeconds: u256ToBigInt(snapshot.proofMaturityDelaySeconds),
   });
 
   async function getL2Block(blockNumber) {
@@ -617,7 +626,8 @@ export function createWithdrawals(deps) {
       const old = games.filter((game) => game.createdAt <= cutoff);
       // The newest of them doesn't cover the withdrawal: none does.
       if (old.length && old[0].l2BlockNumber < withdrawalBlockNumber) return null;
-      const covering = old.filter((game) => game.l2BlockNumber >= withdrawalBlockNumber && game.createdAt > updatedAt);
+      const rules = { respectedGameTypeUpdatedAt: updatedAt, withdrawalBlockNumber };
+      const covering = old.filter((game) => isCandidateGame(game, rules));
       // Each one's status, and whether the Portal would take it, as the
       // registry it asks says: a query at a time, newest first, until one
       // passes.
@@ -635,7 +645,7 @@ export function createWithdrawals(deps) {
         );
         for (const [position, game] of batch.entries()) {
           const [status, proper, respected] = checks.slice(position * 3, position * 3 + 3);
-          if (status !== GAME_STATUS.DEFENDER_WINS || proper !== true || respected !== true) continue;
+          if (!isEligibleGame({ ...game, proper, respected, status }, rules)) continue;
           try {
             const proof = await buildWithdrawalOutputProof(withdrawalHash, game.l2BlockNumber);
             if (proof.outputRoot.toLowerCase() === game.rootClaim.toLowerCase())
@@ -758,19 +768,17 @@ export function createWithdrawals(deps) {
       return check.error
         ? { provenAt, stage: "proven_waiting", statusMessage: "The proof is accepted, but its dispute game can't be read right now." }
         : { provenAt, stage: "ready_to_finalize", statusMessage: "" };
-    const claim = claimFrom({ game, network: { clock }, provenAt: provenWithdrawal.timestamp, timing: claimTiming(snapshot, game), tip });
-    const readyAt = claim.at === null ? null : BigInt(Math.floor(claim.at / 1_000));
-    const due = readyAt === null || readyAt <= BigInt(tip.timestamp);
-    if (!check.error && due) return { claimOverdue: false, provenAt, readyAt, readyAtExact: claim.exact, stage: "ready_to_finalize", statusMessage: "" };
-    // Past its date and still refused: the date says nothing more.
-    const passed = Boolean(check.error) && readyAt !== null && due;
+    const claim = claimFrom({ clock, game, portal: portalDelays(snapshot), provenAt: provenWithdrawal.timestamp, tip });
+    const { claimOverdue, ready, readyAt, readyAtExact, refused } = claimReadiness({ claim, portalAccepts: !check.error, tip });
+    if (ready) return { claimOverdue, provenAt, readyAt, readyAtExact, stage: "ready_to_finalize", statusMessage: "" };
     return {
-      claimOverdue: claim.overdue,
+      claimOverdue,
       provenAt,
-      readyAt: passed ? null : readyAt,
-      readyAtExact: passed ? false : claim.exact,
+      readyAt,
+      readyAtExact,
       stage: "proven_waiting",
-      statusMessage: passed
+      // Past its date and still refused: the date says nothing more.
+      statusMessage: refused
         ? "The Portal doesn't take the claim yet."
         : game.status === GAME_STATUS.IN_PROGRESS
           ? "The proof is accepted. Its dispute game is still in progress."
@@ -1032,7 +1040,7 @@ export function createWithdrawals(deps) {
     try {
       const hub = await hubOfGame(proof.disputeGameProxy);
       const game = asGame(await Promise.all(gameReads(hub, proof.disputeGameProxy)));
-      const claim = claimFrom({ game, timing: claimTiming(snapshot, game), tip });
+      const claim = claimFrom({ game, portal: portalDelays(snapshot), tip });
       return claim.at === null ? null : claim;
     } catch {
       return null;

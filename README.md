@@ -145,13 +145,14 @@ receipt link or a looked-up hash opens the same transfer on any device.
   times, the claim date, and the next action. Readiness is read from the
   Portal and dispute-game state, never inferred from elapsed time.
 
-The claim date is when the Portal takes the claim: the later of the proof
-plus the Portal's proof maturity delay, and the proof's dispute game's
-resolution plus its finality delay. Both are read on Dusk, from the Portal and
-the game's hub, in one Multicall for Dusk query (once a check knows the
-proof's game). The times are the contracts' own: testnet's deployed contracts
-count Dusk block height × 10, which the latest block converts to a date; the
-others count block time, a second later for their strict comparisons.
+The claim date is when the Portal takes the claim, worked out as every Dusk
+app does (`@dusk-network/networks/duskevm`): the later of the proof plus the
+Portal's proof maturity delay, and the proof's dispute game's resolution plus
+its finality delay. Both are read on Dusk, from the Portal and the game's hub,
+in one Multicall for Dusk query (once a check knows the proof's game). The
+times are the contracts' own: testnet's deployed contracts count Dusk block
+height × 10, which the latest block converts to a date; the others count block
+time, a second later for their strict comparisons.
 
 - Before the proof: "Claim 7 days after you prove. You can prove about 30
   minutes after sending.", with the chain's figures.
