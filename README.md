@@ -25,11 +25,14 @@ stays on that network's counterparts.
 
 | Mainnet | Testnet |
 | --- | --- |
-| Ethereum → Dusk Mainnet | Sepolia → Dusk Testnet |
-| BNB Smart Chain → Dusk Mainnet | |
-| Dusk Mainnet → BNB Smart Chain | Dusk Testnet → Sepolia |
-| Dusk → DuskEVM, once configured | Dusk Testnet → DuskEVM Testnet |
-| DuskEVM → Dusk, once configured | DuskEVM Testnet → Dusk Testnet |
+| Ethereum → Dusk | Ethereum (Sepolia) → Dusk |
+| BNB Smart Chain → Dusk | |
+| Dusk → BNB Smart Chain | Dusk → Ethereum (Sepolia) |
+| Dusk → DuskEVM, once configured | Dusk → DuskEVM |
+| DuskEVM → Dusk, once configured | DuskEVM → Dusk |
+
+Each chain has one name per network: Dusk and DuskEVM keep theirs next to the
+network badge, and the old-token chains name their testnet in brackets.
 
 The old-token migration contracts and the operated Dusk → BSC account are
 pinned to the values used by the Dusk Web Wallet and documentation. DuskEVM
@@ -47,10 +50,51 @@ The app supports:
 
 Amounts move in whole Lux (9 decimals), the precision Dusk holds.
 
+## Pages
+
+- **Start**: the tasks, each with its time and cost, and on a phone without
+  Dusk Wallet whether it works there.
+- **A task**: the amount, where it goes, and the quote: what you send, the
+  network fee as a maximum and its usual cost, the bridge fee, what you
+  receive and when. One line says what becomes public.
+- **Review**: the checked facts (balances, gas, where the payout goes), then
+  each wallet step with the lines its window will show, in its order and
+  words, raw values decoded next to them and every recipient in full. Cancel
+  and confirm are equal. A Dusk call is built before the review, so the call
+  data's sha256 shown is the one Dusk Wallet prints (older versions show a
+  bridge call only as its bytes), and the reviewed request is what is sent.
+- **Receipt**, at `#/transfer/<hash>`: the steps with times, explorer links
+  and hashes, both transactions in full, the fees paid and the receipt link.
+  It shows no balances: the link is safe to share. A withdrawal waiting for
+  its claim counts down, says when a clock change falls inside the wait, and
+  offers an .ics file made in the browser ("Add to calendar").
+- **My transfers**: the connected accounts' transfers, read from the networks
+  (below), plus any sent or looked up on this device. "Look up a transfer"
+  finds a transfer's route from its hash alone.
+- **Contracts**: every address and contract ID each route uses, in full,
+  with copy buttons and explorer links, and an operator only where the
+  deployment names one.
+
+## My transfers
+
+The list is the same on any device: it comes from the networks, a bounded
+number of requests per visit, and what was read is kept per network and
+account so the next visit asks only for what is new.
+
+- **The Dusk account**: its archive history (`moonlightHistory`, sender and
+  receiver in one request), synced from the newest block down in windows
+  that widen while they hold little, with the extension's resumable coverage.
+  It gives the account's deposits into DuskEVM, its transfers to the bridge
+  account, and migration payouts (incoming transfers whose memo is an EVM
+  transaction hash that called a configured migration contract).
+- **The EVM address**: DuskEVM's L2 bridge event `ETHBridgeInitiated` filtered
+  by sender, 100,000 blocks (the RPC's limit) per request from the newest
+  down. Each withdrawal's Dusk recipient is decoded from its `extraData`.
+
 ## Following a transfer
 
-Recent activity is kept in this browser, but every entry is rebuilt from its
-route and source transaction hash, so "Track a transfer" can add one back.
+Every entry is rebuilt from its route and source transaction hash, so a
+receipt link or a looked-up hash opens the same transfer on any device.
 
 - **Migrations** complete when the Dusk payout appears: Messina pays out the
   migrated amount with the migration's transaction hash as the memo
@@ -80,7 +124,9 @@ batch fails alone; a batch the node refuses is retried one read at a time.
 Dusk contract calls ask the wallet for their own limit at the node's price:
 5M for a deposit, 50M plus the withdrawal's own gas for a proof or claim. A
 claim that would need more than `VITE_GAS_LIMIT_UPPER` isn't sent. Transfers
-use the wallet's public-transfer default.
+to the bridge account carry the wallet's public-transfer limit, 2.5M, at the
+node's price. The quote shows each limit as "up to" and the measured usual
+cost next to it.
 
 ## Configuration
 
@@ -103,6 +149,18 @@ VITE_DUSKEVM_DISPUTE_GAME_FACTORY_CONTRACT_ID=<from the address book>
 
 `.env.example` lists the testnet values in use today.
 
+Some page content appears only when configured, since none of it is guessed:
+the support contact (`VITE_SUPPORT_URL`, `VITE_SUPPORT_LABEL`), the other
+network's bridge site (`VITE_MAINNET_BRIDGE_URL`, `VITE_TESTNET_BRIDGE_URL`),
+Terms, Privacy and Status links, a guide per route (`VITE_DOCS_MIGRATION_URL`,
+`VITE_DOCS_SERVICE_URL`, `VITE_DOCS_DUSKEVM_URL`; the docs' bridge guides
+describe the web wallet's bridge), and the operator named per route in the
+Contracts sheet and the footer (`VITE_MIGRATION_OPERATOR`,
+`VITE_SERVICE_OPERATOR`, `VITE_DUSKEVM_OPERATOR`).
+
+The page uses the system's fonts: the Söhne files the mockups used aren't
+licensed for this repository.
+
 ## Development
 
 ```sh
@@ -124,6 +182,7 @@ production dependencies at high severity.
 - Wallet extensions retain keys and display every signing request.
 - The browser talks directly to configured Dusk and EVM RPC endpoints.
 - Data drivers run only when they match their pinned SHA-256.
-- Local storage contains transaction metadata only.
+- Local storage contains transaction metadata and what was read for My
+  transfers, per network and account; no keys and no balances.
 - Contract IDs, RPC endpoints and this site's origin are deployment trust
   inputs. Review them before publishing.

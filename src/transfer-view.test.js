@@ -1,0 +1,210 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { WITHDRAWAL_GAS_REFUSAL } from "./gas.js";
+import {
+  custodyLine,
+  explorerTxUrl,
+  friendlyWalletError,
+  privacyLine,
+  short,
+  transferSubline,
+  transferView,
+} from "./transfer-view.js";
+import { receiptModel } from "./page-models.js";
+import { receiptPage, transferRow } from "./views.js";
+import { PROVEN_BY_OTHER_ACCOUNT } from "./withdrawal-lifecycle.js";
+
+const cfg = {
+  dusk: { explorerUrl: "https://apps.testnet.dusk.network/explorer/" },
+  duskEvm: { explorerUrl: "https://explorer.testnet.evm.dusk.network" },
+  evmNetworks: { ethereum: { explorerUrl: "https://sepolia.etherscan.io" } },
+  migrationDelaySeconds: 3_600,
+  profile: "testnet",
+  service: { delaySeconds: 3_600, feeLux: 1_000_000_000n, network: "ethereum" },
+};
+const deposit = { from: { id: "dusk", kind: "dusk" }, id: "dusk-to-dusk-evm", mode: "duskevm-deposit", signer: "dusk", to: { id: "dusk-evm", kind: "evm" } };
+const withdrawal = { from: { id: "dusk-evm", kind: "evm" }, id: "dusk-evm-to-dusk", mode: "duskevm-withdrawal", signer: "evm", to: { id: "dusk", kind: "dusk" } };
+const service = { from: { id: "dusk", kind: "dusk" }, id: "dusk-to-ethereum", mode: "service-transfer", signer: "dusk", to: { id: "ethereum", kind: "evm" } };
+const migration = { from: { id: "ethereum", kind: "evm" }, id: "ethereum-to-dusk", mode: "migration", signer: "evm", to: { id: "dusk", kind: "dusk" } };
+const DUSK_HASH = "ce".repeat(32);
+const L2_HASH = `0x${"34".repeat(32)}`;
+const ACCOUNT = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
+const EVM = "0x3E5B8223e638CB414BEF8CF95393460cA1C3a11d";
+const AMS = "Europe/Amsterdam";
+
+test("explorer links point at each network's own explorer", () => {
+  assert.equal(
+    explorerTxUrl(cfg, "dusk", `0x${DUSK_HASH}`),
+    `https://apps.testnet.dusk.network/explorer/transactions/transaction?id=${DUSK_HASH}`,
+  );
+  assert.equal(explorerTxUrl(cfg, "dusk-evm", "34".repeat(32)), `https://explorer.testnet.evm.dusk.network/tx/${L2_HASH}`);
+  assert.equal(explorerTxUrl(cfg, "ethereum", L2_HASH), `https://sepolia.etherscan.io/tx/${L2_HASH}`);
+});
+
+test("short forms are the same everywhere: 0x and 4 + 4, or 6 + 6", () => {
+  assert.equal(short(EVM), "0x3E5B…a11d");
+  assert.equal(short(ACCOUNT), "21n5nc…fMMLNz");
+  assert.equal(short("abc"), "abc");
+});
+
+test("a deposit shows Pending with its steps, then Completed with both transactions", () => {
+  const now = Date.UTC(2026, 9, 26, 9, 40);
+  const sent = { amountLux: "25000000000", destination: EVM, hash: DUSK_HASH, sender: ACCOUNT, sentHere: true, sourceAt: Date.UTC(2026, 9, 26, 9, 31, 12), status: "pending" };
+  const pending = transferView(sent, { cfg, now, route: deposit, timeZone: AMS });
+  assert.equal(pending.title, "Sending 25 DUSK to DuskEVM");
+  assert.equal(pending.statusWord, "Pending");
+  assert.deepEqual(pending.steps.map((step) => [step.title, step.state]), [
+    ["Sent from Dusk", "done"],
+    ["Confirmed on Dusk", "done"],
+    ["Arriving on DuskEVM", "now"],
+  ]);
+  assert.equal(pending.steps[0].href, `https://apps.testnet.dusk.network/explorer/transactions/transaction?id=${DUSK_HASH}`);
+  assert.equal(pending.steps[1].atText, "Mon 26 Oct, 10:31 CET");
+  assert.equal(pending.steps[2].detail, "Usually within a minute, to 0x3E5B…a11d");
+  assert.equal(pending.late, false);
+
+  const done = transferView(
+    { ...sent, destinationAt: Date.UTC(2026, 9, 26, 9, 31, 19), destinationHash: L2_HASH, status: "completed" },
+    { cfg, now, route: deposit, timeZone: AMS, year: true },
+  );
+  assert.equal(done.title, "25 DUSK arrived on DuskEVM");
+  assert.equal(done.statusWord, "Completed");
+  assert.equal(done.steps[2].title, "Arrived on DuskEVM");
+  assert.equal(done.steps[2].href, `https://explorer.testnet.evm.dusk.network/tx/${L2_HASH}`);
+  assert.equal(done.steps[2].atText, "Mon 26 Oct 2026, 10:31 CET");
+  assert.equal(transferView({ hash: DUSK_HASH, note: "Nope.", status: "failed" }, { cfg, route: deposit }).statusWord, "Failed");
+
+  // Late after 15 minutes, with what is usual.
+  const late = transferView(sent, { cfg, now: sent.sourceAt + 16 * 60_000, route: deposit });
+  assert.equal(late.late, true);
+  assert.equal(late.lateText, "Taking longer than usual. Deposits usually arrive within a minute.");
+});
+
+test("a payout to another chain says what arrives after the bridge fee", () => {
+  const view = transferView({ amountLux: "50000000000", hash: DUSK_HASH, sourceAt: Date.UTC(2026, 9, 26, 9, 12), status: "pending" }, { cfg, route: service, timeZone: AMS });
+  assert.equal(view.title, "Sending 50 DUSK to Ethereum (Sepolia)");
+  assert.equal(
+    transferSubline(view, { sourceAt: Date.UTC(2026, 9, 26, 9, 12) }, service, cfg, { timeZone: AMS }),
+    "Sent Mon 26 Oct, 10:12 CET · usually within an hour · you receive 49 DUSK",
+  );
+  const done = transferView({ amountLux: "50000000000", hash: DUSK_HASH, status: "completed" }, { cfg, route: service });
+  assert.equal(done.title, "49 DUSK arrived on Ethereum (Sepolia)");
+  assert.equal(transferView({ amountLux: "1000000000000", hash: L2_HASH, status: "pending" }, { cfg, route: migration }).title, "Moving 1,000 old DUSK to Dusk");
+});
+
+test("a withdrawal shows its three steps, their times and the next action", () => {
+  const sentAt = Date.UTC(2026, 9, 23, 14, 20);
+  const ready = transferView({ amountLux: "200000000000", hash: L2_HASH, sourceAt: sentAt, stage: "ready_to_prove", status: "pending" }, { cfg, route: withdrawal, timeZone: AMS });
+  assert.deepEqual(ready.steps.map(({ title, state }) => [title, state]), [
+    ["Sent on DuskEVM", "done"],
+    ["Prove on Dusk", "turn"],
+    ["Claim on Dusk", "todo"],
+  ]);
+  assert.equal(ready.steps[0].atText, "Fri 23 Oct, 16:20 CEST");
+  assert.equal(ready.steps[1].detail, "Ready now · network fee up to 0.05 DUSK");
+  assert.equal(ready.steps[2].detail, "About 7 days after the proof");
+  assert.deepEqual(ready.action, { blocked: "", failure: "", kind: "prove", label: "Prove on Dusk" });
+  assert.equal(ready.title, "Prove your withdrawal of 200 DUSK");
+  assert.deepEqual(ready.tracker.map(({ label }) => label), ["Sent", "Prove now", "Claim"]);
+
+  // Proven only by another account: the user still proves, and is told why.
+  const other = transferView({ hash: L2_HASH, provenByOther: true, sourceAt: sentAt, stage: "ready_to_prove", status: "pending" }, { cfg, route: withdrawal });
+  assert.equal(other.steps[1].detail, PROVEN_BY_OTHER_ACCOUNT);
+  assert.equal(other.action.kind, "prove");
+  assert.equal(other.tracker[1].label, "Proven by another");
+
+  // Ready to claim with the proof this browser sent: only that account can.
+  const proved = { hash: L2_HASH, id: "w", proofAccount: ACCOUNT, proofSubmitter: `0x${"2c".repeat(20)}`, proveHash: "ab".repeat(32), sourceAt: sentAt, stage: "ready_to_finalize", status: "pending" };
+  const claimWith = (submitter) => transferView(proved, { cfg, route: withdrawal, submitter }).action;
+  assert.equal(claimWith(`0x${"2C".repeat(20)}`).blocked, "");
+  assert.equal(claimWith(null).blocked, "");
+  // A prover counts only once a proof was sent from here, not as a guess.
+  assert.equal(transferView({ ...proved, proveHash: undefined }, { cfg, route: withdrawal, submitter: `0x${"3d".repeat(20)}` }).action.blocked, "");
+  const elsewhere = claimWith(`0x${"3d".repeat(20)}`);
+  assert.equal(elsewhere.blocked, "Switch Dusk Wallet to 21n5nc…fMMLNz, the account that proved it. Only that account can claim.");
+  assert.equal(transferView({ ...proved, proofAccount: undefined }, { cfg, route: withdrawal, submitter: `0x${"3d".repeat(20)}` }).action.blocked, "Switch Dusk Wallet to the account that proved it. Only that account can claim.");
+  // The receipt and the list say so in place of the Claim button.
+  const receipt = receiptPage({ ...receiptModel(proved, { cfg, route: withdrawal, submitter: `0x${"3d".repeat(20)}`, url: "https://bridge.example/#/transfer/x" }), canAct: true });
+  assert.match(receipt, /<p class="note">.*Switch Dusk Wallet to 21n5nc…fMMLNz, the account that proved it/u);
+  assert.doesNotMatch(receipt, /data-action="withdrawal-finalize"/u);
+  assert.match(transferRow({ action: elsewhere, amountText: "200 DUSK", href: "#", id: "w", pair: ["dusk-evm", "dusk"], status: "pending", statusWord: "Pending", subline: "", title: "DuskEVM to Dusk" }), /Switch account to claim/u);
+  assert.match(receiptPage({ ...receiptModel(proved, { cfg, route: withdrawal, submitter: `0x${"2c".repeat(20)}`, url: "https://bridge.example/#/transfer/x" }), canAct: true }), /data-action="withdrawal-finalize"/u);
+});
+
+test("a waiting withdrawal counts down to its claim time, across a clock change", () => {
+  const provenAt = Date.UTC(2026, 9, 24, 12, 38);
+  const now = Date.UTC(2026, 9, 26, 9, 38);
+  const waiting = transferView(
+    {
+      amountLux: "200000000000",
+      destination: ACCOUNT,
+      hash: L2_HASH,
+      proveHash: DUSK_HASH,
+      provenAt,
+      readyAt: (provenAt + 7 * 86_400_000) / 1_000,
+      readyAtExact: true,
+      sourceAt: Date.UTC(2026, 9, 23, 14, 20),
+      stage: "proven_waiting",
+      status: "pending",
+    },
+    { cfg, now, route: withdrawal, timeZone: AMS },
+  );
+  assert.deepEqual(waiting.steps.map(({ state }) => state), ["done", "done", "now"]);
+  assert.equal(waiting.steps[1].atText, "Sat 24 Oct, 14:38 CEST");
+  assert.equal(waiting.steps[1].detail, "By you");
+  assert.equal(waiting.steps[1].hash, DUSK_HASH);
+  assert.deepEqual(
+    { at: waiting.countdown.atText, exact: waiting.countdown.exact, left: waiting.countdown.left, note: waiting.countdown.clockNote },
+    { at: "Sat 31 Oct, 13:38 CET", exact: true, left: "5 days 3 hours", note: "clocks went back on 25 Oct" },
+  );
+  assert.equal(waiting.tracker[2].label, "Claim in 5 days 3 hours");
+  assert.equal(
+    transferSubline(waiting, { readyAt: (provenAt + 7 * 86_400_000) / 1_000, stage: "proven_waiting" }, withdrawal, cfg, { now, timeZone: AMS }),
+    "Claim from Sat 31 Oct, 13:38 CET · 5 days 3 hours left",
+  );
+  assert.equal(waiting.action, null);
+  assert.match(custodyLine(withdrawal, cfg, { destination: ACCOUNT }), /A claim always pays 21n5nc…fMMLNz\.$/u);
+
+  const rejected = transferView({ hash: L2_HASH, proofRejected: true, stage: "proven_waiting", status: "pending" }, { cfg, now, route: withdrawal });
+  assert.equal(rejected.steps[2].detail, "The proof was rejected. Prove again once DuskEVM reports a new output.");
+  assert.equal(rejected.countdown, null);
+
+  const refused = transferView({ actionError: WITHDRAWAL_GAS_REFUSAL, hash: L2_HASH, stage: "ready_to_finalize", status: "pending" }, { cfg, route: withdrawal });
+  assert.equal(refused.action.label, "Claim on Dusk");
+  assert.equal(refused.action.failure, WITHDRAWAL_GAS_REFUSAL);
+  assert.equal(refused.title, "DUSK is ready to claim");
+});
+
+test("what becomes public names the accounts themselves, not a label", () => {
+  assert.equal(
+    privacyLine(deposit, cfg, { dusk: ACCOUNT, evm: EVM }),
+    "Your Dusk account 21n5nc…fMMLNz, 0x3E5B…a11d and the amount are visible on Dusk and DuskEVM, and linked to each other.",
+  );
+  assert.match(privacyLine(migration, cfg, { dusk: ACCOUNT, evm: EVM }), /^0x3E5B…a11d, the amount and the Dusk account 21n5nc…fMMLNz it pays are visible on Ethereum \(Sepolia\)/u);
+  assert.match(custodyLine(migration, cfg), /locked: it has no function to send them out/u);
+});
+
+test("wallet errors say what happened, naming the wallet", () => {
+  assert.equal(friendlyWalletError({ code: 4001 }), "You cancelled in your wallet, so nothing was sent.");
+  // viem wraps an EVM wallet's rejection in its own error.
+  assert.equal(
+    friendlyWalletError({ cause: { code: 4001 }, shortMessage: "User rejected the request." }, "evm"),
+    "You cancelled in your wallet, so nothing was sent.",
+  );
+  assert.match(friendlyWalletError({ code: 4100, message: "Wallet locked" }), /^The Dusk wallet is locked/u);
+  assert.match(friendlyWalletError({ code: 4100 }, "evm"), /^The EVM wallet is locked/u);
+  assert.match(friendlyWalletError({ code: 4900 }, "evm"), /^The EVM wallet disconnected/u);
+});
+
+test("a rejected proof isn't shown as proven, and promises no claim", () => {
+  const at = Date.UTC(2026, 9, 20, 12);
+  // The Portal rejected the proof and a new output is out: prove again.
+  const again = transferView({ hash: L2_HASH, proveAt: at, provenAt: at, sourceAt: at - 3_600_000, stage: "ready_to_prove", status: "pending" }, { cfg, route: withdrawal });
+  assert.deepEqual([again.steps[1].title, again.steps[1].state], ["Prove on Dusk", "turn"]);
+  assert.equal(again.action.kind, "prove");
+  // Rejected, with no new output yet: no claim date, here or in the list.
+  const rejected = { hash: L2_HASH, proofRejected: true, provenAt: at, sourceAt: at - 3_600_000, stage: "proven_waiting", status: "pending" };
+  const view = transferView(rejected, { cfg, now: at + 86_400_000, route: withdrawal });
+  assert.equal(transferSubline(view, rejected, withdrawal, cfg, { now: at + 86_400_000 }), "The proof was rejected. Prove again once DuskEVM reports a new output.");
+});

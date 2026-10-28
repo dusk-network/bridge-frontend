@@ -9,6 +9,8 @@ import { config } from "./config.js";
 
 const listeners = new Set();
 const discoveredProviders = [];
+// EIP-6963 announces each wallet with its name ("MetaMask", "Rabby Wallet").
+const providerNames = new WeakMap();
 let provider = null;
 let account = null;
 let chainId = null;
@@ -17,12 +19,24 @@ let discoveryStarted = false;
 let appKit = null;
 let appKitPromise = null;
 
+/** The connected wallet's own name, when it gives one. */
+export function walletNameOf(candidate) {
+  if (!candidate) return "";
+  const announced = providerNames.get(candidate);
+  if (announced) return announced;
+  if (candidate.isRabby) return "Rabby";
+  if (candidate.isCoinbaseWallet) return "Coinbase Wallet";
+  if (candidate.isMetaMask) return "MetaMask";
+  return "";
+}
+
 const state = () =>
   Object.freeze({
     account,
     chainId,
     installed: Boolean(config.reown.projectId || findProvider()),
     provider,
+    walletName: walletNameOf(provider) || (appKit?.getWalletInfo?.()?.name ?? ""),
   });
 
 const publish = () => {
@@ -46,7 +60,10 @@ function discoverProviders() {
   if (!discoveryStarted && globalThis.addEventListener) {
     discoveryStarted = true;
     globalThis.addEventListener("eip6963:announceProvider", (event) => {
-      rememberProvider(event.detail?.provider);
+      const announced = event.detail?.provider;
+      if (announced && typeof event.detail?.info?.name === "string")
+        providerNames.set(announced, event.detail.info.name.slice(0, 40));
+      rememberProvider(announced);
       publish();
     });
   }

@@ -26,6 +26,7 @@ import {
   toRlp,
 } from "viem";
 
+import { withdrawalRecipientAccount } from "./dusk-recipient.js";
 import { withdrawalGasLimit } from "./gas.js";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -194,12 +195,15 @@ export function withdrawalDetails(withdrawal) {
     if (String(sender).toLowerCase() !== L2_STANDARD_BRIDGE_ADDRESS.toLowerCase()) return null;
     const inner = decodeFunctionData({ abi: RELAY_ABI, data: message });
     if (inner.functionName !== "finalizeBridgeETH") return null;
-    const [, , amountWei, extraData] = inner.args;
+    const [from, , amountWei, extraData] = inner.args;
     if (amountWei !== relayValue) return null;
     if (withdrawal.value !== undefined && BigInt(withdrawal.value) !== amountWei) return null;
     const recipientKey = hexToBytes(extraData).slice(3);
     return Object.freeze({
       amountWei,
+      // Who sent it on DuskEVM, and the Dusk account it pays.
+      from,
+      recipient: withdrawalRecipientAccount(extraData),
       // The Dusk account's EVM-shaped address, as the Portal sees its proofs.
       recipientSubmitter: recipientKey.length
         ? `0x${keccak256(recipientKey).slice(-40)}`
@@ -300,6 +304,20 @@ function onDuskClock(time, latestTimestamp) {
   const distance =
     time > latestTimestamp ? time - latestTimestamp : latestTimestamp - time;
   return distance < DUSK_CLOCK_WINDOW_SECONDS;
+}
+
+/** Why this account's proof isn't sent again. */
+function provenAlreadyMessage(status) {
+  switch (status.stage) {
+    case "finalized":
+      return "This withdrawal is already claimed.";
+    case "ready_to_finalize":
+      return "This account already proved this withdrawal. You can claim it now.";
+    default:
+      return status.proofRejected
+        ? status.statusMessage
+        : "This account already proved this withdrawal. Claim it once the waiting period ends.";
+  }
 }
 
 function finalizationNotReadyMessage(status) {
@@ -807,48 +825,70 @@ export function createWithdrawals(deps) {
     return { limit: limit.toString(), price: (await deps.gasPrice()).toString() };
   }
 
-  async function proveWithdrawal(txHash) {
+  /** The proof call for a withdrawal, ready to review and send, with the withdrawal it carries. */
+  async function prepareProve(txHash) {
     const event = parseWithdrawalReceipt(await fetchL2Receipt(txHash));
     const submitter = deps.proofSubmitter();
     const snapshot = await readSnapshot(event.withdrawalHash, submitter);
+    // A proof this account already has, or one a claimed withdrawal no longer
+    // needs, isn't sent again: it would cost its fee for nothing. Only a
+    // proof the Portal rejected is replaced.
+    const proven = snapshot.provenWithdrawal;
+    const status = snapshot.finalized
+      ? { stage: "finalized" }
+      : proven.timestamp !== 0n && proven.disputeGameProxy !== ZERO_ADDRESS
+        ? await proofStatus(event, snapshot, submitter)
+        : null;
+    if (status && status.stage !== "ready_to_prove") throw new Error(provenAlreadyMessage(status));
     const proof = await findWithdrawalProof({
       snapshot,
       withdrawalBlockNumber: event.blockNumber,
       withdrawalHash: event.withdrawalHash,
     });
-    const gas = await withdrawalGas();
-    const response = await deps.sendPortalCall(
-      "proveWithdrawalTransaction",
-      [
+    return {
+      args: [
         withdrawalToDriverInput(event.withdrawal),
         bigIntToU256(proof.disputeGameIndex),
         outputRootProofToDriverInput(proof.outputRootProof),
         proof.withdrawalProof.map((node) => hexToArray(node, undefined)),
       ],
-      gas,
-    );
-    return response.hash;
+      fnName: "proveWithdrawalTransaction",
+      gas: await withdrawalGas(),
+      withdrawal: event.withdrawal,
+    };
   }
 
-  async function finalizeWithdrawal(txHash) {
+  /** The claim call for a withdrawal that is ready, to review and send, with the withdrawal it carries. */
+  async function prepareFinalize(txHash) {
     const status = await loadWithdrawalStatus(txHash, {
       proofSubmitter: deps.proofSubmitter(),
     });
     if (status.stage !== "ready_to_finalize")
       throw new Error(finalizationNotReadyMessage(status));
-    const gas = await withdrawalGas(status.withdrawal.gasLimit);
-    const response = await deps.sendPortalCall(
-      "finalizeWithdrawalTransaction",
-      withdrawalToDriverInput(status.withdrawal),
-      gas,
-    );
-    return response.hash;
+    return {
+      args: withdrawalToDriverInput(status.withdrawal),
+      fnName: "finalizeWithdrawalTransaction",
+      gas: await withdrawalGas(status.withdrawal.gasLimit),
+      withdrawal: status.withdrawal,
+    };
+  }
+
+  async function proveWithdrawal(txHash) {
+    const { args, fnName, gas } = await prepareProve(txHash);
+    return (await deps.sendPortalCall(fnName, args, gas)).hash;
+  }
+
+  async function finalizeWithdrawal(txHash) {
+    const { args, fnName, gas } = await prepareFinalize(txHash);
+    return (await deps.sendPortalCall(fnName, args, gas)).hash;
   }
 
   return Object.freeze({
     finalizeWithdrawal,
     loadWithdrawalStatus,
     loadWithdrawalWaitingPeriod,
+    prepareFinalize,
+    prepareProve,
     proveWithdrawal,
     withdrawalGas,
   });

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { toRlp } from "viem";
 
-import { activityView } from "./activity-view.js";
+import { transferView } from "./transfer-view.js";
 import { PROVED_BY_ANOTHER_ACCOUNT, createWithdrawals, hashOutputRootProof } from "./withdrawals.js";
 import { PROVEN_BY_OTHER_ACCOUNT } from "./withdrawal-lifecycle.js";
 
@@ -141,12 +141,13 @@ function setup({ own = null, others = [], games = {} }) {
 }
 
 const route = {
-  from: { id: "dusk-evm", kind: "evm", label: "DuskEVM Testnet" },
+  from: { id: "dusk-evm", kind: "evm", label: "DuskEVM" },
   id: "dusk-evm-to-dusk",
   mode: "duskevm-withdrawal",
-  to: { id: "dusk", kind: "dusk", label: "Dusk Testnet" },
+  to: { id: "dusk", kind: "dusk", label: "Dusk" },
 };
-const cfg = { dusk: { explorerUrl: "https://x" }, duskEvm: { explorerUrl: "https://y" }, evmNetworks: {} };
+const cfg = { dusk: { explorerUrl: "https://x" }, duskEvm: { explorerUrl: "https://y" }, evmNetworks: {}, profile: "testnet" };
+const proveStep = (view) => view.steps.find((step) => step.key === "prove");
 
 test("a withdrawal proven only by another account still needs the user's own proof", async () => {
   const { sent, withdrawals } = setup({
@@ -162,8 +163,9 @@ test("a withdrawal proven only by another account still needs the user's own pro
   // can't be claimed with.
   assert.match(PROVEN_BY_OTHER_ACCOUNT, /^Someone else sent a proof for this withdrawal\. Your DUSK isn't affected;/u);
   assert.match(PROVED_BY_ANOTHER_ACCOUNT, /^Another account proved this withdrawal\. Your DUSK isn't affected,/u);
-  const view = activityView({ hash: TX, provenByOther: true, stage: "ready_to_prove", status: "pending" }, { cfg, route });
-  assert.equal(view.note, PROVEN_BY_OTHER_ACCOUNT);
+  const view = transferView({ hash: TX, provenByOther: true, stage: "ready_to_prove", status: "pending" }, { cfg, route });
+  assert.equal(proveStep(view).detail, PROVEN_BY_OTHER_ACCOUNT);
+  assert.equal(proveStep(view).state, "turn");
   assert.equal(view.action.kind, "prove");
 
   // Claiming as this account isn't possible on another account's proof:
@@ -198,8 +200,8 @@ test("another account's rejected or blacklisted proof leaves a plain ready to pr
 
     assert.equal(status.stage, "ready_to_prove");
     assert.equal(status.provenByOther, false);
-    const view = activityView({ hash: TX, provenByOther: false, stage: "ready_to_prove", status: "pending" }, { cfg, route });
-    assert.equal(view.note, "");
+    const view = transferView({ hash: TX, provenByOther: false, stage: "ready_to_prove", status: "pending" }, { cfg, route });
+    assert.notEqual(proveStep(view).detail, PROVEN_BY_OTHER_ACCOUNT);
   }
 });
 

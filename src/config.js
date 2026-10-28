@@ -62,12 +62,16 @@ const ETH = Object.freeze({ decimals: 18, name: "Ether", symbol: "ETH" });
 const nativeCurrency = (id, chainId) =>
   id === "bsc" ? { decimals: 18, name: "BNB", symbol: chainId === 97 ? "tBNB" : "BNB" } : ETH;
 
+const url = (name) => {
+  const raw = value(name);
+  return /^https?:\/\//iu.test(raw) ? raw : "";
+};
+
 const PROFILES = Object.freeze({
   mainnet: {
     dusk: {
       chainId: "dusk:1",
       explorerUrl: "https://apps.dusk.network/explorer",
-      label: "Dusk Mainnet",
       nodeUrl: "https://nodes.dusk.network",
     },
     evm: {
@@ -100,7 +104,6 @@ const PROFILES = Object.freeze({
     dusk: {
       chainId: "dusk:2",
       explorerUrl: "https://apps.testnet.dusk.network/explorer",
-      label: "Dusk Testnet",
       nodeUrl: "https://testnet.nodes.dusk.network",
     },
     evm: {
@@ -179,6 +182,7 @@ function duskEvmConfig(defaults) {
       "VITE_DUSKEVM_L2_STANDARD_BRIDGE_ADDRESS",
       "0x4200000000000000000000000000000000000010",
     ),
+    // The chain name wallets list; the page itself says "DuskEVM".
     name: value("VITE_DUSKEVM_NAME", defaults.name ?? "DuskEVM"),
     optimismPortalContractId: contractId(
       "VITE_DUSKEVM_OPTIMISM_PORTAL_CONTRACT_ID",
@@ -219,7 +223,6 @@ export function loadConfig() {
   const dusk = Object.freeze({
     chainId: value("VITE_DUSK_CHAIN_ID", defaults.dusk.chainId),
     explorerUrl: value("VITE_DUSK_EXPLORER_URL", defaults.dusk.explorerUrl),
-    label: value("VITE_DUSK_LABEL", defaults.dusk.label),
     nodeUrl: value("VITE_DUSK_NODE_URL", defaults.dusk.nodeUrl),
   });
 
@@ -248,7 +251,31 @@ export function loadConfig() {
   const multicallId = contractId("VITE_DUSK_MULTICALL_CONTRACT_ID", DUSK_MULTICALL_CONTRACT_ID);
 
   return Object.freeze({
-    defaultDuskRecipient: value("VITE_DEFAULT_DUSK_RECIPIENT"),
+    // Shown only when set: nothing here is guessed.
+    links: Object.freeze({
+      // Guides written for this page only: the docs' bridge guides describe
+      // the web wallet's own bridge.
+      docs: Object.freeze({
+        duskEvm: url("VITE_DOCS_DUSKEVM_URL"),
+        migration: url("VITE_DOCS_MIGRATION_URL"),
+        service: url("VITE_DOCS_SERVICE_URL"),
+      }),
+      privacy: url("VITE_PRIVACY_URL"),
+      sites: Object.freeze({
+        mainnet: url("VITE_MAINNET_BRIDGE_URL"),
+        testnet: url("VITE_TESTNET_BRIDGE_URL"),
+      }),
+      status: url("VITE_STATUS_URL"),
+      support: url("VITE_SUPPORT_URL"),
+      supportLabel: value("VITE_SUPPORT_LABEL", "support"),
+      terms: url("VITE_TERMS_URL"),
+    }),
+    migrationDelaySeconds: positiveInteger("VITE_MIGRATION_DELAY_SECONDS", 3_600),
+    operators: Object.freeze({
+      duskEvm: value("VITE_DUSKEVM_OPERATOR"),
+      migration: value("VITE_MIGRATION_OPERATOR"),
+      service: value("VITE_SERVICE_OPERATOR"),
+    }),
     dusk,
     duskEvm: duskEvmConfig(defaults.duskEvm),
     evmNetworks,

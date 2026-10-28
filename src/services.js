@@ -3,8 +3,12 @@ import { createPublicClient, http } from "viem";
 import { config } from "./config.js";
 import { createContractReader, contractFacade } from "./contract-reader.js";
 import { createDriverLoader, driverJson } from "./data-driver.js";
+import { createDiscovery } from "./discovery.js";
+import { createDuskNames } from "./dusk-names.js";
 import { createDuskNode } from "./dusk-node.js";
 import { getDuskWallet, sendDuskContractCall } from "./dusk-wallet.js";
+import { createEvmReads } from "./evm-reads.js";
+import { resolveTransfer } from "./resolve.js";
 import { createTracking, duskAccountEvmAddress } from "./tracking.js";
 import { createWithdrawals, parseGameSearchDepth } from "./withdrawals.js";
 
@@ -25,6 +29,36 @@ export function createRpc(urls, fetch = globalThis.fetch) {
         code: body.error.code,
       });
     return body.result;
+  };
+}
+
+/**
+ * JSON-RPC batches: several calls in one request, each answered in order.
+ * A call the node answered with an error, or not at all, is undefined, so
+ * "not found" (null) and "couldn't ask" stay apart. At most 20 calls go in
+ * one request.
+ */
+export function createRpcBatch(urls, fetch = globalThis.fetch) {
+  return async function rpcBatch(network, calls) {
+    const url = urls[network];
+    if (!url) throw new Error(`No RPC is configured for ${network}.`);
+    const results = [];
+    for (let start = 0; start < calls.length; start += 20) {
+      const chunk = calls.slice(start, start + 20);
+      const response = await fetch(url, {
+        body: JSON.stringify(chunk.map(({ method, params = [] }, index) => ({ id: index, jsonrpc: "2.0", method, params }))),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      if (!response.ok) throw new Error(`RPC batch failed with HTTP ${response.status}`);
+      const body = await response.json();
+      const byId = new Map((Array.isArray(body) ? body : [body]).map((item) => [item?.id, item]));
+      for (let index = 0; index < chunk.length; index += 1) {
+        const item = byId.get(index);
+        results.push(item && !item.error ? item.result : undefined);
+      }
+    }
+    return results;
   };
 }
 
@@ -56,10 +90,25 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
     ),
   };
   const rpc = createRpc(urls);
+  const rpcBatch = createRpcBatch(urls);
 
   let withdrawals = null;
+  let portalRequest = null;
   if (cfg.duskEvm.enabled) {
     const portal = contract(cfg.duskEvm.optimismPortalContractId, cfg.duskEvm.optimismPortalDriver);
+    /** A proof or claim as Dusk Wallet receives it, with its arguments encoded. */
+    portalRequest = async ({ args, fnName, gas }) => {
+      const driver = await portal.driver();
+      return {
+        contractId: portal.id,
+        display: {
+          label: fnName === "proveWithdrawalTransaction" ? "Prove a DuskEVM withdrawal" : "Claim a DuskEVM withdrawal",
+        },
+        fnArgs: driver.encodeInputFn(fnName, driverJson(args)),
+        fnName,
+        gas,
+      };
+    };
     const dgf = contract(cfg.duskEvm.disputeGameFactoryContractId, cfg.duskEvm.disputeGameFactoryDriver);
     withdrawals = createWithdrawals({
       dgf: contractFacade(reader, dgf),
@@ -77,21 +126,7 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
           return null;
         }
       },
-      sendPortalCall: async (fnName, args, gas) => {
-        const driver = await portal.driver();
-        return sendDuskContractCall({
-          contractId: portal.id,
-          display: {
-            label:
-              fnName === "proveWithdrawalTransaction"
-                ? "Prove a DuskEVM withdrawal"
-                : "Claim a DuskEVM withdrawal",
-          },
-          fnArgs: driver.encodeInputFn(fnName, driverJson(args)),
-          fnName,
-          gas,
-        });
-      },
+      sendPortalCall: async (fnName, args, gas) => sendDuskContractCall(await portalRequest({ args, fnName, gas })),
     });
   }
 
@@ -108,5 +143,21 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
     withdrawals,
   });
 
-  return Object.freeze({ node, reader, rpc, tracking, withdrawals });
+  const discovery = createDiscovery({ cfg, node, rpc, rpcBatch });
+  const evmReads = createEvmReads({ cfg, rpc, rpcBatch });
+
+  return Object.freeze({
+    discovery,
+    evmReads,
+    // The connected account's verified .dusk name, where Dusk Wallet sends none.
+    names: createDuskNames({ chainId: cfg.dusk.chainId, nodeUrl: cfg.dusk.nodeUrl }),
+    node,
+    portalRequest,
+    reader,
+    resolve: (hash) => resolveTransfer(hash, { cfg, node, rpc }),
+    rpc,
+    rpcBatch,
+    tracking,
+    withdrawals,
+  });
 }

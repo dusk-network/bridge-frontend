@@ -72,10 +72,11 @@ async function withDuskSession(operation, reviewed) {
   }
 }
 
-/** A public transfer; the wallet applies its own public-transfer gas. */
-export function buildTransferRequest({ amountLux, memo, to }) {
+/** A public transfer; without `gas`, the wallet applies its own. */
+export function buildTransferRequest({ amountLux, gas, memo, to }) {
   return {
     amount: BigInt(amountLux).toString(),
+    ...(gas ? { gas: { limit: String(gas.limit), price: String(gas.price) } } : {}),
     memo: String(memo ?? ""),
     privacy: "public",
     to,

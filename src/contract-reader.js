@@ -6,8 +6,10 @@ const MAX_BATCH = 64;
 
 /**
  * Contract reads made in the same tick go to the node as one Multicall for
- * Dusk `aggregate` query; a lone read is sent directly. Each inner call is
- * encoded and decoded with its own contract's data driver.
+ * Dusk `aggregate` query, a lone read too: a call that panics then comes back
+ * as an answer with its message, where a direct query is an HTTP 500 the
+ * browser logs as an error. Each inner call is encoded and decoded with its
+ * own contract's data driver.
  */
 export function createContractReader({ node, multicall = null }) {
   let queue = [];
@@ -40,7 +42,7 @@ export function createContractReader({ node, multicall = null }) {
   }
 
   async function settle(batch) {
-    if (!multicall?.id || batch.length === 1) {
+    if (!multicall?.id) {
       await Promise.all(
         batch.map((item) => direct(item).then(item.resolve, item.reject)),
       );

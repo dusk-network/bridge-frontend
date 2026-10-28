@@ -79,10 +79,10 @@ test("the testnet profile stays on Dusk testnet, Sepolia and DuskEVM testnet", (
   assert.deepEqual(
     routes.map((route) => `${route.from.label} → ${route.to.label}`),
     [
-      "Sepolia → Dusk Testnet",
-      "Dusk Testnet → Sepolia",
-      "Dusk Testnet → DuskEVM Testnet",
-      "DuskEVM Testnet → Dusk Testnet",
+      "Ethereum (Sepolia) → Dusk",
+      "Dusk → Ethereum (Sepolia)",
+      "Dusk → DuskEVM",
+      "DuskEVM → Dusk",
     ],
   );
 });
@@ -151,4 +151,34 @@ test("the gas bound, fee and multicall come from config", () => {
     withConfig({ VITE_BRIDGE_PROFILE: "testnet" }).cfg.multicall.contractId,
     "93de287b7d349d678a0038fe7772e8960e1a84a1b5da2d0b1f62f532616ce1d4",
   );
+});
+
+test("links, operators and contacts appear only when configured", () => {
+  const bare = withConfig({ VITE_BRIDGE_PROFILE: "mainnet" }).cfg;
+  assert.equal(bare.links.support, "");
+  assert.equal(bare.links.sites.testnet, "");
+  assert.deepEqual({ ...bare.operators }, { duskEvm: "", migration: "", service: "" });
+  // The docs' bridge guides describe the web wallet's bridge: none is linked unless set.
+  assert.deepEqual({ ...bare.links.docs }, { duskEvm: "", migration: "", service: "" });
+
+  const set = withConfig({
+    VITE_BRIDGE_PROFILE: "mainnet",
+    VITE_SERVICE_OPERATOR: "Example Operator B.V.",
+    VITE_SUPPORT_URL: "javascript:alert(1)",
+    VITE_TESTNET_BRIDGE_URL: "https://bridge.example.org",
+  }).cfg;
+  assert.equal(set.operators.service, "Example Operator B.V.");
+  assert.equal(withConfig({ VITE_BRIDGE_PROFILE: "mainnet", VITE_DOCS_MIGRATION_URL: "https://guide.example.org" }).cfg.links.docs.migration, "https://guide.example.org");
+  assert.equal(set.links.sites.testnet, "https://bridge.example.org");
+  // Only http(s) links are shown.
+  assert.equal(set.links.support, "");
+});
+
+test("no deployment prefills where a migration pays out", async () => {
+  // A payout account set for everyone would sit in front of every user; the
+  // default is the connected Dusk account, or the one typed.
+  const cfg = withConfig({ VITE_BRIDGE_PROFILE: "mainnet", VITE_DEFAULT_DUSK_RECIPIENT: "21n5nc" }).cfg;
+  assert.equal("defaultDuskRecipient" in cfg, false);
+  const { readFile } = await import("node:fs/promises");
+  assert.doesNotMatch(await readFile(new URL("../.env.example", import.meta.url), "utf8"), /VITE_DEFAULT_DUSK_RECIPIENT/u);
 });

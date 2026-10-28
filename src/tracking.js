@@ -15,6 +15,7 @@ import {
 
 import { decodeBase58 } from "./base58.js";
 import { decodeDepositArgs, DEPOSIT_FN_NAME } from "./dusk-deposit.js";
+import { networkName } from "./names.js";
 import { normalizeEvmAddress } from "./validation.js";
 import { NOT_A_DUSK_WITHDRAWAL } from "./withdrawals.js";
 
@@ -39,6 +40,16 @@ const MIGRATE_ABI = parseAbi([
 // Older DuskEVM deployments count block height × 10 s for proof times,
 // decades off Dusk's clock; such a time isn't shown.
 const DUSK_CLOCK_WINDOW_MS = 365 * 86_400_000;
+
+/** What a Dusk transaction paid: the gas it spent at its price, in Lux. */
+export function duskFeePaid(tx) {
+  try {
+    if (tx?.gasSpent === null || tx?.gasSpent === undefined) return undefined;
+    return (BigInt(tx.gasSpent) * BigInt(tx.json?.fee?.gas_price ?? 1)).toString();
+  } catch {
+    return undefined;
+  }
+}
 
 const pending = (note, extra = {}) => ({ ...extra, note, status: "pending" });
 const failed = (note, extra = {}) => ({ ...extra, note, status: "failed" });
@@ -139,6 +150,7 @@ const isMethodMissing = (error) =>
 export function createTracking(deps) {
   const { config, node, rpc } = deps;
   const now = deps.now ?? Date.now;
+  const name = (id) => networkName(config, id);
   let adapterLookup = "unknown";
   // A transfer's equal transfers, once the archive lists the transfer itself:
   // earlier ones don't change after that.
@@ -299,7 +311,6 @@ export function createTracking(deps) {
 
   async function refreshMigration(entry, route, others) {
     const network = route.from.id;
-    const chain = config.evmNetworks[network];
     const patch = {};
     if (!entry.destination || !entry.amountLux) {
       const tx = await rpc(network, "eth_getTransactionByHash", [entry.hash]);
@@ -308,16 +319,19 @@ export function createTracking(deps) {
           const { args } = decodeFunctionData({ abi: MIGRATE_ABI, data: tx.input });
           patch.amountLux = (args[0] / WEI_PER_LUX).toString();
           patch.destination = args[1];
+          patch.sender = tx.from;
         } catch {
           return failed("This transaction isn't a migration.");
         }
       }
     }
     const receipt = await rpc(network, "eth_getTransactionReceipt", [entry.hash]);
-    if (!receipt) return pending(`Waiting for ${chain.chainName}.`, patch);
+    if (!receipt) return pending(`Waiting for ${name(network)}.`, patch);
     patch.sourceAt = entry.sourceAt ?? (await blockTime(network, receipt.blockNumber));
+    if (receipt.gasUsed && receipt.effectiveGasPrice)
+      patch.feeWei = (BigInt(receipt.gasUsed) * BigInt(receipt.effectiveGasPrice)).toString();
     if (receipt.status === "0x0")
-      return failed(`The migration failed on ${chain.chainName}.`, patch);
+      return failed(`The migration failed on ${name(network)}.`, patch);
     const recipient = patch.destination ?? entry.destination;
     const amountLux = patch.amountLux ?? entry.amountLux;
     // Messina pays out the migrated amount with the migration's transaction
@@ -339,7 +353,7 @@ export function createTracking(deps) {
         ),
     );
     if (!payout)
-      return pending(`Paid out on ${config.dusk.label}, usually within an hour.`, patch);
+      return pending(`Paid out on ${name("dusk")}, usually within an hour.`, patch);
     const paid = await node.transaction(payout.origin);
     return completed({
       ...patch,
@@ -353,12 +367,18 @@ export function createTracking(deps) {
     const network = route.to.id;
     const chain = config.evmNetworks[network];
     const tx = await node.transaction(entry.hash);
-    if (!tx) return pending(`Waiting for ${config.dusk.label}.`);
+    if (!tx) return pending(`Waiting for ${name("dusk")}.`);
     const sourceAt = tx.blockTimestamp ? Number(tx.blockTimestamp) * 1_000 : null;
     if (tx.error) return failed("The transfer failed on Dusk.", { sourceAt });
     const value = BigInt(tx.json?.value ?? 0);
     const recipient = memoText(tx.memo);
-    const patch = { amountLux: value.toString(), destination: recipient, sourceAt };
+    const patch = {
+      amountLux: value.toString(),
+      destination: recipient,
+      feeLux: duskFeePaid(tx),
+      sender: tx.json?.sender,
+      sourceAt,
+    };
     if (tx.json?.receiver !== service.account)
       return failed("This transfer didn't go to the bridge account.", patch);
     if (value <= service.feeLux)
@@ -408,7 +428,7 @@ export function createTracking(deps) {
       return pending(
         late
           ? "Taking longer than usual."
-          : `Paid out on ${chain.chainName}, usually within an hour.`,
+          : `Paid out on ${name(network)}, usually within an hour.`,
         { ...patch, scanBasis, scanFrom: next.toString() },
       );
     }
@@ -506,7 +526,7 @@ export function createTracking(deps) {
 
   async function refreshDeposit(entry, others) {
     const tx = await node.transaction(entry.hash);
-    if (!tx) return pending(`Waiting for ${config.dusk.label}.`);
+    if (!tx) return pending(`Waiting for ${name("dusk")}.`);
     const sourceAt = tx.blockTimestamp ? Number(tx.blockTimestamp) * 1_000 : null;
     const call = tx.callData;
     if (
@@ -518,6 +538,7 @@ export function createTracking(deps) {
     const patch = {
       amountLux: args.amountLux.toString(),
       destination: args.to,
+      feeLux: duskFeePaid(tx),
       sender: tx.json?.sender,
       sourceAt,
     };
@@ -528,7 +549,7 @@ export function createTracking(deps) {
     if (viaAdapter?.hash)
       return completed({ ...patch, destinationAt: viaAdapter.at, destinationHash: viaAdapter.hash });
     if (viaAdapter === null)
-      return pending(`Waiting for ${config.duskEvm.name}. Usually within a few minutes.`, patch);
+      return pending(`Waiting for ${name("dusk-evm")}. Usually within a few minutes.`, patch);
     const credit = await eventCredit(
       entry,
       { amountLux: args.amountLux, height: tx.blockHeight, recipient: args.to, sender: tx.json?.sender, sentAt: sourceAt },
@@ -540,7 +561,7 @@ export function createTracking(deps) {
         patch,
       );
     if (!credit.hash)
-      return pending(`Waiting for ${config.duskEvm.name}. Usually within a few minutes.`, {
+      return pending(`Waiting for ${name("dusk-evm")}. Usually within a few minutes.`, {
         ...patch,
         scanBasis: credit.scanBasis,
         scanFrom: credit.next.toString(),
@@ -562,8 +583,8 @@ export function createTracking(deps) {
     }
     const at = tx?.blockTimestamp ? Number(tx.blockTimestamp) * 1_000 : null;
     const sent = entry.pendingAction === "prove"
-      ? { proveAt: at, proveHash: entry.pendingHash }
-      : { claimAt: at, claimHash: entry.pendingHash };
+      ? { proveAt: at, proveFeeLux: duskFeePaid(tx), proveHash: entry.pendingHash }
+      : { claimAt: at, claimFeeLux: duskFeePaid(tx), claimHash: entry.pendingHash };
     if (done) return { patch: { ...sent, pendingAction: null, pendingHash: null }, status };
     if (tx?.error)
       return {
@@ -600,7 +621,7 @@ export function createTracking(deps) {
       });
     } catch (error) {
       if (error?.message === "Withdrawal transaction was not found.")
-        return pending(`Waiting for ${config.duskEvm.name}.`, { stage: "submitted" });
+        return pending(`Waiting for ${name("dusk-evm")}.`, { stage: "submitted" });
       if (error?.message === "Withdrawal transaction failed on DuskEVM.")
         return failed("The withdrawal failed on DuskEVM. Your DUSK is still there.", {
           stage: "failed",
@@ -617,6 +638,10 @@ export function createTracking(deps) {
       amountLux: current.details?.amountWei
         ? (current.details.amountWei / WEI_PER_LUX).toString()
         : entry.amountLux,
+      destination: current.details?.recipient ?? entry.destination,
+      sender: current.details?.from ?? entry.sender,
+      // Claiming adds this to its gas limit: the quote's maximum uses it.
+      withdrawalGas: current.withdrawal?.gasLimit === undefined ? entry.withdrawalGas : String(current.withdrawal.gasLimit),
       proofRejected: current.proofRejected ?? false,
       provenByOther: current.provenByOther ?? false,
       provenAt:
