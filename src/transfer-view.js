@@ -343,7 +343,9 @@ function trackerWhen(item, entry, timeZone) {
   if (item.state === "done") return item.at ? day(item.at) : "";
   if (item.key !== "claim" || entry.stage !== "proven_waiting" || entry.proofRejected) return "";
   const timing = claimTiming(entry);
-  return timing.at ? `from ${timing.exact ? "" : "about "}${day(timing.at)}` : "";
+  if (!timing.at) return "";
+  // Late, the date is only the soonest.
+  return timing.overdue ? `from ${day(timing.at)} at the soonest` : `from ${timing.exact ? "" : "about "}${day(timing.at)}`;
 }
 
 function trackerLabel(item, entry, now) {
@@ -355,7 +357,8 @@ function trackerLabel(item, entry, now) {
   }
   if (item.state === "done") return "Claimed";
   if (item.state === "turn") return "Claim now";
-  if (entry.stage === "proven_waiting" && entry.readyAt) {
+  // Late, the date moves on each check: no countdown to it.
+  if (entry.stage === "proven_waiting" && entry.readyAt && !entry.claimOverdue) {
     const left = Number(entry.readyAt) * 1_000 - now;
     return left > 0 ? `Claim in ${durationWords(left / 1_000)}` : "Claim";
   }

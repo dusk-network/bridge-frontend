@@ -89,6 +89,18 @@ test("the testnet profile stays on Dusk testnet, Sepolia and DuskEVM testnet", (
   );
 });
 
+test("DuskEVM testnet's anchor state registry is known, and a deployment can set or leave it out", () => {
+  const registry = (extra = {}) => withConfig({ VITE_BRIDGE_PROFILE: "testnet", ...TESTNET_DUSKEVM, ...extra }).cfg.duskEvm;
+  assert.equal(registry().anchorStateRegistryContractId, "1735498c11978854e390894502850916f4ba619e3f4b88c10ef758c5026619cc");
+  assert.equal(registry({ VITE_DUSKEVM_ANCHOR_STATE_REGISTRY_CONTRACT_ID: `0x${"44".repeat(32)}` }).anchorStateRegistryContractId, "44".repeat(32));
+  // Optional: DuskEVM runs without it.
+  assert.deepEqual(
+    [registry({ VITE_DUSKEVM_ANCHOR_STATE_REGISTRY_CONTRACT_ID: "none" }).anchorStateRegistryContractId, registry({ VITE_DUSKEVM_ANCHOR_STATE_REGISTRY_CONTRACT_ID: "none" }).enabled],
+    ["", true],
+  );
+  assert.equal(withConfig({ VITE_BRIDGE_PROFILE: "mainnet" }).cfg.duskEvm.anchorStateRegistryContractId, "");
+});
+
 test("the Ethereum and BSC routes follow the configured networks", () => {
   const none = withConfig({
     VITE_BRIDGE_PROFILE: "mainnet",

@@ -372,6 +372,7 @@ test("the Contracts sheet lists every address in full, per route, with an operat
     `0x${testnet.duskEvm.l1StandardBridgeContractId}`,
     `0x${testnet.duskEvm.optimismPortalContractId}`,
     `0x${testnet.duskEvm.disputeGameFactoryContractId}`,
+    `0x${testnet.duskEvm.anchorStateRegistryContractId}`,
     "0x4200000000000000000000000000000000000010",
     "0x4200000000000000000000000000000000000016",
     `0x${testnet.multicall.contractId}`,

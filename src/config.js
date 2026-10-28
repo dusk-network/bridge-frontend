@@ -169,6 +169,10 @@ const PROFILES = Object.freeze({
     // routes since 11 Feb 2026. `VITE_PAUSED_ROUTES=none` runs them again.
     paused: ["ethereum-to-dusk", "dusk-to-ethereum"],
     duskEvm: {
+      // DuskEVM testnet's anchor state registry (its address book,
+      // testnet/l1-addresses.json): the Portal asks it whether a game is
+      // proper and respected.
+      anchorStateRegistryContractId: "1735498c11978854e390894502850916f4ba619e3f4b88c10ef758c5026619cc",
       chainId: 745,
       // Until DuskEVM's own figure is read: its 40 deposits of 1 Sep to
       // 27 Oct 2026 took 25 to 39 s from their Dusk block (Dusk's own time)
@@ -217,7 +221,11 @@ function evmNetwork(id, defaults = {}) {
 }
 
 function duskEvmConfig(defaults) {
+  // Optional: without it, a proof goes against the newest game covering the
+  // withdrawal, not one that has already resolved. `none` leaves it out.
+  const registry = contractId("VITE_DUSKEVM_ANCHOR_STATE_REGISTRY_CONTRACT_ID", defaults.anchorStateRegistryContractId);
   const duskEvm = {
+    anchorStateRegistryContractId: isContractId(registry) ? registry : "",
     bridgeGameSearchDepth: positiveInteger("VITE_DUSKEVM_BRIDGE_GAME_SEARCH_DEPTH", 64),
     chainId: positiveInteger("VITE_DUSKEVM_CHAIN_ID", defaults.chainId ?? 0),
     depositSeconds: seconds("VITE_DUSKEVM_DEPOSIT_SECONDS", defaults.depositSeconds),

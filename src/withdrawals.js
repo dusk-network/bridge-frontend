@@ -27,6 +27,7 @@ import {
 } from "viem";
 
 import { GAME_STATUS, claimFrom, contractClock, contractNow, wallTime } from "./claim-date.js";
+import { MAX_BATCH } from "./contract-reader.js";
 import { withdrawalRecipientAccount } from "./dusk-recipient.js";
 import { withdrawalGasLimit } from "./gas.js";
 
@@ -53,6 +54,8 @@ const OUTPUT_SAMPLE = 6n;
 /** Games searched for one already resolved, a page at a time, at most three pages. */
 const RESOLVED_PAGE = 32n;
 const RESOLVED_PAGES = 3;
+/** Three reads a game: as many games as one Multicall for Dusk query holds. */
+const CHECKED_PER_QUERY = Math.floor(MAX_BATCH / 3);
 /** How far past a game's earliest resolution its resolver is usually done: 205 blocks at p90. */
 const RESOLVER_LAG_SECONDS = 3_600n;
 
@@ -78,6 +81,19 @@ export const GAME_HUB_DRIVER = Object.freeze({
     return Number(bytes[0]);
   },
   encodeInputFn: (fnName, json) => (fnName === "maxClockDuration" ? new Uint8Array(0) : Uint8Array.from(JSON.parse(json))),
+});
+
+/**
+ * The anchor state registry the Portal asks whether a game is proper and
+ * respected, read raw like the hubs: a game's 20-byte address in, yes or no
+ * out.
+ */
+export const GAME_REGISTRY_DRIVER = Object.freeze({
+  decodeOutputFn(fnName, bytes) {
+    if (bytes?.length !== 1 || bytes[0] > 1) throw new RangeError(`Expected ${fnName}'s yes or no.`);
+    return bytes[0] === 1;
+  },
+  encodeInputFn: (_fnName, json) => Uint8Array.from(JSON.parse(json)),
 });
 
 export function parseGameSearchDepth(value) {
@@ -354,6 +370,7 @@ function finalizationNotReadyMessage(status) {
  * @param {{ call: Record<string, Function> }} deps.portal OptimismPortal reads
  * @param {{ call: Record<string, Function> }} deps.dgf DisputeGameFactory reads
  * @param {(contractId: string) => { call: Record<string, Function> }} deps.hub a dispute game hub's reads, by its contract ID
+ * @param {{ call: Record<string, Function> } | null} [deps.registry] the anchor state registry's reads, where it's known
  * @param {(method: string, params: unknown[]) => Promise<any>} deps.l2Rpc DuskEVM JSON-RPC
  * @param {() => Promise<{ height: bigint, timestamp: bigint }>} deps.latestBlock Dusk's latest block
  * @param {() => string | null} deps.proofSubmitter the connected account's Portal address
@@ -364,7 +381,7 @@ function finalizationNotReadyMessage(status) {
  */
 export function createWithdrawals(deps) {
   const searchDepth = deps.gameSearchDepth ?? 64n;
-  const { portal, dgf } = deps;
+  const { portal, dgf, registry = null } = deps;
 
   async function fetchL2Receipt(txHash) {
     return deps.l2Rpc("eth_getTransactionReceipt", [txHash]);
@@ -568,12 +585,16 @@ export function createWithdrawals(deps) {
 
   /**
    * A game covering the withdrawal that has already resolved for its
-   * proposal: a proof against it can be claimed exactly its maturity delay
+   * proposal, and that the Portal would take a proof against: one the
+   * registry calls proper (registered, not blacklisted, not retired) and
+   * respected. A proof against it can be claimed exactly its maturity delay
    * later. Games come at a steady pace, so the search starts about where
    * games are old enough to have resolved, and goes back a few pages. Null
-   * when none covers the withdrawal yet, or none of them has resolved.
+   * when none covers the withdrawal yet, none of them has resolved and
+   * passes, or the registry isn't known.
    */
   async function findResolvedProof({ gameCount, gameType, tip, withdrawalBlockNumber, withdrawalHash }) {
+    if (!registry) return null;
     const page = async (from) =>
       (await dgf.call.findLatestGames([gameType, bigIntToU256(from), bigIntToU256(RESOLVED_PAGE)])).map(searchedGame);
     const [known, newest] = await Promise.all([gameHub(gameType), page(gameCount - 1n)]);
@@ -590,23 +611,33 @@ export function createWithdrawals(deps) {
       const old = games.filter((game) => game.createdAt <= cutoff);
       // The newest of them doesn't cover the withdrawal: none does.
       if (old.length && old[0].l2BlockNumber < withdrawalBlockNumber) return null;
-      // Each one's status, and whether the Portal blacklisted it: one query.
-      const checks = await Promise.all(
-        old.flatMap((game) => [
-          known.hub.call.statusForGame(hexToArray(game.proxy, 20)).then(Number, () => null),
-          portal.call.disputeGameBlacklist(hexToArray(game.proxy, 20)).then(Boolean, () => null),
-        ]),
-      );
-      for (const [position, game] of old.entries()) {
-        const [status, blacklisted] = checks.slice(position * 2, position * 2 + 2);
-        if (status !== GAME_STATUS.DEFENDER_WINS || blacklisted !== false || game.l2BlockNumber < withdrawalBlockNumber) continue;
-        try {
-          const proof = await buildWithdrawalOutputProof(withdrawalHash, game.l2BlockNumber);
-          if (proof.outputRoot.toLowerCase() === game.rootClaim.toLowerCase())
-            return { ...proof, disputeGameIndex: game.index, disputeGameProxy: game.proxy, l2BlockNumber: game.l2BlockNumber };
-        } catch {
-          // DuskEVM no longer gives that block's proof: an older game won't either.
-          return null;
+      const covering = old.filter((game) => game.l2BlockNumber >= withdrawalBlockNumber);
+      // Each one's status, and whether the Portal would take it, as the
+      // registry it asks says: a query at a time, newest first, until one
+      // passes.
+      for (let start = 0; start < covering.length; start += CHECKED_PER_QUERY) {
+        const batch = covering.slice(start, start + CHECKED_PER_QUERY);
+        const checks = await Promise.all(
+          batch.flatMap((game) => {
+            const address = hexToArray(game.proxy, 20);
+            return [
+              known.hub.call.statusForGame(address).then(Number, () => null),
+              registry.call.isGameProper(address).then(Boolean, () => null),
+              registry.call.isGameRespected(address).then(Boolean, () => null),
+            ];
+          }),
+        );
+        for (const [position, game] of batch.entries()) {
+          const [status, proper, respected] = checks.slice(position * 3, position * 3 + 3);
+          if (status !== GAME_STATUS.DEFENDER_WINS || proper !== true || respected !== true) continue;
+          try {
+            const proof = await buildWithdrawalOutputProof(withdrawalHash, game.l2BlockNumber);
+            if (proof.outputRoot.toLowerCase() === game.rootClaim.toLowerCase())
+              return { ...proof, disputeGameIndex: game.index, disputeGameProxy: game.proxy, l2BlockNumber: game.l2BlockNumber };
+          } catch {
+            // DuskEVM no longer gives that block's proof: an older game won't either.
+            return null;
+          }
         }
       }
       if (!games.length || games.at(-1).index === 0n) break;
@@ -691,7 +722,9 @@ export function createWithdrawals(deps) {
    * the Portal's own check; the latest block gives the contracts' time. A
    * proof time on the height clock is converted, not dropped. A game that
    * can't be read now leaves the date known so far (no `readyAt`); a date
-   * that has passed while the Portal still refuses the claim isn't shown.
+   * that has passed while the Portal still refuses the claim isn't shown. A
+   * claim is ready from its date only: a Portal whose check takes just the
+   * proof and its game says yes before it, and refuses the claim itself.
    */
   async function provenWithdrawalGameStatus(event, snapshot, provenWithdrawal, proofSubmitter) {
     const proxy = provenWithdrawal.disputeGameProxy;
@@ -721,9 +754,10 @@ export function createWithdrawals(deps) {
         : { provenAt, stage: "ready_to_finalize", statusMessage: "" };
     const claim = claimFrom({ game, network: { clock }, provenAt: provenWithdrawal.timestamp, timing: claimTiming(snapshot, game), tip });
     const readyAt = claim.at === null ? null : BigInt(Math.floor(claim.at / 1_000));
-    if (!check.error) return { claimOverdue: false, provenAt, readyAt, readyAtExact: claim.exact, stage: "ready_to_finalize", statusMessage: "" };
+    const due = readyAt === null || readyAt <= BigInt(tip.timestamp);
+    if (!check.error && due) return { claimOverdue: false, provenAt, readyAt, readyAtExact: claim.exact, stage: "ready_to_finalize", statusMessage: "" };
     // Past its date and still refused: the date says nothing more.
-    const passed = readyAt !== null && readyAt <= BigInt(tip.timestamp);
+    const passed = Boolean(check.error) && readyAt !== null && due;
     return {
       claimOverdue: claim.overdue,
       provenAt,

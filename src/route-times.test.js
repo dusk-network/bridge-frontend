@@ -78,6 +78,17 @@ test("what the chain says replaces the configured time, and a withdrawal has non
   assert.equal(routeTime(withdrawal, testnet, { chain: { withdrawal: { ...CHAIN.withdrawal, finalitySeconds: 1_209_600 } } }).wait, 1_209_600);
 });
 
+test("a withdrawal keeps its waits before there are two games to time outputs by", () => {
+  // Just after launch, or a switch of game type: no output cadence yet.
+  const withdrawal = byId(testnet, "dusk-evm-to-dusk");
+  const early = { chain: { withdrawal: { ...CHAIN.withdrawal, outputSeconds: null } } };
+  assert.deepEqual(routeTime(withdrawal, testnet, early), { maturity: 604_800, seconds: 604_800, source: "chain", wait: 604_800 });
+  assert.equal(text(testnet, "dusk-evm-to-dusk", early), "~7 days");
+  // The quote still says the days to wait, and leaves out only when proving can start.
+  const when = buildQuote(withdrawal, "10", { balance: null, cfg: testnet, gasPrice: 1n, timing: early }).rows.find((row) => row.key === "when");
+  assert.deepEqual([when.value, when.detail], ["Claim 7 days after you prove.", ""]);
+});
+
 test("this browser's own recent transfers measure a route the chain says nothing about", () => {
   const now = Date.UTC(2026, 9, 27, 12);
   const route = byId(mainnet, "dusk-to-bsc");

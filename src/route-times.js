@@ -41,12 +41,14 @@ const configured = (value) => (value ? { seconds: value, source: "config" } : nu
  * A withdrawal also gives its parts: `prove`, about when it can be proved
  * (one output after it's sent), `report`, when it's late to be provable (two
  * outputs), `maturity`, the Portal's wait from a proof to its claim, and
- * `wait`, the longer of that and the game's finality.
+ * `wait`, the longer of that and the game's finality. Before there are two
+ * games to tell how often outputs come (just after launch, or a switch of
+ * game type), it has the waits without `prove` and `report`.
  *
  * @param {object} route
  * @param {object} cfg the deployment config
  * @param {object} [timing]
- * @param {{ deposit?: { lagSeconds: number }, withdrawal?: { finalitySeconds: number, maturitySeconds: number, outputSeconds: number } } | null} [timing.chain]
+ * @param {{ deposit?: { lagSeconds: number }, withdrawal?: { finalitySeconds: number, maturitySeconds: number, outputSeconds: number | null } } | null} [timing.chain]
  *   what the chains said, as `createChainTimes` keeps it
  * @param {object[]} [timing.transfers] the transfers this browser knows
  * @param {number} [timing.now]
@@ -55,12 +57,13 @@ const configured = (value) => (value ? { seconds: value, source: "config" } : nu
 export function routeTime(route, cfg, { chain = null, now = Date.now(), transfers = [] } = {}) {
   if (route.mode === "duskevm-withdrawal") {
     const read = chain?.withdrawal;
-    if (!read?.outputSeconds || !read.maturitySeconds) return null;
+    if (!read?.maturitySeconds) return null;
+    const wait = Math.max(read.maturitySeconds, read.finalitySeconds ?? 0);
+    if (!read.outputSeconds) return { maturity: read.maturitySeconds, seconds: wait, source: "chain", wait };
     // An output covers DuskEVM up to about when its batch reached Dusk, and
     // the batcher posts at least as often as outputs come: a withdrawal
     // waits at most about two outputs to be reported.
     const report = 2 * read.outputSeconds;
-    const wait = Math.max(read.maturitySeconds, read.finalitySeconds ?? 0);
     return { maturity: read.maturitySeconds, prove: read.outputSeconds, report, seconds: report + wait, source: "chain", wait };
   }
   if (route.mode === "duskevm-deposit" && chain?.deposit)

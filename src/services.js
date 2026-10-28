@@ -11,7 +11,7 @@ import { getDuskWallet, sendDuskContractCall } from "./dusk-wallet.js";
 import { createEvmReads } from "./evm-reads.js";
 import { resolveTransfer } from "./resolve.js";
 import { createTracking, duskAccountEvmAddress } from "./tracking.js";
-import { GAME_HUB_DRIVER, createWithdrawals, parseGameSearchDepth } from "./withdrawals.js";
+import { GAME_HUB_DRIVER, GAME_REGISTRY_DRIVER, createWithdrawals, parseGameSearchDepth } from "./withdrawals.js";
 
 /** JSON-RPC over fetch, for the EVM chains and the DuskEVM adapter. */
 export function createRpc(urls, fetch = globalThis.fetch) {
@@ -130,6 +130,10 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
           return null;
         }
       },
+      // Whether the Portal would take a proof against a game, read raw in the same batches.
+      registry: cfg.duskEvm.anchorStateRegistryContractId
+        ? contractFacade(reader, { driver: async () => GAME_REGISTRY_DRIVER, id: cfg.duskEvm.anchorStateRegistryContractId })
+        : null,
       sendPortalCall: async (fnName, args, gas) => sendDuskContractCall(await portalRequest({ args, fnName, gas })),
     });
   }

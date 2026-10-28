@@ -1392,7 +1392,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const route = entry && routeOf(entry.routeId);
     if (!entry || !route) return;
     const view = transferView(entry, { cfg, route, timing: timing() });
-    if (!view.countdown) return;
+    // A late claim's date is only the soonest: it's not put in a calendar.
+    if (!view.countdown || view.countdown.overdue) return;
     const ics = claimReminder({
       amount: view.amountText || "DUSK",
       claimAt: view.countdown.at,

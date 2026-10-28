@@ -288,3 +288,18 @@ test("after the proof, the claim date reads as the chain gives it: exact, about,
   assert.equal(model.view.steps[2].detail, "");
   assert.match(receiptPage({ ...model, canAct: true }), /<div class="k">You can claim in<\/div><div class="v">5 days<\/div><div class="s">Claim from about Mon 2 Nov 2026, 04:20 CET<\/div>/u);
 });
+
+test("a late claim says only the wait and its soonest date: no countdown, nothing for a calendar", () => {
+  // Its game unresolved an hour past its clock: the date moves on with each check.
+  const provenAt = Date.UTC(2026, 9, 26, 3, 20, 39);
+  const now = Date.UTC(2026, 9, 28, 3, 10);
+  const entry = { amountLux: "1000000000", claimOverdue: true, hash: L2_HASH, provenAt, readyAt: Date.UTC(2026, 10, 2, 3, 20, 39) / 1_000, sourceAt: provenAt - 86_400_000, stage: "proven_waiting", status: "pending" };
+  const model = receiptModel(entry, { cfg, now, route: withdrawal, timeZone: AMS, timing, url: "https://bridge.example/#/transfer/x" });
+  const html = receiptPage({ ...model, canAct: true });
+  assert.match(html, /<div class="group count"><p>Waiting for DuskEVM to settle this proof\. Claim from Mon 2 Nov 2026, 04:20 CET at the soonest\.<\/p><\/div>/u);
+  assert.doesNotMatch(html, /You can claim in/u);
+  assert.doesNotMatch(html, /data-action="calendar"/u);
+  // In My transfers, its claim step counts down to nothing either.
+  const view = transferView(entry, { cfg, now, route: withdrawal, timeZone: AMS, timing });
+  assert.deepEqual([view.tracker[2].label, view.tracker[2].when], ["Claim", "from 2 Nov at the soonest"]);
+});

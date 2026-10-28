@@ -119,6 +119,9 @@ export function contractGroups(cfg) {
         contractRow(cfg, "Bridge contract on Dusk", cfg.duskEvm.l1StandardBridgeContractId, "Takes deposits, and holds the DUSK that is on DuskEVM."),
         contractRow(cfg, "Withdrawal portal on Dusk", cfg.duskEvm.optimismPortalContractId, "Checks proofs and releases claims."),
         contractRow(cfg, "Dispute game factory on Dusk", cfg.duskEvm.disputeGameFactoryContractId),
+        ...(cfg.duskEvm.anchorStateRegistryContractId
+          ? [contractRow(cfg, "Anchor state registry on Dusk", cfg.duskEvm.anchorStateRegistryContractId, "Says which dispute games the portal takes.")]
+          : []),
         row(cfg, "dusk-evm", "Bridge on DuskEVM", cfg.duskEvm.l2StandardBridgeAddress),
         row(cfg, "dusk-evm", "Message passer on DuskEVM", L2_TO_L1_MESSAGE_PASSER),
       ],

@@ -6,6 +6,7 @@ import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, encodeFunct
 
 import { WITHDRAWAL_GAS_REFUSAL, gasAtNodePrice, withdrawalGasLimit } from "./gas.js";
 import {
+  GAME_REGISTRY_DRIVER,
   NOT_A_DUSK_WITHDRAWAL,
   createWithdrawals,
   hashOutputRootProof,
@@ -53,6 +54,8 @@ const PROVEN_AT = 46_877_440n;
 const GAME_CREATED = 46_876_050n;
 /** A contract time on the wall clock, in seconds, counted from the tip. */
 const wall = (seconds, tip = TIP) => tip.timestamp + seconds - 10n * tip.height;
+/** A proof long matured, against a game resolved and final long ago: claimable now. */
+const CLAIMABLE = Object.freeze({ createdAt: 45_250_000n, gameStatus: 2, provenAt: 45_252_320n, resolvedAt: 45_555_010n });
 const HUB_ID = "d5".repeat(32);
 
 function u256(value) {
@@ -88,6 +91,7 @@ function setup({
   gasUpper = 1_000_000_000n,
   submitterCount = 1,
   l2 = null,
+  registry = { call: { isGameProper: fn(async () => true), isGameRespected: fn(async () => true) } },
 } = {}) {
   const portal = {
     call: {
@@ -139,12 +143,13 @@ function setup({
     latestBlock: async () => tip,
     portal,
     proofSubmitter: () => SUBMITTER,
+    registry,
     sendPortalCall: async (fnName, args, gas) => {
       sent.push({ args, fnName, gas });
       return { hash: "finalize-hash" };
     },
   });
-  return { dgf, hub, hubIds, portal, sent, withdrawals };
+  return { dgf, hub, hubIds, portal, registry, sent, withdrawals };
 }
 
 const invalidGame = async () => {
@@ -326,14 +331,14 @@ test("a finalized withdrawal isn't claimed again", async () => {
 });
 
 test("a claim that needs more gas than the bound isn't sent", async () => {
-  const { sent, withdrawals } = setup({ gasUpper: 50_000_000n });
+  const { sent, withdrawals } = setup({ ...CLAIMABLE, gasUpper: 50_000_000n });
 
   await assert.rejects(withdrawals.finalizeWithdrawal(TX), { message: WITHDRAWAL_GAS_REFUSAL });
   assert.equal(sent.length, 0);
 });
 
 test("a claim sends the SDK-serialized withdrawal with its own gas on top", async () => {
-  const { sent, withdrawals } = setup();
+  const { sent, withdrawals } = setup(CLAIMABLE);
 
   assert.equal(await withdrawals.finalizeWithdrawal(TX), "finalize-hash");
   const [{ args, fnName, gas }] = sent;
@@ -496,7 +501,7 @@ test("a proof this account already has isn't prepared again", async () => {
     throw new Error("OptimismPortal2: invalid dispute game");
   };
   const cases = [
-    [{}, "This account already proved this withdrawal. You can claim it now."],
+    [CLAIMABLE, "This account already proved this withdrawal. You can claim it now."],
     [{ preflight: rejected }, "This account already proved this withdrawal. Claim it once the waiting period ends."],
     [{ gameStatus: 1, preflight: rejected }, "The existing proof was rejected, but no replacement output proposal is available yet."],
     [{ finalized: true }, "This withdrawal is already claimed."],
@@ -549,9 +554,11 @@ const rootOf = (l2) =>
 /**
  * A not yet proven withdrawal at L2 block 13,668, with games whose L2 blocks
  * start at `firstL2`. Game i sits at factory index i × `stride`: other game
- * types take the indexes between. `blacklisted` lists games the Portal refuses.
+ * types take the indexes between. The registry the Portal asks calls the
+ * `blacklisted` and `retired` games improper, and the `unrespected` ones not
+ * respected; without the registry (`registry: false`), none is checked.
  */
-function provingSetup({ blacklisted = [], firstL2, stride = 1 }) {
+function provingSetup({ blacklisted = [], firstL2, registry = true, retired = [], stride = 1, unrespected = [] }) {
   const l2Of = (i) => firstL2 + i * 100;
   const searched = (i) => ({
     extra_data: u256(l2Of(i)),
@@ -569,7 +576,18 @@ function provingSetup({ blacklisted = [], firstL2, stride = 1 }) {
     proofsAt.push(Number(BigInt(params[2])));
     return { storageHash: STORAGE, storageProof: [{ proof: [toRlp(["0x20", "0x01"])] }] };
   };
-  const proved = setup({ l2, provenAt: 0n });
+  const proved = setup({
+    l2,
+    provenAt: 0n,
+    registry: registry
+      ? {
+          call: {
+            isGameProper: fn(async (address) => ![...blacklisted, ...retired].includes(indexOf(address))),
+            isGameRespected: fn(async (address) => !unrespected.includes(indexOf(address))),
+          },
+        }
+      : null,
+  });
   const { dgf, hub, portal, withdrawals } = proved;
   dgf.call.gameCount = fn(async () => u256((GAMES - 1) * stride + 1));
   // The games of the Portal's type at or below a factory index, newest first.
@@ -736,4 +754,45 @@ test("a date that has passed while the Portal still refuses the claim isn't show
   const status = await withdrawals.loadWithdrawalStatus(TX);
   assert.deepEqual([status.stage, status.readyAt, status.readyAtExact], ["proven_waiting", null, false]);
   assert.equal(status.statusMessage, "The Portal doesn't take the claim yet.");
+});
+
+test("a resolved game the Portal wouldn't take is passed over, and with none it takes, the proof goes against the newest", async () => {
+  // The registry the Portal asks answers yes or no, in one byte.
+  assert.equal(GAME_REGISTRY_DRIVER.decodeOutputFn("isGameProper", Uint8Array.of(1)), true);
+  assert.equal(GAME_REGISTRY_DRIVER.decodeOutputFn("isGameRespected", Uint8Array.of(0)), false);
+  assert.throws(() => GAME_REGISTRY_DRIVER.decodeOutputFn("isGameProper", Uint8Array.of()), RangeError);
+  assert.deepEqual(GAME_REGISTRY_DRIVER.encodeInputFn("isGameProper", JSON.stringify(Array(20).fill(0x6f))), Uint8Array.from(Array(20).fill(0x6f)));
+  // Game 29 retired after it resolved, and 28 of a type no longer respected: the next resolved one.
+  const passedOver = provingSetup({ firstL2: 13_000, retired: [29], unrespected: [28] });
+  const prepared = await passedOver.withdrawals.prepareProve(TX);
+  assert.deepEqual(prepared.args[1], u256(27));
+  assert.equal(prepared.claim.exact, true);
+  const asked = (spy) => spy.calls.map(([address]) => address[18] * 256 + address[19]);
+  assert.ok(asked(passedOver.registry.call.isGameProper).includes(29));
+  assert.ok(asked(passedOver.registry.call.isGameRespected).includes(28));
+  // Three reads a candidate, as many as one Multicall query holds (64): 21 of the 23 covering games.
+  assert.deepEqual(asked(passedOver.registry.call.isGameProper), Array.from({ length: 21 }, (_, k) => 29 - k));
+  // Every resolved covering game retired: the newest covering game, as before.
+  const allRetired = provingSetup({ firstL2: 13_000, retired: Array.from({ length: 30 }, (_, i) => i) });
+  const newest = await allRetired.withdrawals.prepareProve(TX);
+  assert.deepEqual(newest.args[1], u256(GAMES - 1));
+  assert.equal(newest.claim.exact, false);
+  // Without the registry, nothing says the Portal would take a resolved game: the newest too.
+  const unknown = await provingSetup({ firstL2: 13_000, registry: false }).withdrawals.prepareProve(TX);
+  assert.deepEqual(unknown.args[1], u256(GAMES - 1));
+});
+
+test("a claim isn't ready before its date, even when the Portal's check says yes", async () => {
+  // A Portal whose check takes just the proof and its game says yes on
+  // 28 Oct, for a proof that matures, and a game final, on 2 Nov.
+  const early = setup({ gameStatus: 2, resolvedAt: 47_180_060n });
+  const status = await early.withdrawals.loadWithdrawalStatus(TX);
+  assert.deepEqual([status.stage, status.readyAtExact, status.claimOverdue], ["proven_waiting", true, false]);
+  assert.equal(new Date(Number(status.readyAt) * 1_000).toISOString(), "2026-11-02T03:24:19.000Z");
+  // Claim stays off: nothing is prepared or sent.
+  await assert.rejects(early.withdrawals.prepareFinalize(TX), /Wait for its dispute game to become final/u);
+  await assert.rejects(early.withdrawals.finalizeWithdrawal(TX));
+  assert.deepEqual(early.sent, []);
+  // From its date, the Portal's yes counts.
+  assert.equal((await setup(CLAIMABLE).withdrawals.loadWithdrawalStatus(TX)).stage, "ready_to_finalize");
 });

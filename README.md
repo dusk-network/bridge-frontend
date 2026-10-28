@@ -152,10 +152,14 @@ others count block time, a second later for their strict comparisons.
 - After it: "Claim from Mon 2 Nov, 04:20 CET" once the game has resolved, and
   "Claim from about …", the earliest it can be, before that. A game left
   unresolved more than an hour past its clock is late: "Waiting for DuskEVM
-  to settle this proof. Claim from … at the soonest."
-- A proof goes against a game that covers the withdrawal and has already
-  resolved where there is one, so its date is exact when it's made ("If you
-  prove now, you can claim from …"); otherwise against the newest.
+  to settle this proof. Claim from … at the soonest.", with no countdown or
+  calendar entry, since that date moves on with each check.
+- A claim is ready once the Portal's check passes and its date has come.
+- A proof goes against a game that covers the withdrawal, has already
+  resolved, and that the Portal would take, where there is one: the anchor
+  state registry calls it proper and respected. Its date is then exact when
+  the proof is made ("If you prove now, you can claim from …"). Otherwise the
+  proof goes against the newest covering game.
 
 Several contract reads on one screen go to the node as one Multicall for Dusk
 query (`93de287b…6ce1d4`, mainnet and testnet). A read that fails inside a
@@ -168,7 +172,8 @@ only this network's:
 
 - **DuskEVM withdrawals**: the Portal's proof maturity and dispute game
   finality delays, and how often outputs come, from the gaps between the
-  dispute game factory's latest games: two Multicall for Dusk queries.
+  dispute game factory's latest games: two Multicall for Dusk queries. With
+  fewer than two games of the Portal's type, the delays are still shown.
 - **DuskEVM deposits**: how far DuskEVM trails Dusk, its latest block against
   Dusk's own time for the Dusk block it last took in (the L1Block predeploy).
 - The chains are asked at most every 10 minutes, and their answers are kept
@@ -195,7 +200,10 @@ cost next to it.
 
 Copy `.env.example` to `.env.local`. Empty values mean the default. The
 DuskEVM contract IDs come from the trusted deployment address book. They are
-deliberately not guessed from EVM addresses.
+deliberately not guessed from EVM addresses. The anchor state registry's
+(`VITE_DUSKEVM_ANCHOR_STATE_REGISTRY_CONTRACT_ID`) is optional, and testnet's
+by default. Without it (`none`), a proof goes against the newest covering
+game.
 
 The same keys can be provided before the app loads through
 `window.__DUSK_BRIDGE_CONFIG__`, which allows one immutable build to be
