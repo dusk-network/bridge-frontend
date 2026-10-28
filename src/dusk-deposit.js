@@ -1,3 +1,5 @@
+import { DEFAULT_BRIDGE_MIN_GAS_LIMIT } from "@dusk/evm-sdk";
+
 import { formatUnits } from "./amount.js";
 import { config } from "./config.js";
 import { fromHex } from "./data-driver.js";
@@ -6,7 +8,13 @@ import { networkName } from "./names.js";
 import { DEPOSIT_GAS_LIMIT, gasAtNodePrice } from "./gas.js";
 import { normalizeEvmAddress } from "./validation.js";
 
-export const BRIDGE_DEPOSIT_MIN_GAS_LIMIT = 200_000;
+/**
+ * The least gas DuskEVM gives the deposit's own call: the DuskEVM SDK's
+ * default, 200,000, as OP Stack bridges use. The call itself, crediting an
+ * address that has no code, used 27,213 gas on DuskEVM testnet (Oct 2026);
+ * the rest leaves room for a contract that receives the DUSK.
+ */
+export const BRIDGE_DEPOSIT_MIN_GAS_LIMIT = DEFAULT_BRIDGE_MIN_GAS_LIMIT;
 export const DEPOSIT_FN_NAME = "depositETHToWithValue";
 const UINT32_MAX = 2n ** 32n - 1n;
 const UINT64_MAX = 2n ** 64n - 1n;

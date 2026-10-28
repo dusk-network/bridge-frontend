@@ -159,8 +159,8 @@ test("only the migrated amount counts as a payout, and only from the payout acco
   assert.equal(paid.status, "completed");
   assert.equal(paid.destinationHash, "02".repeat(32));
 
-  // With the payout account known, the same amount from anyone else doesn't count.
-  const known = { ...cfg, migrationPayoutAccount: PAYER };
+  // With the chain's payout account known, the same amount from anyone else doesn't count.
+  const known = { ...cfg, evmNetworks: { ethereum: { ...cfg.evmNetworks.ethereum, payoutAccount: PAYER } } };
   assert.equal((await tracking(known).refresh(entry, ROUTES.migration)).status, "pending");
   payouts.push(payout("03".repeat(32), { sender: PAYER, value: "3000000000" }));
   assert.equal((await tracking(known).refresh(entry, ROUTES.migration)).destinationHash, "03".repeat(32));
@@ -522,9 +522,26 @@ test("a withdrawal follows its stages, and a sent proof waits for Dusk", async (
   assert.equal(proven.provenAt, 1_793_000_000_000);
   assert.equal(proven.readyAt, 1_793_604_800);
 
-  // A proof time counted in block heights (older deployments) isn't a date.
-  status = { ...status, provenAt: 45_252_320n };
-  assert.equal((await tracking.refresh(entry, ROUTES.withdrawal)).provenAt, null);
+  // A late game's resolution, and the proof's game, which the next check reads with the Portal's values.
+  status = { ...status, claimOverdue: true, disputeGameProxy: `0x${"6f".repeat(20)}` };
+  const late = await tracking.refresh(entry, ROUTES.withdrawal);
+  assert.deepEqual([late.claimOverdue, late.proofGame], [true, `0x${"6f".repeat(20)}`]);
+  // A check that couldn't read the proof's game says no date: the one known so far stands.
+  const dated = await tracking.refresh(entry, ROUTES.withdrawal);
+  const { readyAt: _readyAt, readyAtExact: _exact, claimOverdue: _late, ...undated } = status;
+  status = undated;
+  const kept = await tracking.refresh({ ...entry, claimOverdue: true, readyAt: dated.readyAt, readyAtExact: true }, ROUTES.withdrawal);
+  assert.deepEqual([kept.readyAt, kept.readyAtExact, kept.claimOverdue], [dated.readyAt, true, true]);
+  status = { ...status, claimOverdue: true, readyAt: 1_793_604_800n };
+  const games = [];
+  const load = withdrawals.loadWithdrawalStatus;
+  withdrawals.loadWithdrawalStatus = async (hash, options) => {
+    games.push(options.proofGame);
+    return load(hash, options);
+  };
+  await tracking.refresh({ ...entry, proofGame: late.proofGame }, ROUTES.withdrawal);
+  withdrawals.loadWithdrawalStatus = load;
+  assert.deepEqual(games, [`0x${"6f".repeat(20)}`]);
 
   status = { ...status, stage: "finalized" };
   assert.equal((await tracking.refresh(entry, ROUTES.withdrawal)).status, "completed");

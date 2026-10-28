@@ -13,8 +13,8 @@
 // - An entry read twice is the same entry, by its hash.
 //
 // Of the account's history, it keeps deposits into the DuskEVM bridge,
-// transfers to the operated bridge account, and payouts of old-DUSK
-// migrations (incoming transfers whose memo is an EVM transaction hash).
+// transfers to the operated bridge account, and payouts of ERC20 and BEP20
+// DUSK migrations (incoming transfers whose memo is an EVM transaction hash).
 
 import { fromHex } from "./data-driver.js";
 

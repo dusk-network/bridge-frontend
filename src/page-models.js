@@ -4,11 +4,12 @@
 
 import { explorerAddressUrl } from "./contracts.js";
 import { groupTransfers, shownFor } from "./discovery.js";
+import { claimAfterProving, proveNowText } from "./claim-date.js";
 import { aboutFee, formatDateTime, formatDusk, formatFee, formatLux, formatMaxFee, formatUnitsGrouped } from "./format.js";
-import { gasCoin, networkName, networkNames, routeTitle } from "./names.js";
+import { gasCoin, networkName, networkNames, routeTitle, tokenName } from "./names.js";
 import { transferHref } from "./permalink.js";
 import { buildQuote, routeDuskFees, stepFeeText, withdrawalStepMax } from "./quote.js";
-import { aboutTime, routeTime, routeTimeText } from "./route-times.js";
+import { routeTime, routeTimeText } from "./route-times.js";
 import { explorerTxUrl, html, privacyLine, short, transferSubline, transferView } from "./transfer-view.js";
 
 export const DUSK_WALLET_URL = "https://docs.dusk.network/use/wallets/#dusk-wallet";
@@ -81,7 +82,7 @@ export function reviewChecks(route, { cfg, destination, duskAccount, evm, quote,
     const migration = reads.migration ?? {};
     if (migration.balanceWei !== null && migration.balanceWei !== undefined)
       checks.push({
-        html: `You have <b class="num">${html(formatUnitsGrouped(migration.balanceWei, 18, 4))} old DUSK</b> at <code class="mono">${html(short(evm?.account))}</code> on ${html(from)}`,
+        html: `You have <b class="num">${html(formatUnitsGrouped(migration.balanceWei, 18, 4))} ${html(tokenName(route.from.id))}</b> at <code class="mono">${html(short(evm?.account))}</code> on ${html(from)}`,
         ok: lux * WEI_PER_LUX <= migration.balanceWei,
       });
     if (migration.gasCoinWei !== null && migration.gasCoinWei !== undefined)
@@ -106,6 +107,25 @@ export function reviewChecks(route, { cfg, destination, duskAccount, evm, quote,
     ok: true,
   });
   return checks;
+}
+
+/**
+ * The line under To that says who's paid: the recipient by its .dusk name
+ * or short form, "to your account …" when it's the connected one, "Paying …"
+ * for a Dusk recipient a link handed over (`handedOver`), saying so when
+ * Dusk Wallet is `connected` with another account, or what's missing. HTML,
+ * its values escaped.
+ */
+export function recipientLine(route, { connected = false, destination = "", duskName = "", handedOver = false, own = false, resolved = null, walletName = "your EVM wallet" } = {}) {
+  const dusk = route.to.kind === "dusk";
+  if (!destination) return dusk ? "Connect Dusk Wallet, or add a Dusk account" : "Connect an EVM wallet, or add a 0x address";
+  if (handedOver && dusk) return `Paying <b class="mono">${html(short(destination))}</b>${connected && !own ? ", not your connected account" : ""}`;
+  const who = resolved
+    ? `<b>${html(resolved.name)}</b> (${html(short(destination))})`
+    : own && dusk && duskName
+      ? `<b>${html(duskName)}</b>`
+      : `<b class="mono">${html(short(destination))}</b>`;
+  return own ? `to your ${dusk ? "account" : walletName} ${who}` : `to ${who}`;
 }
 
 /** A late transfer's note: that it is, and who to ask where the deployment names one. */
@@ -153,7 +173,7 @@ export function availableLine(route, maxLux) {
   if (maxLux === null || maxLux === undefined) return { available: "", availableLabel: "", canMax: false };
   const migration = route.mode === "migration";
   return {
-    available: migration ? `${formatLux(maxLux, 4)} old DUSK` : formatDusk(maxLux, 4),
+    available: migration ? `${formatLux(maxLux, 4)} ${tokenName(route.from.id)}` : formatDusk(maxLux, 4),
     availableLabel: migration ? "Available" : "Available after fees",
     canMax: maxLux > 0n,
   };
@@ -173,10 +193,12 @@ export function actionPrivacy(kind, base, { account = "", name = "" } = {}) {
  * The top of a proof's or a claim's review: what the step costs at most
  * (`maxLux`) and what moves. A proof moves no DUSK; a claim pays the
  * withdrawal's account. When that isn't Dusk Wallet's `account`, it says so,
- * by its .dusk `name` where there is one. `wait` is this network's wait
- * from the proof to the claim, in seconds, where it's known.
+ * by its .dusk `name` where there is one. A proof says when it can be
+ * claimed: from `claim`, the date for a proof made now, once the request is
+ * ready (`when` writes it); until then from `maturity`, the Portal's wait in
+ * seconds, where it's known.
  */
-export function actionLead(kind, entry, { account = "", amountLux = null, maxLux, name = "", wait = null }) {
+export function actionLead(kind, entry, { account = "", amountLux = null, claim = null, maturity = null, maxLux, name = "", when = (ms) => formatDateTime(ms) }) {
   const cost = formatMaxFee(maxLux);
   const pays = entry.destination ?? "";
   const payee = !pays ? "the withdrawal's Dusk account" : /^[0-9a-f]{64}$/u.test(pays) ? `the Dusk contract ${short(pays)}` : short(pays);
@@ -187,7 +209,7 @@ export function actionLead(kind, entry, { account = "", amountLux = null, maxLux
     ? {
         amount: cost,
         label: "Proving costs up to",
-        line: `No DUSK moves now.${wait ? ` Claim ${aboutTime(wait)} after the proof.` : ""}`,
+        line: `No DUSK moves now.${claim?.at ? ` ${proveNowText(claim, when)}.` : maturity ? ` ${claimAfterProving(maturity)}` : ""}`,
         notYours,
       }
     : {
@@ -220,7 +242,7 @@ export function receiptModel(entry, { cfg, gasPrice = 1n, now = Date.now(), own 
   const sourceNetwork = route.from.kind === "dusk" ? "dusk" : route.from.id;
   const destinationNetwork = route.to.kind === "dusk" ? "dusk" : route.to.id;
   const details = [];
-  if (view.amount !== null) details.push({ label: route.mode === "migration" ? "You sent" : "Amount", value: route.mode === "migration" ? `${formatLux(view.amount)} old DUSK` : formatDusk(view.amount) });
+  if (view.amount !== null) details.push({ label: route.mode === "migration" ? "You sent" : "Amount", value: route.mode === "migration" ? `${formatLux(view.amount)} ${tokenName(route.from.id)}` : formatDusk(view.amount) });
   if (route.mode === "service-transfer" && view.amount !== null) {
     details.push({ label: "Bridge fee", value: formatDusk(cfg.service.feeLux) });
     details.push({ label: "You receive", value: formatDusk(view.amount - BigInt(cfg.service.feeLux) > 0n ? view.amount - BigInt(cfg.service.feeLux) : 0n) });

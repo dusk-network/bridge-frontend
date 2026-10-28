@@ -37,10 +37,6 @@ const MIGRATE_ABI = parseAbi([
   "function migrate(uint256 amount, string mainnetDuskAddress)",
 ]);
 
-// Older DuskEVM deployments count block height × 10 s for proof times,
-// decades off Dusk's clock; such a time isn't shown.
-const DUSK_CLOCK_WINDOW_MS = 365 * 86_400_000;
-
 /** What a Dusk transaction paid: the gas it spent at its price, in Lux. */
 export function duskFeePaid(tx) {
   try {
@@ -334,10 +330,11 @@ export function createTracking(deps) {
       return failed(`The migration failed on ${name(network)}.`, patch);
     const recipient = patch.destination ?? entry.destination;
     const amountLux = patch.amountLux ?? entry.amountLux;
-    // Messina pays out the migrated amount with the migration's transaction
-    // hash as the memo. Anyone can send a transfer with that memo, so only
-    // the exact amount counts, from the payout account where one is known.
-    const payer = config.migrationPayoutAccount || null;
+    // The bridge pays out the migrated amount with the migration's
+    // transaction hash as the memo. Anyone can send a transfer with that
+    // memo, so only the exact amount counts, from the chain's payout account
+    // where one is known.
+    const payer = config.evmNetworks[network]?.payoutAccount || null;
     const taken = takenDestinations(entry, others);
     const payouts = amountLux === undefined ? [] : await node.transfersByMemo(entry.hash.toLowerCase());
     const payout = payouts.find(
@@ -624,6 +621,8 @@ export function createTracking(deps) {
     let status;
     try {
       status = await deps.withdrawals.loadWithdrawalStatus(entry.hash, {
+        // The proof's game, as the last check found it: read in the same query.
+        proofGame: entry.proofGame ?? null,
         // The account that proved, once this browser sent a proof or a claim;
         // before that, the connected account's proof, or any other found.
         proofSubmitter: entry.proveHash || entry.claimHash || entry.pendingHash ? entry.proofSubmitter ?? undefined : undefined,
@@ -642,6 +641,8 @@ export function createTracking(deps) {
     }
     const settled = await settlePendingAction(entry, status);
     const current = settled.status;
+    // A proof whose game couldn't be read this time says no date: the one known so far stands.
+    const dated = "readyAt" in current || !["proven_waiting", "ready_to_finalize"].includes(current.stage);
     const patch = {
       ...(settled.patch ?? {}),
       amountLux: current.details?.amountWei
@@ -653,13 +654,12 @@ export function createTracking(deps) {
       withdrawalGas: current.withdrawal?.gasLimit === undefined ? entry.withdrawalGas : String(current.withdrawal.gasLimit),
       proofRejected: current.proofRejected ?? false,
       provenByOther: current.provenByOther ?? false,
-      provenAt:
-        current.provenAt &&
-        Math.abs(Number(current.provenAt) * 1_000 - now()) < DUSK_CLOCK_WINDOW_MS
-          ? Number(current.provenAt) * 1_000
-          : null,
-      readyAt: current.readyAt ? Number(current.readyAt) : null,
-      readyAtExact: current.readyAtExact ?? false,
+      // The Portal's proof time, on the wall clock, its game, and when it can be claimed.
+      proofGame: current.disputeGameProxy ?? null,
+      provenAt: current.provenAt ? Number(current.provenAt) * 1_000 : null,
+      claimOverdue: dated ? (current.claimOverdue ?? false) : (entry.claimOverdue ?? false),
+      readyAt: dated ? (current.readyAt ? Number(current.readyAt) : null) : (entry.readyAt ?? null),
+      readyAtExact: dated ? (current.readyAtExact ?? false) : (entry.readyAtExact ?? false),
       sourceAt:
         entry.sourceAt ??
         (current.blockNumber === undefined ? null : await blockTime("dusk-evm", current.blockNumber)),

@@ -2,7 +2,7 @@ import { driverJson, fromHex, toHex } from "./data-driver.js";
 
 // Multicall for Dusk takes at most 256 calls and 64 KiB in or out per query;
 // bridge screens make far fewer reads, so a smaller batch leaves headroom.
-const MAX_BATCH = 64;
+export const MAX_BATCH = 64;
 
 /**
  * Contract reads made in the same tick go to the node as one Multicall for

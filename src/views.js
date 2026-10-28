@@ -75,19 +75,33 @@ export function header(vm) {
   </div></header>`;
 }
 
+/**
+ * Who runs the bridge: "Operated by Dusk", or by route where the routes have
+ * different operators.
+ */
+export function operatedBy({ operator = "", operators = [] } = {}) {
+  if (operator) return `Operated by ${html(operator)}`;
+  const each = operators.map(({ name, route }) => `${html(name)} for ${html(route)}`);
+  return each.length ? `Operated by ${each.join(" · ")}` : "";
+}
+
+/** The terms and privacy notice the bridge is offered under, as links. */
+const termsLinks = (links) =>
+  [
+    links.terms ? `<a href="${html(links.terms)}" target="_blank" rel="noreferrer">Terms of use</a>` : "",
+    links.privacy ? `<a href="${html(links.privacy)}" target="_blank" rel="noreferrer">Privacy policy</a>` : "",
+  ].filter(Boolean);
+
 export function footer(vm) {
   const links = [
     `<button type="button" class="linkish" data-action="open-about" aria-haspopup="dialog">About this page</button>`,
     vm.links.docs ? `<a href="${html(vm.links.docs)}" target="_blank" rel="noreferrer">How the bridge works</a>` : "",
     vm.links.status ? `<a href="${html(vm.links.status)}" target="_blank" rel="noreferrer">Status</a>` : "",
-    vm.links.terms ? `<a href="${html(vm.links.terms)}" target="_blank" rel="noreferrer">Terms</a>` : "",
-    vm.links.privacy ? `<a href="${html(vm.links.privacy)}" target="_blank" rel="noreferrer">Privacy</a>` : "",
+    ...termsLinks(vm.links),
   ].filter(Boolean);
   const site = vm.officialSite ? `<span>Official site: ${html(vm.officialSite.replace(/^https?:\/\//u, "").replace(/\/$/u, ""))}</span>` : "";
-  // Who runs each route, where that's configured.
-  const operators = (vm.operators ?? []).map(({ name, route }) => `${html(name)} for ${html(route)}`);
-  const runBy = operators.length ? `<p class="small t2 run-by">Run by ${operators.join(" · ")}.</p>` : "";
-  return `<footer class="foot"><nav aria-label="About the bridge">${links.join("")}</nav>${site}${runBy}</footer>`;
+  const runBy = operatedBy(vm);
+  return `<footer class="foot"><nav aria-label="About the bridge">${links.join("")}</nav>${site}${runBy ? `<span class="run-by">${runBy}</span>` : ""}</footer>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -153,11 +167,23 @@ export function cardRegions(vm) {
   };
 }
 
+/**
+ * Under the card, for whoever holds DUSK on Ethereum or BNB Smart Chain and
+ * doesn't know to pick it as From: each chain a link that sets it.
+ */
+export function entryLine(entry) {
+  if (!entry?.length) return "";
+  const links = entry.map(({ href, name }) => `<a href="${html(href)}" aria-label="Move DUSK from ${html(name)} to Dusk">${html(name)}</a>`);
+  const chains = links.length > 1 ? `${links.slice(0, -1).join(", ")} or ${links.at(-1)}` : links[0];
+  return `<p class="entry">Have DUSK on ${chains}? Move it to Dusk.</p>`;
+}
+
 export function cardPage(vm) {
   const top = `<div class="bcard-top"><nav class="tabs" aria-label="Bridge and activity"><a class="tab" href="#/" ${vm.tab === "bridge" ? 'aria-current="page"' : ""}>Bridge</a><a class="tab" href="#/transfers" ${vm.tab === "activity" ? 'aria-current="page"' : ""}>Activity${vm.needsCount ? `<span class="cnt" aria-label="${vm.needsCount} need you">${vm.needsCount}</span>` : ""}</a></nav>${
     vm.tab === "bridge" ? `<button type="button" class="icon-btn tip" data-action="settings" aria-label="Recipient and gas" data-tip="Recipient and gas">${icon("sliders")}</button>` : ""
   }</div>`;
-  if (vm.tab === "activity") return `<main class="swap" id="main" tabindex="-1"><section class="bcard wide" aria-label="Activity">${top}${vm.activity}</section></main>`;
+  // Each screen has its heading; the tabs show which one it is.
+  if (vm.tab === "activity") return `<main class="swap" id="main" tabindex="-1"><h1 class="sr-only">My transfers</h1><section class="bcard wide" aria-label="Activity">${top}${vm.activity}</section></main>`;
   const regions = cardRegions(vm);
   const notice = vm.notice
     ? `<div class="card notice-box" role="note"><div class="note">${icon(vm.notice.icon ?? "info")}<span>${vm.notice.html}</span></div>${vm.notice.actions ?? ""}</div>`
@@ -178,11 +204,11 @@ export function cardPage(vm) {
       <div class="panel-f"><span>You receive</span></div>
       ${recipient}
     </div>`;
-  return `<main class="swap" id="main" tabindex="-1">
+  return `<main class="swap" id="main" tabindex="-1"><h1 class="sr-only">Bridge DUSK</h1>
     <section class="bcard" aria-label="Bridge">${top}${notice}${from}${flip}${to}
       <details class="route" data-region="route"${vm.routeOpen ? " open" : ""}>${regions.route}</details>
       <div class="cta" data-region="cta">${regions.cta}</div>
-    </section>
+    </section>${entryLine(vm.entry)}
   </main>`;
 }
 
@@ -286,9 +312,14 @@ export function receiptPage(vm) {
   if (vm.missing)
     return `<main class="col" id="main" tabindex="-1"><div class="topbar"><a class="bk" href="#/transfers">${icon("back")}My transfers</a><h1 class="ti">Transfer</h1></div><div class="group pad"><p>${html(vm.missing)}</p><p class="small t2"><code class="mono wrap">${html(vm.hash)}</code></p></div><p class="links-row"><a class="lnk" href="#/lookup">Look up another transfer ${icon("search")}</a></p></main>`;
   const view = vm.view;
-  const countdown = view.countdown
-    ? `<div class="group count"><div><div class="k">You can claim in</div><div class="v">${html(view.countdown.left)}</div><div class="s">${view.countdown.exact ? "" : "About "}${html(view.countdown.atText)}${view.countdown.clockNote ? ` (${html(view.countdown.clockNote)})` : ""}</div></div><button type="button" class="btn sec sm" data-action="calendar">${icon("calendar")}Add to calendar</button></div>`
-    : "";
+  // When it can be claimed: "Claim from …" or "Claim from about …", counted
+  // down. Late, the date is only the soonest and moves on each check: the
+  // wait is said, with no countdown and nothing to put in a calendar.
+  const countdown = view.countdown?.overdue
+    ? `<div class="group count"><p>${html(view.countdown.line)}</p></div>`
+    : view.countdown
+      ? `<div class="group count"><div><div class="k">You can claim in</div><div class="v">${html(view.countdown.left)}</div><div class="s">${html(view.countdown.line)}${view.countdown.clockNote ? ` (${html(view.countdown.clockNote)})` : ""}</div></div><button type="button" class="btn sec sm" data-action="calendar">${icon("calendar")}Add to calendar</button></div>`
+      : "";
   const action = view.action
     ? vm.canAct === false
       ? `<div class="action-box">${actionNeedsWallet(view.action.kind)}<span class="small t2">Dusk Wallet is a browser extension for computers.</span></div>`
@@ -418,12 +449,17 @@ export function contractsSheet(vm) {
         .join("");
       const operator = group.operator ? `<div class="kv"><dt class="k">Operated by</dt><dd class="v">${html(group.operator)}</dd></div>` : "";
       const docs = group.docs ? `<a class="lnk" href="${html(group.docs)}" target="_blank" rel="noreferrer">Guide ${icon("ext")}<span class="sr-only"> (opens in a new tab)</span></a>` : "";
-      return `<section class="cgroup"><h3 class="gt">${html(group.title)}${docs}</h3><div class="group ${group.id === "networks" ? "kvs" : "crows"}">${rows}${operator}</div></section>`;
+      const note = group.note ? `<p class="small t2 gnote">${html(group.note)}</p>` : "";
+      return `<section class="cgroup"><h3 class="gt">${html(group.title)}${docs}</h3>${note}<div class="group ${group.id === "networks" ? "kvs" : "crows"}">${rows}${operator}</div></section>`;
     })
     .join("");
-  // What the page reads from, then the contracts and accounts of each route.
+  // Who runs it and on what terms, what the page reads from, then the
+  // contracts and accounts of each route.
+  const runBy = operatedBy(vm);
+  const terms = termsLinks(vm.links ?? {});
+  const about = runBy || terms.length ? `<p class="about-op">${[runBy ? `<span>${runBy}</span>` : "", ...terms].filter(Boolean).join('<span class="sep" aria-hidden="true">·</span>')}</p>` : "";
   const servers = vm.servers ? `<section class="cgroup"><h3 class="gt">Servers</h3><p class="card about-servers">${html(vm.servers)}</p></section>` : "";
-  return `<div class="sheet-head"><div><h2 id="sheet-title">About this page · ${html(vm.badge)}</h2><p class="sub">Check these against your wallet before you confirm.</p></div><button type="button" class="icon-btn round" data-action="close-sheet" aria-label="Close">${icon("close")}</button></div><div class="sheet-body">${servers}${groups}</div>`;
+  return `<div class="sheet-head"><div><h2 id="sheet-title">About this page · ${html(vm.badge)}</h2><p class="sub">Check these against your wallet before you confirm.</p></div><button type="button" class="icon-btn round" data-action="close-sheet" aria-label="Close">${icon("close")}</button></div><div class="sheet-body">${about}${servers}${groups}</div>`;
 }
 
 export function networkSheet(vm) {

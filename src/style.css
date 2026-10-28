@@ -170,7 +170,6 @@ svg.glyph { display: block; flex: 0 0 auto; }
 .foot a:hover, .linkish:hover { color: var(--text); text-decoration: underline; }
 .linkish { padding: 0; border: 0; background: none; color: inherit; font-size: inherit; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; text-decoration-color: var(--hair-2); }
 .foot .linkish { text-decoration: none; }
-.run-by { flex-basis: 100%; }
 
 /* ------------------------------------------------------------------ */
 /* Pages and shared parts                                              */
@@ -327,6 +326,10 @@ h1 { font-size: 28px; font-weight: 500; letter-spacing: -0.01em; line-height: 1.
 .route .kvs .kv { padding: 8px 8px; font-size: 13.5px; }
 .route .kvs .kv::before, .route .kvs .kv + .kv::before { left: 8px; right: 8px; }
 .route .pubnote { margin: 6px 8px 12px; color: var(--text-2); font-size: 13px; line-height: 1.5; }
+/* Under the card: DUSK on Ethereum or BNB Smart Chain, each chain a link that sets From. */
+.entry { max-width: 472px; padding: 0 12px; color: var(--text-2); font-size: 14px; line-height: 1.5; text-align: center; }
+.entry a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; text-decoration-color: var(--hair-2); }
+.entry a:hover { text-decoration-color: currentColor; }
 .bcard .cta { margin-top: 4px; }
 .bcard .cta .btn { height: 54px; font-size: 16px; }
 .bcard .cta .hint:empty { display: none; }
@@ -424,6 +427,13 @@ h1 { font-size: 28px; font-weight: 500; letter-spacing: -0.01em; line-height: 1.
 .cgroup + .cgroup { margin-top: 18px; }
 .gt { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 2px 8px; color: var(--text-2); font-size: 13px; font-weight: 500; }
 .about-servers { color: var(--text-2); font-size: 13.5px; line-height: 1.55; }
+/* Who runs the bridge and on what terms, above the rest. */
+.about-op { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0 2px 18px; color: var(--text-2); font-size: 13.5px; }
+.about-op span:first-child { color: var(--text); }
+.about-op .sep { opacity: .5; }
+.about-op a { text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; text-decoration-color: var(--hair-2); }
+.about-op a:hover { color: var(--text); }
+.gnote { margin: -2px 2px 8px; }
 .crows .crow { position: relative; padding: 12px 16px; }
 .crows .crow + .crow::before, .crows .kv::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; border-top: 1px solid var(--hair); }
 .crows .kv { position: relative; display: flex; justify-content: space-between; gap: 12px; padding: 11px 16px; font-size: 13.5px; }

@@ -44,6 +44,15 @@ const isContractId = (id) => /^[0-9a-f]{64}$/u.test(id);
 export const MAINNET_BSC_BRIDGE_ACCOUNT =
   "24jFms4JqYdWb19jFn3CUjNUQz1AeRozYnwsHuUkLbXAj2gRBq598aLAJmqmsaPcsCNJTgTaJTaUZCXpT3s9UeWBsHTmd5hQx95JymZSUsmtwoibiB8AMp4bZjAiLMjmAH3x";
 
+/** The Dusk account that pays out Ethereum migrations on mainnet. */
+export const MAINNET_ETHEREUM_PAYOUT_ACCOUNT =
+  "2427XSRsdBpgBp3TtcYbFXc8NoGXX4pRZNurE1uRcSgsyGTo4yFJz3or2id85xZdGimEREB8ufEuW9UTPoX53r9ns4EsfSuLkzNMyqt4ha34A6T3DbjBKYNowih6YLGW1Zvi";
+
+/** Who runs the bridge, and the terms and privacy notice it's offered under. */
+export const OPERATOR = "Dusk";
+export const DUSK_TERMS_URL = "https://dusk.network/terms-of-use";
+export const DUSK_PRIVACY_URL = "https://dusk.network/privacy-policy";
+
 export const TESTNET_REGGIO_BRIDGE_ACCOUNT =
   "25z9o6qCaVk1ReyHjmB4pyXcE3D1vRu4FVV1rR8ChYcosdTSktkANLDHq9GD6B4985Q1S2KrDZYBRrohWAjrNmACFUb3UMSRyYctJRzh3d28R1ZNC1ZyKm1HwXL4FF5Etftt";
 
@@ -73,9 +82,15 @@ const ETH = Object.freeze({ decimals: 18, name: "Ether", symbol: "ETH" });
 const nativeCurrency = (id, chainId) =>
   id === "bsc" ? { decimals: 18, name: "BNB", symbol: chainId === 97 ? "tBNB" : "BNB" } : ETH;
 
-const url = (name) => {
-  const raw = value(name);
+const url = (name, fallback = "") => {
+  const raw = value(name, fallback);
   return /^https?:\/\//iu.test(raw) ? raw : "";
+};
+
+/** A Dusk account where one is known; `none` clears the profile's. */
+const account = (name, fallback = "") => {
+  const raw = value(name, fallback);
+  return raw.toLowerCase() === NONE ? "" : raw;
 };
 
 const PROFILES = Object.freeze({
@@ -93,9 +108,13 @@ const PROFILES = Object.freeze({
         explorerUrl: "https://bscscan.com",
         migrationContract: "0x32979f040feb67a5223acb0716fe4c7a5956488c",
         // "Around one hour" to the payout on Dusk, as the docs' migration
-        // guide says. Not measured: the payouts of the 200 days to 27 Oct
-        // 2026 were all for Ethereum migrations.
+        // guide says. The three payouts of the 7 days to 28 Oct 2026 came 63
+        // to 66.5 minutes after their migrations.
         migrationSeconds: 3_600,
+        // The account Dusk -> BSC transfers go to pays out BSC migrations
+        // too, with the migration's hash as the memo: 189 payouts in the 200
+        // days to 27 Oct 2026.
+        payoutAccount: MAINNET_BSC_BRIDGE_ACCOUNT,
         // bsc-dataseed refuses eth_getLogs over 1,000 blocks; payouts need it.
         rpcUrl: "https://bsc-rpc.publicnode.com",
         tokenContract: "0xb2bd0749dbe21f623d9baba856d3b0f0e1bfec9c",
@@ -109,6 +128,7 @@ const PROFILES = Object.freeze({
         // 66 to 67 minutes from the migration's block to its payout on Dusk,
         // for each of the 15 migrations of 28 Sep to 24 Oct 2026.
         migrationSeconds: 4_000,
+        payoutAccount: MAINNET_ETHEREUM_PAYOUT_ACCOUNT,
         rpcUrl: "https://ethereum-rpc.publicnode.com",
         tokenContract: "0x940a2db1b7008b6c776d4faaca729d6d4a4aa551",
       },
@@ -145,7 +165,14 @@ const PROFILES = Object.freeze({
     // No time: the testnet worker that pays out doesn't always run (no
     // transfers in the 60 days to 27 Oct 2026).
     service: { account: TESTNET_REGGIO_BRIDGE_ACCOUNT, delaySeconds: null, network: "ethereum" },
+    // Shown, but not running: nothing has been paid out on the Sepolia
+    // routes since 11 Feb 2026. `VITE_PAUSED_ROUTES=none` runs them again.
+    paused: ["ethereum-to-dusk", "dusk-to-ethereum"],
     duskEvm: {
+      // DuskEVM testnet's anchor state registry (its address book,
+      // testnet/l1-addresses.json): the Portal asks it whether a game is
+      // proper and respected.
+      anchorStateRegistryContractId: "1735498c11978854e390894502850916f4ba619e3f4b88c10ef758c5026619cc",
       chainId: 745,
       // Until DuskEVM's own figure is read: its 40 deposits of 1 Sep to
       // 27 Oct 2026 took 25 to 39 s from their Dusk block (Dusk's own time)
@@ -175,6 +202,12 @@ function evmNetwork(id, defaults = {}) {
       defaults.migrationContract,
     ),
     migrationSeconds: seconds(`VITE_${prefix}_MIGRATION_SECONDS`, defaults.migrationSeconds),
+    // The Dusk account this chain's migrations are paid from, where it's
+    // known: only its transfers then count as payouts.
+    payoutAccount: account(
+      `VITE_${prefix}_PAYOUT_ACCOUNT`,
+      value("VITE_MIGRATION_PAYOUT_ACCOUNT", defaults.payoutAccount),
+    ),
     rpcUrl: value(`VITE_${prefix}_RPC_URL`, defaults.rpcUrl),
     tokenContract: value(`VITE_${prefix}_TOKEN_CONTRACT`, defaults.tokenContract),
   };
@@ -188,7 +221,11 @@ function evmNetwork(id, defaults = {}) {
 }
 
 function duskEvmConfig(defaults) {
+  // Optional: without it, a proof goes against the newest game covering the
+  // withdrawal, not one that has already resolved. `none` leaves it out.
+  const registry = contractId("VITE_DUSKEVM_ANCHOR_STATE_REGISTRY_CONTRACT_ID", defaults.anchorStateRegistryContractId);
   const duskEvm = {
+    anchorStateRegistryContractId: isContractId(registry) ? registry : "",
     bridgeGameSearchDepth: positiveInteger("VITE_DUSKEVM_BRIDGE_GAME_SEARCH_DEPTH", 64),
     chainId: positiveInteger("VITE_DUSKEVM_CHAIN_ID", defaults.chainId ?? 0),
     depositSeconds: seconds("VITE_DUSKEVM_DEPOSIT_SECONDS", defaults.depositSeconds),
@@ -292,7 +329,8 @@ export function loadConfig() {
         migration: url("VITE_DOCS_MIGRATION_URL"),
         service: url("VITE_DOCS_SERVICE_URL"),
       }),
-      privacy: url("VITE_PRIVACY_URL"),
+      // Dusk's own, as on the explorer; a deployment can name its own.
+      privacy: url("VITE_PRIVACY_URL", DUSK_PRIVACY_URL),
       sites: Object.freeze({
         mainnet: url("VITE_MAINNET_BRIDGE_URL"),
         testnet: url("VITE_TESTNET_BRIDGE_URL"),
@@ -300,25 +338,25 @@ export function loadConfig() {
       status: url("VITE_STATUS_URL"),
       support: url("VITE_SUPPORT_URL"),
       supportLabel: value("VITE_SUPPORT_LABEL", "support"),
-      terms: url("VITE_TERMS_URL"),
+      terms: url("VITE_TERMS_URL", DUSK_TERMS_URL),
     }),
+    // Dusk runs every route, unless a deployment names another for one.
     operators: Object.freeze({
-      duskEvm: value("VITE_DUSKEVM_OPERATOR"),
-      migration: value("VITE_MIGRATION_OPERATOR"),
-      service: value("VITE_SERVICE_OPERATOR"),
+      duskEvm: value("VITE_DUSKEVM_OPERATOR", OPERATOR),
+      migration: value("VITE_MIGRATION_OPERATOR", OPERATOR),
+      service: value("VITE_SERVICE_OPERATOR", OPERATOR),
     }),
     dusk,
     duskEvm: duskEvmConfig(defaults.duskEvm),
     evmNetworks,
     gasLimitUpper: BigInt(positiveInteger("VITE_GAS_LIMIT_UPPER", 1_000_000_000)),
-    // The Dusk account migrations are paid from, where it's known: only its
-    // transfers then count as payouts.
-    migrationPayoutAccount: value("VITE_MIGRATION_PAYOUT_ACCOUNT"),
     migrations,
     multicall: Object.freeze({
       contractId: isContractId(multicallId) ? multicallId : "",
       driver: BUNDLED_DRIVERS.multicall,
     }),
+    // Routes shown but not running now, by route ID; `none` runs them all.
+    pausedRoutes: Object.freeze(list("VITE_PAUSED_ROUTES", defaults.paused ?? [])),
     profile,
     reown: Object.freeze({ projectId: value("VITE_REOWN_PROJECT_ID") }),
     service,

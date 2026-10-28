@@ -4,6 +4,7 @@
 // and how long the route takes on this network; no balances, no network
 // requests.
 
+import { claimText } from "./claim-date.js";
 import {
   clockChangeBetween,
   clockChangeNote,
@@ -12,7 +13,7 @@ import {
   formatDusk,
   formatShortDay,
 } from "./format.js";
-import { networkName } from "./names.js";
+import { networkName, tokenName } from "./names.js";
 import { aboutTime, lateAfterSeconds, routeTime } from "./route-times.js";
 import { STATUS_WORDS } from "./tracking.js";
 import { withdrawalActionFailure, withdrawalNextAction } from "./withdrawal-lifecycle.js";
@@ -102,14 +103,14 @@ function step(key, title, state, extra = {}) {
 }
 
 /**
- * The claim time of a waiting withdrawal, and how sure it is: Dusk's own once
- * it gives one, else the proof time and this network's wait after it.
+ * When a waiting withdrawal can be claimed, as the chain says (`claimFrom`):
+ * exact once its game has resolved, the earliest before that, and overdue
+ * when the game's resolution is late. No date is made up from a fixed wait.
  */
-function claimTiming(entry, now, time) {
-  if (entry.readyAt) return { at: Number(entry.readyAt) * 1_000, exact: Boolean(entry.readyAtExact) };
-  const proof = entry.provenAt ?? entry.proveAt;
-  if (proof && time?.wait) return { at: proof + time.wait * 1_000, exact: false };
-  return { at: null, exact: false, from: now };
+function claimTiming(entry) {
+  return entry.readyAt
+    ? { at: Number(entry.readyAt) * 1_000, exact: Boolean(entry.readyAtExact), overdue: Boolean(entry.claimOverdue) }
+    : { at: null, exact: false, overdue: false };
 }
 
 const REJECTED_PROOF = "The proof was rejected. Prove again once DuskEVM reports a new output.";
@@ -151,8 +152,8 @@ function withdrawalSteps(entry, cfg, { account, now, time: usual, timeZone, year
     prove = step("prove", "Prove on Dusk", "now", { detail: "Proof sent, waiting for Dusk", hash: entry.pendingHash ?? null, network: "dusk" });
   else
     prove = step("prove", "Prove on Dusk", entry.sourceAt ? "now" : "todo", {
-      // From when it can be proved: once DuskEVM reports it to Dusk.
-      detail: entry.sourceAt && usual?.report ? `From about ${time(entry.sourceAt + usual.report * 1_000)}` : "",
+      // From when it can be proved: about an output after it was sent.
+      detail: entry.sourceAt && usual?.prove ? `From about ${time(entry.sourceAt + usual.prove * 1_000)}` : "",
     });
 
   let claim;
@@ -174,18 +175,20 @@ function withdrawalSteps(entry, cfg, { account, now, time: usual, timeZone, year
   else if (stage === "proven_waiting" && entry.proofRejected)
     claim = step("claim", "Claim on Dusk", "todo", { detail: REJECTED_PROOF });
   else if (stage === "proven_waiting") {
-    const timing = claimTiming(entry, now, usual);
+    const timing = claimTiming(entry);
     claim = step("claim", "Claim on Dusk", "now", {
-      detail: timing.at
-        ? `${timing.exact ? "From" : "From about"} ${formatDateTime(timing.at, { timeZone, year })}`
-        : afterProof(usual),
+      detail: timing.overdue
+        ? claimText(timing, time)
+        : timing.at
+          ? `${timing.exact ? "From" : "From about"} ${time(timing.at)}`
+          : afterTheProof(usual),
     });
-  } else claim = step("claim", "Claim on Dusk", "todo", { detail: afterProof(usual) });
+  } else claim = step("claim", "Claim on Dusk", "todo", { detail: usual?.maturity ? `${durationWords(usual.maturity)} after you prove` : "" });
   return [sent, prove, claim];
 }
 
-/** "~7 days after the proof", or nothing where the wait isn't known. */
-const afterProof = (time) => (time?.wait ? `${aboutTime(time.wait)} after the proof` : "");
+/** A proven withdrawal whose date isn't read yet: "7 days after the proof at the soonest". */
+const afterTheProof = (time) => (time?.maturity ? `${durationWords(time.maturity)} after the proof at the soonest` : "");
 
 function sourceSteps(entry, route, cfg, { timeZone, year }) {
   const time = (ms) => (ms ? formatDateTime(ms, { timeZone, year }) : "");
@@ -231,16 +234,17 @@ function titleFor(entry, route, cfg, amount) {
     route.mode === "service-transfer" && amount !== null && cfg.service
       ? formatDusk(amount - BigInt(cfg.service.feeLux) > 0n ? amount - BigInt(cfg.service.feeLux) : 0n)
       : text;
-  const old = route.mode === "migration" ? `${amount === null ? "" : `${formatDusk(amount).replace(" DUSK", "")} `}old DUSK` : text;
+  // A migration moves the chain's own DUSK token: "1,000 ERC20 DUSK".
+  const token = route.mode === "migration" ? `${amount === null ? "" : `${formatDusk(amount).replace(" DUSK", "")} `}${tokenName(route.from.id)}` : text;
   if (entry.status === "completed") return `${received} arrived on ${to}`;
   if (entry.status === "failed")
-    return route.mode === "duskevm-withdrawal" ? `The withdrawal failed on ${from}` : `${route.mode === "migration" ? old : text} didn't reach ${to}`;
+    return route.mode === "duskevm-withdrawal" ? `The withdrawal failed on ${from}` : `${token} didn't reach ${to}`;
   if (route.mode === "duskevm-withdrawal") {
     if (entry.stage === "ready_to_finalize" && !entry.pendingAction) return `${text} is ready to claim`;
     if (entry.stage === "ready_to_prove" && !entry.pendingAction) return `Prove your withdrawal of ${text}`;
     return `Moving ${text} from ${from} to ${to}`;
   }
-  if (route.mode === "migration") return `Moving ${old} to ${to}`;
+  if (route.mode === "migration") return `Moving ${token} to ${to}`;
   return `Sending ${text} to ${to}`;
 }
 
@@ -274,7 +278,7 @@ export function transferView(entry, { account = "", cfg, now = Date.now(), route
 
   let countdown = null;
   if (withdrawal && status === "pending" && entry.stage === "proven_waiting" && !entry.proofRejected) {
-    const timing = claimTiming(entry, now, time);
+    const timing = claimTiming(entry);
     if (timing.at) {
       const proof = entry.provenAt ?? entry.proveAt ?? null;
       const zone = timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -285,6 +289,9 @@ export function transferView(entry, { account = "", cfg, now = Date.now(), route
         clockNote: clockChangeNote(change, { now, timeZone: zone }),
         exact: timing.exact,
         left: durationWords(Math.max(0, (timing.at - now) / 1_000)),
+        // "Claim from …", "Claim from about …", or, late, "Waiting for DuskEVM to settle this proof. …"
+        line: claimText(timing, (ms) => formatDateTime(ms, { timeZone, year })),
+        overdue: timing.overdue,
       };
     }
   }
@@ -324,19 +331,21 @@ export function transferView(entry, { account = "", cfg, now = Date.now(), route
     to: { account: entry.destination ?? null, network: toNetwork },
     trackingError: entry.trackingError ? "Status unavailable. Trying again." : "",
     tracker: withdrawal
-      ? steps.map((item) => ({ label: trackerLabel(item, entry, now), state: item.state, when: trackerWhen(item, entry, now, timeZone, time) }))
+      ? steps.map((item) => ({ label: trackerLabel(item, entry, now), state: item.state, when: trackerWhen(item, entry, timeZone) }))
       : null,
   };
 }
 
 /** The date under a withdrawal's step on its card: when it happened, or from when it can. */
-function trackerWhen(item, entry, now, timeZone, time) {
+function trackerWhen(item, entry, timeZone) {
   const day = (ms) => formatShortDay(ms, { timeZone });
   if (item.key === "sent") return entry.sourceAt ? day(entry.sourceAt) : "";
   if (item.state === "done") return item.at ? day(item.at) : "";
   if (item.key !== "claim" || entry.stage !== "proven_waiting" || entry.proofRejected) return "";
-  const timing = claimTiming(entry, now, time);
-  return timing.at ? `from ${timing.exact ? "" : "about "}${day(timing.at)}` : "";
+  const timing = claimTiming(entry);
+  if (!timing.at) return "";
+  // Late, the date is only the soonest.
+  return timing.overdue ? `from ${day(timing.at)} at the soonest` : `from ${timing.exact ? "" : "about "}${day(timing.at)}`;
 }
 
 function trackerLabel(item, entry, now) {
@@ -348,7 +357,8 @@ function trackerLabel(item, entry, now) {
   }
   if (item.state === "done") return "Claimed";
   if (item.state === "turn") return "Claim now";
-  if (entry.stage === "proven_waiting" && entry.readyAt) {
+  // Late, the date moves on each check: no countdown to it.
+  if (entry.stage === "proven_waiting" && entry.readyAt && !entry.claimOverdue) {
     const left = Number(entry.readyAt) * 1_000 - now;
     return left > 0 ? `Claim in ${durationWords(left / 1_000)}` : "Claim";
   }
@@ -371,15 +381,13 @@ export function transferSubline(view, entry, route, cfg, { account = "", now = D
       return entry.readyAt ? `Ready to claim since ${time(Number(entry.readyAt) * 1_000)}` : "Ready to claim on Dusk";
     // A rejected proof never matures: it's proved again, once there's a new output.
     if (stage === "proven_waiting" && entry.proofRejected) return REJECTED_PROOF;
-    if (stage === "proven_waiting")
-      return view.countdown
-        ? `Claim ${view.countdown.exact ? "from" : "from about"} ${view.countdown.atText} · ${view.countdown.left} left`
-        : view.time?.wait
-          ? `Claim ${aboutTime(view.time.wait)} after the proof`
-          : "Proven";
+    if (stage === "proven_waiting") {
+      if (!view.countdown) return view.time?.maturity ? `Claim ${afterTheProof(view.time)}` : "Proven";
+      return view.countdown.overdue ? view.countdown.line : `${view.countdown.line} · ${view.countdown.left} left`;
+    }
     if (!entry.sourceAt) return "Waiting for DuskEVM";
-    return view.time?.report
-      ? `Prove from about ${time(entry.sourceAt + view.time.report * 1_000)}`
+    return view.time?.prove
+      ? `Prove from about ${time(entry.sourceAt + view.time.prove * 1_000)}`
       : `Sent ${time(entry.sourceAt)}`;
   }
   if (view.status === "completed") {

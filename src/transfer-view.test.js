@@ -93,7 +93,7 @@ test("a payout to another chain says what arrives after the bridge fee", () => {
   );
   const done = transferView({ amountLux: "50000000000", hash: DUSK_HASH, status: "completed" }, { cfg, route: service });
   assert.equal(done.title, "49 DUSK arrived on Ethereum (Sepolia)");
-  assert.equal(transferView({ amountLux: "1000000000000", hash: L2_HASH, status: "pending" }, { cfg, route: migration }).title, "Moving 1,000 old DUSK to Dusk");
+  assert.equal(transferView({ amountLux: "1000000000000", hash: L2_HASH, status: "pending" }, { cfg, route: migration }).title, "Moving 1,000 ERC20 DUSK to Dusk");
 });
 
 test("a withdrawal shows its three steps, their times and the next action", () => {
@@ -107,11 +107,11 @@ test("a withdrawal shows its three steps, their times and the next action", () =
   assert.equal(ready.steps[0].atText, "Fri 23 Oct, 16:20 CEST");
   // Its fee is the receipt's, next to the Prove button.
   assert.equal(ready.steps[1].detail, "Ready now");
-  assert.equal(ready.steps[2].detail, "~7 days after the proof");
-  // Before it can be proved: from when it can, two outputs after it was sent.
+  assert.equal(ready.steps[2].detail, "7 days after you prove");
+  // Before it can be proved: from when it can, about an output after it was sent.
   const sent = transferView({ hash: L2_HASH, sourceAt: sentAt, stage: "waiting_for_output", status: "pending" }, { cfg, route: withdrawal, timeZone: AMS, timing });
-  assert.equal(sent.steps[1].detail, "From about Fri 23 Oct, 17:16 CEST");
-  assert.equal(transferSubline(sent, { sourceAt: sentAt, stage: "waiting_for_output" }, withdrawal, cfg, { timeZone: AMS }), "Prove from about Fri 23 Oct, 17:16 CEST");
+  assert.equal(sent.steps[1].detail, "From about Fri 23 Oct, 16:48 CEST");
+  assert.equal(transferSubline(sent, { sourceAt: sentAt, stage: "waiting_for_output" }, withdrawal, cfg, { timeZone: AMS }), "Prove from about Fri 23 Oct, 16:48 CEST");
   // Where the chain hasn't said, no time at all.
   const unread = transferView({ hash: L2_HASH, sourceAt: sentAt, stage: "waiting_for_output", status: "pending" }, { cfg, route: withdrawal, timeZone: AMS });
   assert.deepEqual(unread.steps.slice(1).map(({ detail }) => detail), ["", ""]);
@@ -239,21 +239,67 @@ test("a rejected proof isn't shown as proven, and promises no claim", () => {
 test("a withdrawal's card dates each step: sent, proven, and from when it can be claimed", () => {
   const sentAt = Date.UTC(2026, 8, 24, 10, 0);
   const provenAt = Date.UTC(2026, 8, 25, 10, 0);
-  const waiting = transferView(
+  // The claim date is the chain's: none is made up from the proof and a fixed wait.
+  const unread = transferView(
     { amountLux: "1008000000000", hash: L2_HASH, provenAt, sourceAt: sentAt, stage: "proven_waiting", status: "pending" },
+    { cfg, now: provenAt + 60_000, route: withdrawal, timeZone: AMS, timing },
+  );
+  assert.equal(unread.tracker[2].when, "");
+  assert.equal(unread.countdown, null);
+  assert.equal(unread.steps[2].detail, "7 days after the proof at the soonest");
+  const waiting = transferView(
+    { amountLux: "1008000000000", hash: L2_HASH, provenAt, readyAt: (provenAt + 7 * 86_400_000) / 1_000, sourceAt: sentAt, stage: "proven_waiting", status: "pending" },
     { cfg, now: provenAt + 60_000, route: withdrawal, timeZone: AMS, timing },
   );
   assert.deepEqual(waiting.tracker.map(({ label, when }) => [label, when]), [
     ["Sent", "24 Sept"],
     ["Proven", "25 Sept"],
-    ["Claim", "from about 2 Oct"],
+    ["Claim in 6 days 23 hours", "from about 2 Oct"],
   ]);
   const html = transferRow({ amountText: "1,008 DUSK", href: "#/t", id: "w", pair: ["dusk-evm", "dusk"], status: "pending", statusWord: "Pending", subline: "", title: "DuskEVM to Dusk", tracker: waiting.tracker });
   assert.match(html, /<span>Sent<\/span><span class="when">24 Sept<\/span>/u);
-  assert.match(html, /Claim from about 2 Oct: in progress/u);
+  assert.match(html, /Claim in 6 days 23 hours from about 2 Oct: in progress/u);
   // Claimed: its day; not sent yet: none.
   const claimedAt = Date.UTC(2026, 9, 2, 12, 0);
   const claimed = transferView({ claimAt: claimedAt, hash: L2_HASH, provenAt, sourceAt: sentAt, stage: "finalized", status: "completed" }, { cfg, route: withdrawal, timeZone: AMS });
   assert.deepEqual(claimed.tracker.map(({ when }) => when), ["24 Sept", "25 Sept", "2 Oct"]);
   assert.deepEqual(transferView({ hash: L2_HASH, stage: "submitted", status: "pending" }, { cfg, route: withdrawal }).tracker.map(({ when }) => when), ["", "", ""]);
+});
+
+test("after the proof, the claim date reads as the chain gives it: exact, about, or late at the soonest", () => {
+  // wallet-both.dusk's withdrawal: proved 26 Oct, 03:20:39 UTC; claimable from 2 Nov, 03:20:39 UTC.
+  const provenAt = Date.UTC(2026, 9, 26, 3, 20, 39);
+  const at = Date.UTC(2026, 10, 2, 3, 20, 39);
+  const now = Date.UTC(2026, 9, 28, 3, 10);
+  const base = { amountLux: "1000000000", hash: L2_HASH, provenAt, readyAt: at / 1_000, sourceAt: provenAt - 86_400_000, stage: "proven_waiting", status: "pending" };
+  const view = (patch) => transferView({ ...base, ...patch }, { cfg, now, route: withdrawal, timeZone: AMS, timing });
+  const subline = (patch) => transferSubline(view(patch), { ...base, ...patch }, withdrawal, cfg, { now, timeZone: AMS });
+  // Exact once its game has resolved.
+  assert.equal(view({ readyAtExact: true }).countdown.line, "Claim from Mon 2 Nov, 04:20 CET");
+  assert.equal(subline({ readyAtExact: true }), "Claim from Mon 2 Nov, 04:20 CET · 5 days left");
+  // Before that, the earliest: "about".
+  assert.equal(view({}).countdown.line, "Claim from about Mon 2 Nov, 04:20 CET");
+  // Its game's resolution late: at the soonest.
+  const late = view({ claimOverdue: true });
+  assert.equal(late.countdown.line, "Waiting for DuskEVM to settle this proof. Claim from Mon 2 Nov, 04:20 CET at the soonest.");
+  assert.equal(subline({ claimOverdue: true }), late.countdown.line);
+  // The receipt says it under the countdown, and its claim step doesn't repeat it.
+  const model = receiptModel({ ...base }, { cfg, now, route: withdrawal, timeZone: AMS, timing, url: "https://bridge.example/#/transfer/x" });
+  assert.equal(model.view.steps[2].detail, "");
+  assert.match(receiptPage({ ...model, canAct: true }), /<div class="k">You can claim in<\/div><div class="v">5 days<\/div><div class="s">Claim from about Mon 2 Nov 2026, 04:20 CET<\/div>/u);
+});
+
+test("a late claim says only the wait and its soonest date: no countdown, nothing for a calendar", () => {
+  // Its game unresolved an hour past its clock: the date moves on with each check.
+  const provenAt = Date.UTC(2026, 9, 26, 3, 20, 39);
+  const now = Date.UTC(2026, 9, 28, 3, 10);
+  const entry = { amountLux: "1000000000", claimOverdue: true, hash: L2_HASH, provenAt, readyAt: Date.UTC(2026, 10, 2, 3, 20, 39) / 1_000, sourceAt: provenAt - 86_400_000, stage: "proven_waiting", status: "pending" };
+  const model = receiptModel(entry, { cfg, now, route: withdrawal, timeZone: AMS, timing, url: "https://bridge.example/#/transfer/x" });
+  const html = receiptPage({ ...model, canAct: true });
+  assert.match(html, /<div class="group count"><p>Waiting for DuskEVM to settle this proof\. Claim from Mon 2 Nov 2026, 04:20 CET at the soonest\.<\/p><\/div>/u);
+  assert.doesNotMatch(html, /You can claim in/u);
+  assert.doesNotMatch(html, /data-action="calendar"/u);
+  // In My transfers, its claim step counts down to nothing either.
+  const view = transferView(entry, { cfg, now, route: withdrawal, timeZone: AMS, timing });
+  assert.deepEqual([view.tracker[2].label, view.tracker[2].when], ["Claim", "from 2 Nov at the soonest"]);
 });

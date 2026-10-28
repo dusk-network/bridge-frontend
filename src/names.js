@@ -1,7 +1,7 @@
 // One name per chain per network. Dusk and DuskEVM keep their names on both
-// networks, next to the network badge; the old-token chains name their
-// testnet in brackets. Wallet chain names (config `chainName`) are separate:
-// they're what a wallet lists, not what this page says.
+// networks, next to the network badge; Ethereum and BNB Smart Chain name
+// their testnet in brackets. Wallet chain names (config `chainName`) are
+// separate: they're what a wallet lists, not what this page says.
 
 export function networkNames(cfg) {
   const testnet = cfg.profile === "testnet";
@@ -15,19 +15,17 @@ export function networkNames(cfg) {
 }
 
 /**
- * The old token's one name, as a token: "old DUSK (ERC20 on Ethereum)" or
- * "(BEP20 on BSC)", on testnet "(ERC20 on Sepolia)" or "(BEP20 on BSC
- * testnet)". It's also what a transfer to that chain pays out.
+ * DUSK on an EVM chain, by its token standard: "BEP20 DUSK" on BNB Smart
+ * Chain, "ERC20 DUSK" on Ethereum. It's what a migration takes and what a
+ * transfer to that chain pays out.
  */
-export function oldTokenName(cfg, id) {
-  const testnet = cfg.profile === "testnet";
-  return id === "bsc"
-    ? `old DUSK (BEP20 on ${testnet ? "BSC testnet" : "BSC"})`
-    : `old DUSK (ERC20 on ${testnet ? "Sepolia" : "Ethereum"})`;
-}
+export const tokenName = (id) => (id === "bsc" ? "BEP20 DUSK" : "ERC20 DUSK");
 
-/** The same, starting a line or a label. */
-export const OldTokenName = (cfg, id) => `O${oldTokenName(cfg, id).slice(1)}`;
+/** What a network holds of DUSK: ERC20 or BEP20 DUSK on Ethereum and BNB Smart Chain, DUSK on Dusk and DuskEVM. */
+const unitOn = (side) => (side.kind === "evm" && side.id !== "dusk-evm" ? tokenName(side.id) : "DUSK");
+
+/** What a route takes and pays: "ERC20 DUSK" in, "DUSK" out, for a migration from Ethereum. */
+export const routeUnits = (route) => ({ receive: unitOn(route.to), send: unitOn(route.from) });
 
 /** The name of a network by id: "dusk", "dusk-evm", "ethereum" or "bsc". */
 export const networkName = (cfg, id) => networkNames(cfg)[id] ?? String(id);
@@ -36,58 +34,63 @@ export const networkName = (cfg, id) => networkNames(cfg)[id] ?? String(id);
 export const gasCoin = (cfg, id) =>
   id === "dusk-evm" ? "DUSK" : (cfg.evmNetworks[id]?.currency?.symbol ?? "ETH");
 
+/** Why a paused route can't be used: "Not running on testnet right now". */
+export const notRunning = (cfg) => `Not running on ${networkNames(cfg).badge.toLowerCase()} right now`;
+
 /**
- * A task on the start page: the routes it covers and what it's called. The
- * old-token migrations are one task with a chain to pick.
+ * The bridge's three routes: BNB Smart Chain ↔ Dusk, one route
+ * both ways; Ethereum → Dusk, one way, since the ERC20 contract can't mint;
+ * and Dusk ↔ DuskEVM. Each lists its directions, the way into Dusk first
+ * (or out to DuskEVM); a link to the route opens the first.
  */
 export function bridgeTasks(cfg, routes) {
   const names = networkNames(cfg);
   const tasks = [];
-  const migrations = routes.filter((route) => route.mode === "migration");
-  if (migrations.length)
+  const chain = (id) => {
+    const into = routes.filter((route) => route.mode === "migration" && route.from.id === id);
+    const out = routes.filter((route) => route.mode === "service-transfer" && route.to.id === id);
+    if (!into.length && !out.length) return;
+    const both = into.length && out.length;
     tasks.push({
-      id: "migrate",
-      routes: migrations,
-      title: "Move old DUSK to Dusk",
-      what: `You hold ${migrations.map((route) => oldTokenName(cfg, route.from.id)).join(" or ")}`,
+      id,
+      routes: [...into, ...out],
+      title: into.length ? `${names[id]} ${both ? "↔" : "→"} Dusk` : `Dusk → ${names[id]}`,
     });
-  const deposit = routes.find((route) => route.mode === "duskevm-deposit");
-  if (deposit)
-    tasks.push({
-      id: "to-duskevm",
-      routes: [deposit],
-      title: "Move DUSK to DuskEVM",
-      what: "For apps on DuskEVM that use an EVM wallet. Not needed for old DUSK.",
-    });
-  const withdrawal = routes.find((route) => route.mode === "duskevm-withdrawal");
-  if (withdrawal)
-    tasks.push({
-      id: "from-duskevm",
-      routes: [withdrawal],
-      title: "Move DUSK from DuskEVM to Dusk",
-      what: "Back from DuskEVM to your Dusk account",
-    });
-  const service = routes.find((route) => route.mode === "service-transfer");
-  if (service)
-    tasks.push({
-      id: `to-${service.to.id}`,
-      routes: [service],
-      title: `Send DUSK to ${names[service.to.id]}`,
-      what: `Paid out as ${oldTokenName(cfg, service.to.id)}`,
-    });
+  };
+  chain("bsc");
+  chain("ethereum");
+  const duskEvm = ["duskevm-deposit", "duskevm-withdrawal"].flatMap((mode) => routes.filter((route) => route.mode === mode));
+  if (duskEvm.length) tasks.push({ id: "duskevm", routes: duskEvm, title: `Dusk ↔ ${names["dusk-evm"]}` });
   return tasks;
+}
+
+/** Earlier links' names for a route: `#/move/migrate` and the like still open it. */
+const LINK_NAMES = Object.freeze({
+  "from-duskevm": (route) => route.mode === "duskevm-withdrawal",
+  migrate: (route) => route.mode === "migration",
+  "to-duskevm": (route) => route.mode === "duskevm-deposit",
+});
+
+/**
+ * The route a link names (`#/move/<name>`): a route by its ID
+ * ("bsc-to-dusk"), one of the three routes ("bsc", "ethereum", "duskevm"), or
+ * an earlier name ("migrate", "to-duskevm", "from-duskevm", "to-bsc"). Null
+ * when this network's bridge has none.
+ */
+export function linkedRoute(name, tasks, routes) {
+  const byLink = LINK_NAMES[name];
+  // One of several routes: the first that runs, else the first.
+  const running = (list) => list.find((route) => !route.paused) ?? list[0] ?? null;
+  const task = tasks.find((item) => item.id === name);
+  return (
+    routes.find((route) => route.id === name) ??
+    (task ? running(task.routes) : null) ??
+    (byLink ? running(routes.filter(byLink)) : null) ??
+    routes.find((route) => route.mode === "service-transfer" && name === `to-${route.to.id}`) ??
+    null
+  );
 }
 
 /** "DuskEVM to Dusk": a route in a list row. */
 export const routeTitle = (cfg, route) =>
   `${networkName(cfg, route.from.id)} to ${networkName(cfg, route.to.id)}`;
-
-/** The task a route belongs to. */
-export const taskIdFor = (route) =>
-  route.mode === "migration"
-    ? "migrate"
-    : route.mode === "duskevm-deposit"
-      ? "to-duskevm"
-      : route.mode === "duskevm-withdrawal"
-        ? "from-duskevm"
-        : `to-${route.to.id}`;

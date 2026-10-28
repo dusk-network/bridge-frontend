@@ -27,7 +27,7 @@ const big = (value) => (value === null || value === undefined ? null : BigInt(va
 export function createEvmReads({ cfg, rpc, rpcBatch }) {
   const call = (to, data) => ({ method: "eth_call", params: [{ data, to }, "latest"] });
 
-  /** Old DUSK held, the migration contract's allowance, and the gas coin: one request. */
+  /** The ERC20 or BEP20 DUSK held, the migration contract's allowance, and the gas coin: one request. */
   async function migrationState(network, owner) {
     const chain = cfg.evmNetworks[network];
     const [balance, allowance, coins, price] = await rpcBatch(network, [

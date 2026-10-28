@@ -21,24 +21,40 @@ remain a narrowly scoped wallet and signer.
 ## Routes
 
 One deployment serves one network (`VITE_BRIDGE_PROFILE`), and every route
-stays on that network's counterparts.
+stays on that network's counterparts. There are three routes:
+
+- **BNB Smart Chain ↔ Dusk**, both ways: BEP20 DUSK migrates to Dusk, and
+  DUSK sent to the bridge account is paid out as BEP20 DUSK;
+- **Ethereum → Dusk**, one way, since the ERC20 contract can't mint: ERC20
+  DUSK migrates to Dusk;
+- **Dusk ↔ DuskEVM**, both ways, with DuskEVM's own deposit and withdrawal.
 
 | Mainnet | Testnet |
 | --- | --- |
-| Ethereum → Dusk | Ethereum (Sepolia) → Dusk |
 | BNB Smart Chain → Dusk | |
-| Dusk → BNB Smart Chain | Dusk → Ethereum (Sepolia) |
+| Dusk → BNB Smart Chain | |
+| Ethereum → Dusk | Ethereum (Sepolia) → Dusk, not running |
+| | Dusk → Ethereum (Sepolia), not running |
 | Dusk → DuskEVM, once configured | Dusk → DuskEVM |
 | DuskEVM → Dusk, once configured | DuskEVM → Dusk |
 
 Each chain has one name per network: Dusk and DuskEVM keep theirs next to the
-network badge, and the old-token chains name their testnet in brackets.
+network badge, and Ethereum and BNB Smart Chain name their testnet in
+brackets. DUSK on them is named by its token standard: ERC20 DUSK and BEP20
+DUSK.
 
-The old-token migration contracts and the operated Dusk → BSC account are
-pinned to the values used by the Dusk Web Wallet and documentation. DuskEVM
-routes appear only when its contract IDs and endpoints are configured; mainnet
-has none until DuskEVM mainnet is live. The testnet old-token routes need the
-Messina and Reggio testnet workers running to settle.
+The migration contracts and the operated Dusk → BSC account are pinned to the
+values used by the Dusk Web Wallet and documentation, and so are the accounts
+that pay out each chain's migrations on mainnet: `2427XSRs…` for Ethereum, and
+for BSC the Dusk → BSC bridge account. DuskEVM routes appear only when its
+contract IDs and endpoints are configured; mainnet has none until DuskEVM
+mainnet is live.
+
+Nothing has been paid out on the testnet Sepolia routes since 11 Feb 2026, so
+they're shown as not running: listed, disabled, and never opened unless a link
+names one. `VITE_PAUSED_ROUTES` lists the routes shown that way (testnet:
+`ethereum-to-dusk,dusk-to-ethereum`); `none` runs them again. Transfers already
+sent on a paused route are still followed.
 
 The app supports:
 
@@ -52,8 +68,9 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
 
 ## Pages
 
-- **Start**: the tasks, each with its time and cost, and on a phone without
-  Dusk Wallet whether it works there.
+- **Start**: the bridge card, with each route's time and cost, and on a phone
+  without Dusk Wallet whether it works there. Under it, for DUSK on Ethereum or
+  BNB Smart Chain, a link per chain that opens its route to Dusk.
 - **A task**: the amount, where it goes, and the quote: what you send, the
   network fee as a maximum and its usual cost, the bridge fee, what you
   receive and when. One line says what becomes public.
@@ -74,6 +91,13 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
 - **Contracts**: every address and contract ID each route uses, in full,
   with copy buttons and explorer links, and an operator only where the
   deployment names one.
+
+A link can open the card on a route: `#/move/<route>`, by its ID
+(`bsc-to-dusk`), by one of the three routes (`bsc`, `ethereum`, `duskevm`), or
+as earlier links named it (`migrate`, `to-duskevm`, `from-duskevm`). For a
+route into Dusk, `?to=<account>` hands over the Dusk account it pays, as the
+web wallet's Migrate can: the card shows "Paying <account>" until it's
+changed.
 
 ## My transfers
 
@@ -99,8 +123,9 @@ receipt link or a looked-up hash opens the same transfer on any device.
 - **Migrations** complete when the Dusk payout appears: Messina pays out the
   migrated amount with the migration's transaction hash as the memo
   (`transactionsByMemo`). Anyone can send a transfer with that memo, so only
-  the exact amount counts, and only from `VITE_MIGRATION_PAYOUT_ACCOUNT` when
-  it's set.
+  the exact amount counts, and only from the chain's payout account where one
+  is known (the mainnet defaults, `VITE_ETHEREUM_PAYOUT_ACCOUNT`,
+  `VITE_BSC_PAYOUT_ACCOUNT`, or `VITE_MIGRATION_PAYOUT_ACCOUNT` for both).
 - **Dusk → BSC** completes when the bridge pays the memo address: an ERC-20
   `Transfer` of the amount minus the fee, found with `eth_getLogs`.
 - **Deposits** complete on their DuskEVM credit. Where the adapter's L1 RPC
@@ -111,9 +136,30 @@ receipt link or a looked-up hash opens the same transfer on any device.
 - A payout or credit belongs to one transfer: two equal transfers to the same
   address each need their own, and take them in the order they were sent.
 - **Withdrawals** show their three steps, sent, proved and claimed, with
-  times, the claim time from the Portal and dispute game, and the next action.
-  Readiness is read from the Portal and dispute-game state, never inferred
-  from elapsed time.
+  times, the claim date, and the next action. Readiness is read from the
+  Portal and dispute-game state, never inferred from elapsed time.
+
+The claim date is when the Portal takes the claim: the later of the proof
+plus the Portal's proof maturity delay, and the proof's dispute game's
+resolution plus its finality delay. Both are read on Dusk, from the Portal and
+the game's hub, in one Multicall for Dusk query (once a check knows the
+proof's game). The times are the contracts' own: testnet's deployed contracts
+count Dusk block height × 10, which the latest block converts to a date; the
+others count block time, a second later for their strict comparisons.
+
+- Before the proof: "Claim 7 days after you prove. You can prove about 30
+  minutes after sending.", with the chain's figures.
+- After it: "Claim from Mon 2 Nov, 04:20 CET" once the game has resolved, and
+  "Claim from about …", the earliest it can be, before that. A game left
+  unresolved more than an hour past its clock is late: "Waiting for DuskEVM
+  to settle this proof. Claim from … at the soonest.", with no countdown or
+  calendar entry, since that date moves on with each check.
+- A claim is ready once the Portal's check passes and its date has come.
+- A proof goes against a game that covers the withdrawal, has already
+  resolved, and that the Portal would take, where there is one: the anchor
+  state registry calls it proper and respected. Its date is then exact when
+  the proof is made ("If you prove now, you can claim from …"). Otherwise the
+  proof goes against the newest covering game.
 
 Several contract reads on one screen go to the node as one Multicall for Dusk
 query (`93de287b…6ce1d4`, mainnet and testnet). A read that fails inside a
@@ -126,7 +172,8 @@ only this network's:
 
 - **DuskEVM withdrawals**: the Portal's proof maturity and dispute game
   finality delays, and how often outputs come, from the gaps between the
-  dispute game factory's latest games: two Multicall for Dusk queries.
+  dispute game factory's latest games: two Multicall for Dusk queries. With
+  fewer than two games of the Portal's type, the delays are still shown.
 - **DuskEVM deposits**: how far DuskEVM trails Dusk, its latest block against
   Dusk's own time for the Dusk block it last took in (the L1Block predeploy).
 - The chains are asked at most every 10 minutes, and their answers are kept
@@ -153,7 +200,10 @@ cost next to it.
 
 Copy `.env.example` to `.env.local`. Empty values mean the default. The
 DuskEVM contract IDs come from the trusted deployment address book. They are
-deliberately not guessed from EVM addresses.
+deliberately not guessed from EVM addresses. The anchor state registry's
+(`VITE_DUSKEVM_ANCHOR_STATE_REGISTRY_CONTRACT_ID`) is optional, and testnet's
+by default. Without it (`none`), a proof goes against the newest covering
+game.
 
 The same keys can be provided before the app loads through
 `window.__DUSK_BRIDGE_CONFIG__`, which allows one immutable build to be
@@ -170,14 +220,18 @@ VITE_DUSKEVM_DISPUTE_GAME_FACTORY_CONTRACT_ID=<from the address book>
 
 `.env.example` lists the testnet values in use today.
 
+The footer and About this page say the bridge is operated by Dusk, and link
+Dusk's Terms of use and Privacy policy, as the explorer does. A deployment can
+name its own (`VITE_TERMS_URL`, `VITE_PRIVACY_URL`), or another operator for a
+route (`VITE_MIGRATION_OPERATOR`, `VITE_SERVICE_OPERATOR`,
+`VITE_DUSKEVM_OPERATOR`), which the Contracts sheet and the footer then name.
+
 Some page content appears only when configured, since none of it is guessed:
-the support contact (`VITE_SUPPORT_URL`, `VITE_SUPPORT_LABEL`), the other
+a support contact (`VITE_SUPPORT_URL`, `VITE_SUPPORT_LABEL`), the other
 network's bridge site (`VITE_MAINNET_BRIDGE_URL`, `VITE_TESTNET_BRIDGE_URL`),
-Terms, Privacy and Status links, a guide per route (`VITE_DOCS_MIGRATION_URL`,
+a Status link, and a guide per route (`VITE_DOCS_MIGRATION_URL`,
 `VITE_DOCS_SERVICE_URL`, `VITE_DOCS_DUSKEVM_URL`; the docs' bridge guides
-describe the web wallet's bridge), and the operator named per route in the
-Contracts sheet and the footer (`VITE_MIGRATION_OPERATOR`,
-`VITE_SERVICE_OPERATOR`, `VITE_DUSKEVM_OPERATOR`).
+describe the web wallet's bridge).
 
 The page uses the system's fonts: the Söhne files the mockups used aren't
 licensed for this repository.

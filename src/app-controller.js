@@ -6,10 +6,10 @@
 
 import { entryId, readActivity, recordActivity, saveActivity, updateActivity, useActivityNetwork } from "./activity.js";
 import { bridgeRoutes, getBridgeRoute } from "./bridge-routes.js";
-import { cardRoute, choosePair, flipRoute, followsWallets, fromChoices, primaryButton, routeBetween, toChoices } from "./bridge-card.js";
+import { cardRoute, choosePair, entryRoutes, flipRoute, followsWallets, fromChoices, handedOverRecipient, primaryButton, routeBetween, toChoices } from "./bridge-card.js";
 import { claimReminder } from "./calendar.js";
 import { config } from "./config.js";
-import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
+import { bridgeOperator, contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
 import { followAfterDiscovery, mergeTransfer, mergeTransfers, partyKey } from "./discovery.js";
 import { createDiscoveryRuns } from "./discovery-runs.js";
 import { depositRequest, submitDuskEvmDeposit } from "./dusk-deposit.js";
@@ -20,11 +20,12 @@ import { connectEvmWallet, getEvmState, initializeEvmWallet, subscribeEvmWallet 
 import { createFormReads } from "./form-reads.js";
 import { formatDusk, formatLux, formatUnitsGrouped } from "./format.js";
 import { approveMigration, submitMigration } from "./legacy-migration.js";
-import { bridgeTasks, networkName, networkNames } from "./names.js";
+import { bridgeTasks, linkedRoute, networkName, networkNames, notRunning, routeUnits, tokenName } from "./names.js";
 import {
   actionLead,
   actionPrivacy,
   pricedReview,
+  recipientLine,
   DUSK_WALLET_URL,
   evmWalletName,
   receiptModel,
@@ -33,7 +34,7 @@ import {
   routeSteps,
   transfersModel,
 } from "./page-models.js";
-import { canonicalHash, parseLocation, quotesOn, receiptUrl, transferHref } from "./permalink.js";
+import { canonicalHash, moveHref, parseLocation, quotesOn, receiptUrl, transferHref } from "./permalink.js";
 import { buildQuote, parseAmount, withdrawalStepMax } from "./quote.js";
 import { serviceTransferRequest, submitServiceTransfer } from "./service-transfer.js";
 import { createServices, proofSubmitterFor } from "./services.js";
@@ -231,11 +232,15 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         terms: cfg.links.terms,
       },
       officialSite: cfg.links.sites[cfg.profile],
-      operators: [
-        cfg.migrations.length && cfg.operators.migration ? { name: cfg.operators.migration, route: "moving old DUSK" } : null,
-        cfg.service && cfg.operators.service ? { name: cfg.operators.service, route: `Dusk to ${networkName(cfg, cfg.service.network)}` } : null,
-        cfg.duskEvm.enabled && cfg.operators.duskEvm ? { name: cfg.operators.duskEvm, route: "DuskEVM" } : null,
-      ].filter(Boolean),
+      // Who runs the bridge, once; by route only where they differ.
+      operator: bridgeOperator(cfg),
+      operators: bridgeOperator(cfg)
+        ? []
+        : [
+            cfg.migrations.length && cfg.operators.migration ? { name: cfg.operators.migration, route: "migrations to Dusk" } : null,
+            cfg.service && cfg.operators.service ? { name: cfg.operators.service, route: `Dusk to ${networkName(cfg, cfg.service.network)}` } : null,
+            cfg.duskEvm.enabled && cfg.operators.duskEvm ? { name: cfg.operators.duskEvm, route: "DuskEVM" } : null,
+          ].filter(Boolean),
     });
   }
 
@@ -272,7 +277,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const { page } = state.page;
     if (page === "transfer") return receiptHtml();
     if (page === "lookup") return lookupPage(state.lookup);
-    if (page === "move" && !taskFor(state.page.task)) return unavailablePage({ title: unavailableTitle(state.page.task) });
+    if (page === "move" && !linkFor(state.page.task)) return unavailablePage({ title: unavailableTitle(state.page.task) });
     // The card: its Bridge tab, or its Activity tab for My transfers.
     return cardHtml(page === "transfers" ? "activity" : "bridge");
   }
@@ -281,40 +286,59 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   // The form
   // -------------------------------------------------------------------------
 
-  function taskFor(id) {
-    return tasks.find((task) => task.id === id) ?? null;
-  }
+  /** The route a link names: by its ID, one of the three routes, or an earlier name. */
+  const linkFor = (name) => linkedRoute(name, tasks, routes);
 
-  /** Why a task link opens no card: DuskEVM not on this network yet, or no such task here. */
+  /** Why a link opens no card: DuskEVM not on this network yet, or no such route here. */
   const unavailableTitle = (id) =>
-    ["to-duskevm", "from-duskevm"].includes(id) && !cfg.duskEvm.enabled
+    ["duskevm", "to-duskevm", "from-duskevm", "dusk-to-dusk-evm", "dusk-evm-to-dusk"].includes(id) && !cfg.duskEvm.enabled
       ? `${names["dusk-evm"]} isn't on ${names.badge} yet`
       : `This bridge doesn't offer that on ${names.badge}`;
 
   /**
-   * The card's state. A link to a task opens it on that task's route; the
-   * card otherwise opens on the pair the connected wallets suggest, and keeps
-   * whatever pair was picked. A link to a task that isn't here opens none.
+   * The card's state. A link to a route opens it on that route, with the
+   * Dusk recipient the link hands over, once, as the page opens (`follow`):
+   * after that the card keeps whatever is picked. The card otherwise opens
+   * on the pair the connected wallets suggest. A link to a route that isn't
+   * here opens none.
    */
-  function ensureCard(page = state.page) {
-    const task = page?.page === "move" ? taskFor(page.task) : null;
+  function ensureCard(page = state.page, { follow = false } = {}) {
+    const linked = page?.page === "move" ? linkFor(page.task) : null;
     if (!state.form) {
       const route = cardRoute(page, tasks, routes, { dusk: Boolean(duskAccount()), evm: Boolean(evmAccount()) });
       if (!route) return null;
       state.form = {
         amount: "",
         error: "",
+        // A recipient handed over in the link, while it's the one shown.
+        handedOver: "",
         // What each .dusk name typed as the recipient pointed to when looked up.
         lookups: {},
         menu: null,
-        pairChosen: Boolean(task),
+        pairChosen: Boolean(linked),
         recipientEditing: false,
         recipientInput: "",
         routeId: route.id,
         routeOpen: false,
       };
-    } else if (task) setPair(task.routes[0]);
+      handOver(page, route);
+    } else if (follow && linked) {
+      setPair(linked);
+      handOver(page, linked);
+    }
     return state.form;
+  }
+
+  /**
+   * The Dusk recipient a link hands over: filled in and shown as "Paying …"
+   * until it's changed. Connecting Dusk Wallet doesn't replace it.
+   */
+  function handOver(page, route) {
+    const to = handedOverRecipient(page, route);
+    if (!to || !state.form) return;
+    state.form.recipientInput = to;
+    state.form.recipientEditing = false;
+    state.form.handedOver = to;
   }
 
   /** Moves the card to `route`: its reads start again, and a typed recipient of the other kind goes. */
@@ -433,7 +457,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   /** The card's networks to choose from, with DuskEVM shown as not live yet where it isn't. */
   function networkChoices(side, route) {
     const nameOf = (id) => networkName(cfg, id);
-    const choices = side === "from" ? fromChoices(routes, route.from.id, nameOf) : toChoices(routes, route.from.id, route.to.id, nameOf);
+    const paused = notRunning(cfg);
+    const choices = side === "from" ? fromChoices(routes, route.from.id, nameOf, paused) : toChoices(routes, route.from.id, route.to.id, nameOf, paused);
     const listed = choices.map((choice) => ({
       ...choice,
       name: nameOf(choice.id),
@@ -450,7 +475,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const reads = formReads.reads;
     const walletName = evmWalletName(state.evmState);
     const phoneOnly = isPhone() && !duskState().installed;
-    const unit = route.mode === "migration" ? "old DUSK" : "DUSK";
+    // ERC20 or BEP20 DUSK on Ethereum and BNB Smart Chain, DUSK on Dusk and DuskEVM.
+    const { receive: receiveUnit, send: unit } = routeUnits(route);
     // What the source holds: the public balance on Dusk, the wallet's on an EVM chain.
     const holdings = route.signer === "dusk" ? reads.duskBalance : route.mode === "migration" ? reads.migration?.balanceWei : reads.l2?.balanceWei;
     const balance =
@@ -465,18 +491,16 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const resolved = typed?.name && typed.address ? { address: typed.address, name: typed.name } : null;
     const destinationIsOwn =
       route.to.kind === "dusk" ? destination && destination === duskAccount() : destination && destination.toLowerCase() === evmAccount().toLowerCase();
-    const who = resolved
-      ? `<b>${html(resolved.name)}</b> (${html(short(destination))})`
-      : destinationIsOwn && route.to.kind === "dusk" && duskName()
-        ? `<b>${html(duskName())}</b>`
-        : `<b class="mono">${html(short(destination))}</b>`;
-    const line = !destination
-      ? route.to.kind === "dusk"
-        ? "Connect Dusk Wallet, or add a Dusk account"
-        : "Connect an EVM wallet, or add a 0x address"
-      : destinationIsOwn
-        ? `to your ${route.to.kind === "dusk" ? "account" : walletName} ${who}`
-        : `to ${who}`;
+    const line = recipientLine(route, {
+      connected: Boolean(duskAccount()),
+      destination,
+      duskName: duskName(),
+      // A recipient the link handed over, as long as it's the one typed.
+      handedOver: Boolean(state.form.handedOver) && state.form.recipientInput === state.form.handedOver,
+      own: Boolean(destinationIsOwn),
+      resolved,
+      walletName,
+    });
     const toVm = {
       canReset: Boolean(state.form.recipientInput) && Boolean(route.to.kind === "dusk" ? duskAccount() : evmAccount()),
       editing: state.form.recipientEditing || (!destination && Boolean(state.form.recipientInput)),
@@ -491,7 +515,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       resolved,
     };
     let notice = null;
-    if (route.signer === "dusk" && phoneOnly)
+    if (route.paused) notice = { html: `${html(notRunning(cfg))}.`, icon: "info" };
+    else if (route.signer === "dusk" && phoneOnly)
       notice = {
         actions: `<div class="btn-row"><button type="button" class="btn sec sm" data-copy="${html(globalThis.location?.href ?? "")}" aria-label="Copy this page's link">Copy link</button>${globalThis.navigator?.share ? '<button type="button" class="btn sec sm" data-action="share">Share link</button>' : ""}</div>`,
         html: "This needs Dusk Wallet on a computer.",
@@ -518,6 +543,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       button: { ...button, href: DUSK_WALLET_URL },
       canFlip: Boolean(flipRoute(routes, route)),
       canMax: quote.maxLux !== null && quote.maxLux !== undefined && quote.maxLux > 0n,
+      // DUSK on Ethereum or BNB Smart Chain, for whoever doesn't know to pick it as From.
+      entry: entryRoutes(routes, route).map((item) => ({ href: moveHref(item.id), name: networkName(cfg, item.from.id) })),
       error: state.form.error,
       from: { balance, balanceLabel: route.signer === "dusk" ? "Public balance" : "Balance", net: netOf(route.from.id) },
       fromChoices: state.form.menu === "from" ? networkChoices("from", route) : [],
@@ -531,7 +558,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       }),
       quote,
       receive: quote.receiveLux !== null && quote.receiveLux > 0n ? formatLux(quote.receiveLux) : "",
-      receiveUnit: "DUSK",
+      receiveUnit,
       routeLine: routeLine(route, cfg, { gasPrice: duskGasPrice(), timing: timing() }),
       routeOpen: state.form.routeOpen,
       steps: routeSteps(route, quote),
@@ -579,7 +606,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     }
   }
 
-  const isCardPage = () => state.page.page === "home" || (state.page.page === "move" && Boolean(taskFor(state.page.task)));
+  const isCardPage = () => state.page.page === "home" || (state.page.page === "move" && Boolean(linkFor(state.page.task)));
 
   /** Balances and prices for the form's route, from the node and the chains. */
   function loadReads() {
@@ -846,7 +873,13 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   function renderSheet() {
     if (state.sheet === "contracts") {
       dialog.className = "sheet wide";
-      dialog.innerHTML = contractsSheet({ badge: names.badge, groups: contractGroups(cfg), servers: serversLine(cfg) });
+      dialog.innerHTML = contractsSheet({
+        badge: names.badge,
+        groups: contractGroups(cfg),
+        links: { privacy: cfg.links.privacy, terms: cfg.links.terms },
+        operator: bridgeOperator(cfg),
+        servers: serversLine(cfg),
+      });
     } else if (state.sheet === "network") {
       const other = cfg.profile === "testnet" ? "mainnet" : "testnet";
       dialog.className = "sheet narrow";
@@ -941,7 +974,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       receive: {
         amount: formatLux(quote.receiveLux ?? lux),
         chain: route.to.id,
-        unit: "DUSK",
+        unit: routeUnits(route).receive,
         where: `${to} · ${
           route.to.kind === "dusk" && destination === duskAccount() && duskName()
             ? duskName()
@@ -954,7 +987,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       send: {
         amount: amountText,
         chain: route.from.id,
-        unit: route.mode === "migration" ? "old DUSK" : "DUSK",
+        unit: routeUnits(route).send,
         where: `${from} · ${route.signer === "dusk" ? duskName() || short(duskAccount()) : short(evmAccount())}`,
       },
       signer: { account: signerNow(route.signer), wallet: route.signer },
@@ -970,11 +1003,11 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       const steps = [];
       if (needsApproval)
         steps.push({
-          confirmLabel: `Approve ${amountText} old DUSK in ${walletName === "your EVM wallet" ? "your wallet" : walletName}`,
+          confirmLabel: `Approve ${amountText} ${tokenName(network)} in ${walletName === "your EVM wallet" ? "your wallet" : walletName}`,
           lines: approveLines({ amountLux: lux, cfg, fee: fee(migration.gas?.approve), network }),
-          title: `Approve exactly ${amountText} old DUSK`,
+          title: `Approve exactly ${amountText} ${tokenName(network)}`,
           walletName,
-          what: `Lets the Dusk migration contract take <b>exactly ${html(amountText)} old DUSK</b> from <code class="mono">${html(short(evmAccount()))}</code>.`,
+          what: `Lets the Dusk migration contract take <b>exactly ${html(amountText)} ${html(tokenName(network))}</b> from <code class="mono">${html(short(evmAccount()))}</code>.`,
           when: "Now",
         });
       steps.push({
@@ -982,7 +1015,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         lines: migrateLines({ amountLux: lux, cfg, duskAccount: destination, fee: fee(migration.gas?.migrate), network }),
         title: "Migrate",
         walletName,
-        what: `Locks the old DUSK in the migration contract. The bridge then pays <b>${html(amountText)} DUSK</b> to <code class="mono">${html(short(destination))}</code> on Dusk.`,
+        what: `Locks the ${html(tokenName(network))} in the migration contract. The bridge then pays <b>${html(amountText)} DUSK</b> to <code class="mono">${html(short(destination))}</code> on Dusk.`,
         when: needsApproval ? "After step 1" : "Now",
       });
       reviews.start({
@@ -990,7 +1023,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         after: needsApproval ? "Step 2 opens when the approval is confirmed." : "",
         current: 0,
         steps,
-        sub: `Old DUSK on ${from} to Dusk${steps.length === 2 ? ` · ${walletName === "your EVM wallet" ? "your wallet" : walletName} asks you twice` : ""}`,
+        sub: `${tokenName(network)} on ${from} to Dusk${steps.length === 2 ? ` · ${walletName === "your EVM wallet" ? "your wallet" : walletName} asks you twice` : ""}`,
       });
       openSheet("review", opener);
       return;
@@ -1084,7 +1117,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const label = kind === "prove" ? "Prove on Dusk" : "Claim on Dusk";
     // What this step costs at most: an estimate until the request is ready.
     const stepMax = withdrawalStepMax({ gasPrice: duskGasPrice(), withdrawalGas: entry.withdrawalGas ? BigInt(entry.withdrawalGas) : 0n });
-    const lead = (maxLux) => actionLead(kind, entry, { account: duskAccount(), amountLux: view.amount, maxLux, name: duskName(), wait: view.time?.wait ?? null });
+    // A proof says when it can be claimed: by the Portal's wait until the request says the date.
+    const lead = (maxLux, claim = null) =>
+      actionLead(kind, entry, { account: duskAccount(), amountLux: view.amount, claim, maturity: view.time?.maturity ?? null, maxLux, name: duskName() });
     const review = reviews.start({
       amountLux: entry.amountLux,
       checks: [],
@@ -1138,15 +1173,15 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
           note: "The DuskEVM withdrawal portal on Dusk.",
           withdrawal: details && { ...details, value: prepared.withdrawal.value },
         });
-        return { account, lines, request };
+        return { account, claim: prepared.claim ?? null, lines, request };
       },
-      ({ account, lines, request }) => {
+      ({ account, claim, lines, request }) => {
         // Prepared for the account Dusk Wallet had then: only it can confirm,
         // and it's the one the proof or claim makes public.
         review.signer = { account, wallet: "dusk" };
         review.privacy = actionPrivacy(kind, privacyLine(route, cfg, { dusk: entry.destination, evm: entry.sender, name: duskPartyName(entry.destination) }), { account, name: duskName() });
         review.request = request;
-        review.lead = lead(BigInt(request.gas.limit) * BigInt(request.gas.price));
+        review.lead = lead(BigInt(request.gas.limit) * BigInt(request.gas.price), claim);
         formReads.usePrice(BigInt(request.gas.price));
         review.steps[0] = { ...review.steps[0], lines };
       },
@@ -1302,7 +1337,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     if (state.sheet === "review") closeSheet();
     state.page = next;
     if (isCardPage()) {
-      ensureCard(next);
+      ensureCard(next, { follow: true });
       void loadReads();
     }
     if (next.page === "transfer") void openReceipt(next.hash);
@@ -1357,7 +1392,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const route = entry && routeOf(entry.routeId);
     if (!entry || !route) return;
     const view = transferView(entry, { cfg, route, timing: timing() });
-    if (!view.countdown) return;
+    // A late claim's date is only the soonest: it's not put in a calendar.
+    if (!view.countdown || view.countdown.overdue) return;
     const ics = claimReminder({
       amount: view.amountText || "DUSK",
       claimAt: view.countdown.at,
@@ -1448,6 +1484,13 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       state.form.menu = null;
       renderMain();
       if (!event.target.closest("[data-action]")) return;
+    }
+    // A link to the route already open opens it again: no hash change says so.
+    const move = event.target.closest('a[href^="#/move/"]');
+    if (move && move.getAttribute("href") === globalThis.location?.hash) {
+      event.preventDefault();
+      navigate();
+      return;
     }
     const copyTarget = event.target.closest("[data-copy]");
     if (copyTarget) {

@@ -34,17 +34,17 @@ function ruskLike(answers) {
 test("node queries send the GraphQL text itself, which Rusk parses", async () => {
   const rusk = ruskLike({
     graphql: (selection) => {
-      assert.equal(selection, "block(height: -1) { header { timestamp } }");
-      return { block: { header: { timestamp: 1_792_980_039 } } };
+      assert.equal(selection, "block(height: -1) { header { height timestamp } }");
+      return { block: { header: { height: 4_704_959, timestamp: 1_793_156_989 } } };
     },
   });
   const node = createDuskNode({ fetch: rusk.fetch, url: `${NODE}/` });
 
-  assert.equal(await node.latestBlockTimestamp(), 1_792_980_039n);
+  assert.deepEqual({ ...(await node.latestBlock()) }, { height: 4_704_959n, timestamp: 1_793_156_989n });
   assert.equal(rusk.requests[0].url, `${NODE}/on/graphql/query`);
   assert.equal(
     rusk.requests[0].body,
-    "query { block(height: -1) { header { timestamp } } }",
+    "query { block(height: -1) { header { height timestamp } } }",
   );
 });
 

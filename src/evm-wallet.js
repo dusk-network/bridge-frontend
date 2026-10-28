@@ -117,7 +117,7 @@ async function initializeReown() {
         public: { http: [rpcUrl] },
       },
     });
-    // Only this deployment's networks: its old-token chains and DuskEVM.
+    // Only this deployment's networks: Ethereum, BNB Smart Chain and DuskEVM, as configured.
     const evmIds = new Set([
       ...config.migrations,
       ...(config.service ? [config.service.network] : []),

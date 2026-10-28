@@ -2,11 +2,14 @@ import { config } from "./config.js";
 import { networkName } from "./names.js";
 
 /**
- * The routes one deployment offers, all on its profile's network: old-token
- * migrations into Dusk, the operated Dusk -> EVM transfer, and DuskEVM only
- * where its contracts are configured.
+ * The routes one deployment offers, all on its profile's network:
+ * migrations of ERC20 and BEP20 DUSK into Dusk, the operated Dusk -> EVM
+ * transfer, and DuskEVM only where its contracts are configured. A route the
+ * deployment lists as paused stays, marked `paused`: it's shown as not
+ * running, and the transfers on it are still followed.
  */
 export function buildRoutes(cfg) {
+  const paused = new Set(cfg.pausedRoutes ?? []);
   const dusk = Object.freeze({ id: "dusk", kind: "dusk", label: networkName(cfg, "dusk") });
   const evm = (id) => Object.freeze({ id, kind: "evm", label: networkName(cfg, id) });
   const routes = cfg.migrations.map((id) => ({
@@ -52,7 +55,7 @@ export function buildRoutes(cfg) {
       },
     );
   }
-  return Object.freeze(routes.map((route) => Object.freeze(route)));
+  return Object.freeze(routes.map((route) => Object.freeze({ ...route, paused: paused.has(route.id) })));
 }
 
 export const bridgeRoutes = buildRoutes(config);

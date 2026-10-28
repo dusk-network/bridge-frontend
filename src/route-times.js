@@ -38,28 +38,33 @@ const configured = (value) => (value ? { seconds: value, source: "config" } : nu
 
 /**
  * How long `route` usually takes on this network, or null when nothing says.
- * A withdrawal also gives its parts: `report`, until it can be proved, and
- * `wait`, from the proof to the claim.
+ * A withdrawal also gives its parts: `prove`, about when it can be proved
+ * (one output after it's sent), `report`, when it's late to be provable (two
+ * outputs), `maturity`, the Portal's wait from a proof to its claim, and
+ * `wait`, the longer of that and the game's finality. Before there are two
+ * games to tell how often outputs come (just after launch, or a switch of
+ * game type), it has the waits without `prove` and `report`.
  *
  * @param {object} route
  * @param {object} cfg the deployment config
  * @param {object} [timing]
- * @param {{ deposit?: { lagSeconds: number }, withdrawal?: { finalitySeconds: number, maturitySeconds: number, outputSeconds: number } } | null} [timing.chain]
+ * @param {{ deposit?: { lagSeconds: number }, withdrawal?: { finalitySeconds: number, maturitySeconds: number, outputSeconds: number | null } } | null} [timing.chain]
  *   what the chains said, as `createChainTimes` keeps it
  * @param {object[]} [timing.transfers] the transfers this browser knows
  * @param {number} [timing.now]
- * @returns {{ seconds: number, source: string, report?: number, wait?: number } | null}
+ * @returns {{ seconds: number, source: string, maturity?: number, prove?: number, report?: number, wait?: number } | null}
  */
 export function routeTime(route, cfg, { chain = null, now = Date.now(), transfers = [] } = {}) {
   if (route.mode === "duskevm-withdrawal") {
     const read = chain?.withdrawal;
-    if (!read?.outputSeconds || !read.maturitySeconds) return null;
+    if (!read?.maturitySeconds) return null;
+    const wait = Math.max(read.maturitySeconds, read.finalitySeconds ?? 0);
+    if (!read.outputSeconds) return { maturity: read.maturitySeconds, seconds: wait, source: "chain", wait };
     // An output covers DuskEVM up to about when its batch reached Dusk, and
     // the batcher posts at least as often as outputs come: a withdrawal
     // waits at most about two outputs to be reported.
     const report = 2 * read.outputSeconds;
-    const wait = Math.max(read.maturitySeconds, read.finalitySeconds ?? 0);
-    return { report, seconds: report + wait, source: "chain", wait };
+    return { maturity: read.maturitySeconds, prove: read.outputSeconds, report, seconds: report + wait, source: "chain", wait };
   }
   if (route.mode === "duskevm-deposit" && chain?.deposit)
     return { seconds: chain.deposit.lagSeconds + DUSK_BLOCK_SECONDS, source: "chain" };
@@ -83,6 +88,14 @@ export function aboutTime(seconds) {
   if (minutes <= 90) return `~${minutes} min`;
   const hours = Math.round(minutes / 60);
   return hours < 48 ? `~${hours} hours` : `~${Math.round(minutes / 1_440)} days`;
+}
+
+/** The same in words: "about 30 minutes", "about 1 hour", "about 7 days". */
+export function aboutWords(seconds) {
+  const text = aboutTime(seconds);
+  const minutes = /^~(\d+) min$/u.exec(text);
+  if (minutes) return `about ${minutes[1]} minute${minutes[1] === "1" ? "" : "s"}`;
+  return text.replace(/^~/u, "about ");
 }
 
 /** The route's time as every page writes it, or "" when it isn't known. */
