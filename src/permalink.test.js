@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { canonicalHash, parseLocation, receiptUrl, transferHref } from "./permalink.js";
+import { canonicalHash, parseLocation, quotesOn, receiptUrl, transferHref } from "./permalink.js";
 
 const DUSK = "3835e0".padEnd(64, "a");
 const EVM = `0x${"Ab".repeat(32)}`;
@@ -35,4 +35,9 @@ test("a malformed link opens a page instead of failing", () => {
   assert.deepEqual(parseLocation("#/lookup/%"), { page: "lookup", query: "%" });
   assert.deepEqual(parseLocation("#/transfer/%E0%A4%A"), { page: "lookup", query: "%E0%A4%A" });
   assert.deepEqual(parseLocation("#/%"), { page: "home" });
+});
+
+test("look up quotes no fee or time, so nothing draws it again while a hash is typed", () => {
+  for (const hash of ["#/lookup", "#/lookup/0xab", "#/transfer/not-a-hash"]) assert.equal(quotesOn(parseLocation(hash)), false, hash);
+  for (const hash of ["#/", "#/move/migrate", `#/transfer/${"ab".repeat(32)}`, "#/transfers"]) assert.equal(quotesOn(parseLocation(hash)), true, hash);
 });

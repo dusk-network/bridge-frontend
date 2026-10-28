@@ -115,7 +115,7 @@ test("a migration is pending until Messina pays it out on Dusk", async () => {
   receipt = { blockNumber: toHex(100n), status: "0x1" };
   const mined = await tracking.refresh(entry, ROUTES.migration);
   assert.equal(mined.status, "pending");
-  assert.match(mined.note, /Paid out on Dusk,/u);
+  assert.equal(mined.note, "Waiting for the payout on Dusk.");
 
   payouts = [
     { events: [{ data: { receiver: "someone else", value: "3000000000" }, reverted: false, topic: "moonlight" }], origin: "00".repeat(32) },
@@ -633,4 +633,33 @@ test("a credit from before the deposit was sent here isn't taken as its credit",
   const tracking = createTracking({ config: cfg, node: node({ transaction: async () => depositTx }), rpc });
   const entry = { hash: DUSK_HASH, id: "sent", routeId: ROUTES.deposit.id, scanFrom: "1700" };
   assert.equal((await tracking.refresh(entry, ROUTES.deposit, { others: [entry] })).destinationHash, "0x02");
+});
+
+test("a failed deposit whose call data doesn't read as a deposit ends as failed", async () => {
+  const depositTx = duskTx({
+    callData: { contractId: "11".repeat(32), data: "ab", fnName: "depositETHToWithValue" },
+    error: "Panic: invalid arguments",
+    json: { sender: SENDER },
+  });
+  const tracking = createTracking({ config: cfg, node: node({ transaction: async () => depositTx }), rpc: fakeRpc({}) });
+  const result = await tracking.refresh({ hash: DUSK_HASH, routeId: ROUTES.deposit.id }, ROUTES.deposit);
+  assert.deepEqual([result.status, result.note], ["failed", "The Dusk transaction failed, so the deposit didn't enter the bridge."]);
+});
+
+test("a sent proof the Portal took and then rejected leaves the withdrawal ready to prove again", async () => {
+  const included = 1_793_000_000n;
+  let status = { blockNumber: 50n, details: { amountWei: 10n ** 17n }, provenAt: included, stage: "ready_to_prove", withdrawal: { gasLimit: 519_542n } };
+  const tracking = createTracking({
+    config: cfg,
+    node: node({ transaction: async () => duskTx({ blockTimestamp: included }) }),
+    now: () => 1_793_100_000_000,
+    rpc: fakeRpc({}),
+    withdrawals: { loadWithdrawalStatus: async () => status },
+  });
+  const proving = { hash: EVM_HASH, pendingAction: "prove", pendingHash: "aa".repeat(32), routeId: ROUTES.withdrawal.id };
+  const settled = await tracking.refresh(proving, ROUTES.withdrawal);
+  assert.deepEqual([settled.stage, settled.pendingAction, settled.proveHash], ["ready_to_prove", null, "aa".repeat(32)]);
+  // An older proof the Portal still shows, from before this one, keeps it pending.
+  status = { ...status, provenAt: included - 3_600n };
+  assert.equal((await tracking.refresh(proving, ROUTES.withdrawal)).stage, "prove_submitted");
 });

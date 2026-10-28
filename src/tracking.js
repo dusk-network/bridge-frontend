@@ -352,8 +352,7 @@ export function createTracking(deps) {
             (!payer || event.data?.sender === payer),
         ),
     );
-    if (!payout)
-      return pending(`Paid out on ${name("dusk")}, usually within an hour.`, patch);
+    if (!payout) return pending(`Waiting for the payout on ${name("dusk")}.`, patch);
     const paid = await node.transaction(payout.origin);
     return completed({
       ...patch,
@@ -397,7 +396,7 @@ export function createTracking(deps) {
     const order = orderAmongAlike(
       { hash: entry.hash, sourceAt: sourceAt ?? now() },
       [...(await serviceAlike(entry, to, value)), ...localAlike(entry, others, isAlike)],
-      { horizonMs: Math.max(SERVICE_ORDER_HORIZON_MS, 4 * service.delaySeconds * 1_000), settled: settledHashes(others) },
+      { horizonMs: Math.max(SERVICE_ORDER_HORIZON_MS, 4 * (service.delaySeconds ?? 0) * 1_000), settled: settledHashes(others) },
     );
     // Where an earlier check stopped, if it started from the same transfer.
     const scanBasis = String(order.since);
@@ -423,15 +422,8 @@ export function createTracking(deps) {
       (log) => BigInt(log.data) === expected,
       { skip: order.skip, taken: takenDestinations(entry, others) },
     );
-    if (!match) {
-      const late = sourceAt && now() - sourceAt > service.delaySeconds * 2_000;
-      return pending(
-        late
-          ? "Taking longer than usual."
-          : `Paid out on ${name(network)}, usually within an hour.`,
-        { ...patch, scanBasis, scanFrom: next.toString() },
-      );
-    }
+    if (!match)
+      return pending(`Waiting for the payout on ${name(network)}.`, { ...patch, scanBasis, scanFrom: next.toString() });
     return completed({
       ...patch,
       destinationAt: await blockTime(network, match.blockNumber),
@@ -534,7 +526,16 @@ export function createTracking(deps) {
       String(call.contractId).toLowerCase() !== config.duskEvm.l1StandardBridgeContractId
     )
       return failed("This transaction isn't a DuskEVM deposit.", { sourceAt });
-    const args = decodeDepositArgs(call.data);
+    let args;
+    try {
+      args = decodeDepositArgs(call.data);
+    } catch {
+      // Arguments that don't read as a deposit's never put DUSK in the bridge.
+      return failed(
+        tx.error ? "The Dusk transaction failed, so the deposit didn't enter the bridge." : "This transaction isn't a DuskEVM deposit.",
+        { feeLux: duskFeePaid(tx), sender: tx.json?.sender, sourceAt },
+      );
+    }
     const patch = {
       amountLux: args.amountLux.toString(),
       destination: args.to,
@@ -548,8 +549,7 @@ export function createTracking(deps) {
     if (viaAdapter?.failed) return failed(viaAdapter.failed, patch);
     if (viaAdapter?.hash)
       return completed({ ...patch, destinationAt: viaAdapter.at, destinationHash: viaAdapter.hash });
-    if (viaAdapter === null)
-      return pending(`Waiting for ${name("dusk-evm")}. Usually within a few minutes.`, patch);
+    if (viaAdapter === null) return pending(`Waiting for ${name("dusk-evm")}.`, patch);
     const credit = await eventCredit(
       entry,
       { amountLux: args.amountLux, height: tx.blockHeight, recipient: args.to, sender: tx.json?.sender, sentAt: sourceAt },
@@ -561,7 +561,7 @@ export function createTracking(deps) {
         patch,
       );
     if (!credit.hash)
-      return pending(`Waiting for ${name("dusk-evm")}. Usually within a few minutes.`, {
+      return pending(`Waiting for ${name("dusk-evm")}.`, {
         ...patch,
         scanBasis: credit.scanBasis,
         scanFrom: credit.next.toString(),
@@ -571,10 +571,6 @@ export function createTracking(deps) {
 
   async function settlePendingAction(entry, status) {
     if (!entry.pendingAction || !entry.pendingHash) return { status };
-    const done =
-      entry.pendingAction === "finalize"
-        ? status.stage === "finalized"
-        : !["ready_to_prove", "submitted", "waiting_for_output"].includes(status.stage);
     let tx = null;
     try {
       tx = await node.transaction(entry.pendingHash);
@@ -582,6 +578,19 @@ export function createTracking(deps) {
       tx = null;
     }
     const at = tx?.blockTimestamp ? Number(tx.blockTimestamp) * 1_000 : null;
+    // A proof the Portal took, from this transaction's time or later, and
+    // then rejected with a newer output to prove against: the withdrawal is
+    // ready to prove again, and this proof is settled.
+    const replaceable =
+      entry.pendingAction === "prove" &&
+      status.stage === "ready_to_prove" &&
+      at !== null &&
+      !tx?.error &&
+      Number(status.provenAt ?? 0) * 1_000 >= at;
+    const done =
+      entry.pendingAction === "finalize"
+        ? status.stage === "finalized"
+        : replaceable || !["ready_to_prove", "submitted", "waiting_for_output"].includes(status.stage);
     const sent = entry.pendingAction === "prove"
       ? { proveAt: at, proveFeeLux: duskFeePaid(tx), proveHash: entry.pendingHash }
       : { claimAt: at, claimFeeLux: duskFeePaid(tx), claimHash: entry.pendingHash };

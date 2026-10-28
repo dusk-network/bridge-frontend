@@ -72,3 +72,19 @@ test("a read still running when the account changes is dropped", async () => {
   await loading;
   assert.equal(reads.reads.duskBalance, null);
 });
+
+test("a gas price learnt from a request draws again what quotes it, where it moved", async () => {
+  let drawn = 0;
+  const reads = createFormReads({ onPrice: () => (drawn += 1), services: { node: { gasPrice: async () => 1n } } });
+  // A review's request carries a higher price: the card behind it quotes it too.
+  assert.equal(reads.usePrice(2n), 2n);
+  assert.equal(reads.reads.gasPrice, 2n);
+  assert.equal(drawn, 1);
+  reads.usePrice(2n);
+  assert.equal(drawn, 1);
+  // The node's own price, read again, is the same.
+  assert.equal(await reads.price(), true);
+  assert.equal(drawn, 2);
+  assert.equal(await reads.price(), false);
+  assert.equal(drawn, 2);
+});

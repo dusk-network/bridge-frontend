@@ -322,3 +322,14 @@ export function createDiscovery({ cfg, node, rpc, rpcBatch, storage = defaultSto
     },
   });
 }
+
+/**
+ * Whether a transfer discovery returned is followed now: an unfinished one
+ * that's new or not followed yet, and a finished one the history left
+ * without its start, as a migration found by its payout lacks its sent time
+ * and network fee: once a visit, until a check fills them in.
+ */
+export function followAfterDiscovery(entry, { known, tracked }) {
+  if (entry.status === "pending") return !known.has(entry.id) || !tracked.has(entry.id);
+  return entry.status === "completed" && !entry.sourceAt && !tracked.has(entry.id);
+}

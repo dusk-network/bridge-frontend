@@ -19,6 +19,17 @@ const positiveInteger = (name, fallback) => {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 };
 
+/**
+ * How long a route usually takes on this network, in seconds, or null where
+ * it isn't known: empty keeps the profile's value, `none` clears it.
+ */
+const seconds = (name, fallback = null) => {
+  const raw = value(name).toLowerCase();
+  if (raw === NONE) return null;
+  const parsed = Number(raw);
+  return raw !== "" && Number.isSafeInteger(parsed) && parsed > 0 ? parsed : (fallback ?? null);
+};
+
 const list = (name, fallback) =>
   value(name, fallback.join(","))
     .split(",")
@@ -81,6 +92,10 @@ const PROFILES = Object.freeze({
         currency: { decimals: 18, name: "BNB", symbol: "BNB" },
         explorerUrl: "https://bscscan.com",
         migrationContract: "0x32979f040feb67a5223acb0716fe4c7a5956488c",
+        // "Around one hour" to the payout on Dusk, as the docs' migration
+        // guide says. Not measured: the payouts of the 200 days to 27 Oct
+        // 2026 were all for Ethereum migrations.
+        migrationSeconds: 3_600,
         // bsc-dataseed refuses eth_getLogs over 1,000 blocks; payouts need it.
         rpcUrl: "https://bsc-rpc.publicnode.com",
         tokenContract: "0xb2bd0749dbe21f623d9baba856d3b0f0e1bfec9c",
@@ -91,12 +106,18 @@ const PROFILES = Object.freeze({
         currency: ETH,
         explorerUrl: "https://etherscan.io",
         migrationContract: "0x36b8e0b938c0172c20e14cc32e7f0e51dcf1084f",
+        // 66 to 67 minutes from the migration's block to its payout on Dusk,
+        // for each of the 15 migrations of 28 Sep to 24 Oct 2026.
+        migrationSeconds: 4_000,
         rpcUrl: "https://ethereum-rpc.publicnode.com",
         tokenContract: "0x940a2db1b7008b6c776d4faaca729d6d4a4aa551",
       },
     },
     migrations: ["ethereum", "bsc"],
-    service: { account: MAINNET_BSC_BRIDGE_ACCOUNT, network: "bsc" },
+    // The payout on BSC takes around 10 hours while a temporary security
+    // measure lasts, one hour otherwise, as the docs' BEP20 bridge guide
+    // says (Oct 2026).
+    service: { account: MAINNET_BSC_BRIDGE_ACCOUNT, delaySeconds: 36_000, network: "bsc" },
     // DuskEVM mainnet isn't live: every endpoint and contract ID must be set.
     duskEvm: { name: "DuskEVM" },
   },
@@ -113,14 +134,23 @@ const PROFILES = Object.freeze({
         currency: { decimals: 18, name: "Sepolia Ether", symbol: "ETH" },
         explorerUrl: "https://sepolia.etherscan.io",
         migrationContract: "0x7B1FF96D7edC07D8d83eC2A4da99EF8215a7366B",
+        // No time: the testnet worker that pays out doesn't always run (two
+        // payouts after 16 minutes in Feb 2026, none since).
+        migrationSeconds: null,
         rpcUrl: "https://ethereum-sepolia-rpc.publicnode.com",
         tokenContract: "0xAced3474eA24f5d77464A0F625dEEB6EaDeE25b8",
       },
     },
     migrations: ["ethereum"],
-    service: { account: TESTNET_REGGIO_BRIDGE_ACCOUNT, network: "ethereum" },
+    // No time: the testnet worker that pays out doesn't always run (no
+    // transfers in the 60 days to 27 Oct 2026).
+    service: { account: TESTNET_REGGIO_BRIDGE_ACCOUNT, delaySeconds: null, network: "ethereum" },
     duskEvm: {
       chainId: 745,
+      // Until DuskEVM's own figure is read: its 40 deposits of 1 Sep to
+      // 27 Oct 2026 took 25 to 39 s from their Dusk block (Dusk's own time)
+      // to their DuskEVM block, plus up to a Dusk block to be included.
+      depositSeconds: 60,
       explorerUrl: "https://explorer.testnet.evm.dusk.network",
       l1BridgeRpcUrl: "https://rpc.testnet.evm.dusk.network/l1",
       name: "DuskEVM Testnet",
@@ -144,6 +174,7 @@ function evmNetwork(id, defaults = {}) {
       `VITE_${prefix}_MIGRATION_CONTRACT`,
       defaults.migrationContract,
     ),
+    migrationSeconds: seconds(`VITE_${prefix}_MIGRATION_SECONDS`, defaults.migrationSeconds),
     rpcUrl: value(`VITE_${prefix}_RPC_URL`, defaults.rpcUrl),
     tokenContract: value(`VITE_${prefix}_TOKEN_CONTRACT`, defaults.tokenContract),
   };
@@ -160,6 +191,7 @@ function duskEvmConfig(defaults) {
   const duskEvm = {
     bridgeGameSearchDepth: positiveInteger("VITE_DUSKEVM_BRIDGE_GAME_SEARCH_DEPTH", 64),
     chainId: positiveInteger("VITE_DUSKEVM_CHAIN_ID", defaults.chainId ?? 0),
+    depositSeconds: seconds("VITE_DUSKEVM_DEPOSIT_SECONDS", defaults.depositSeconds),
     disputeGameFactoryContractId: contractId(
       "VITE_DUSKEVM_DISPUTE_GAME_FACTORY_CONTRACT_ID",
     ),
@@ -241,7 +273,7 @@ export function loadConfig() {
   const service = usable(serviceNetwork)
     ? Object.freeze({
         account: value("VITE_SERVICE_BRIDGE_ACCOUNT", defaults.service.account),
-        delaySeconds: positiveInteger("VITE_SERVICE_BRIDGE_DELAY_SECONDS", 3_600),
+        delaySeconds: seconds("VITE_SERVICE_BRIDGE_DELAY_SECONDS", defaults.service.delaySeconds),
         feeLux: BigInt(positiveInteger("VITE_SERVICE_BRIDGE_FEE_LUX", 1_000_000_000)),
         network: serviceNetwork,
         payoutAddress: value("VITE_SERVICE_BRIDGE_PAYOUT_ADDRESS"),
@@ -270,7 +302,6 @@ export function loadConfig() {
       supportLabel: value("VITE_SUPPORT_LABEL", "support"),
       terms: url("VITE_TERMS_URL"),
     }),
-    migrationDelaySeconds: positiveInteger("VITE_MIGRATION_DELAY_SECONDS", 3_600),
     operators: Object.freeze({
       duskEvm: value("VITE_DUSKEVM_OPERATOR"),
       migration: value("VITE_MIGRATION_OPERATOR"),

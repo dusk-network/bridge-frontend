@@ -9,6 +9,18 @@ const MAX_ITEMS = 200;
 
 const defaultStorage = () => globalThis.localStorage;
 
+// Each network keeps its own list: a site that serves another network keeps
+// that one's transfers apart, though route names such as ethereum-to-dusk
+// are the same on both.
+let network = "";
+
+/** The network this page's transfers are kept for, such as "testnet". */
+export function useActivityNetwork(profile) {
+  network = String(profile ?? "");
+}
+
+const storageKey = () => (network ? `${STORAGE_KEY}:${network}` : STORAGE_KEY);
+
 export function normalizeTxHash(hash) {
   const value = String(hash ?? "").trim().toLowerCase();
   return /^(0x)?[0-9a-f]{64}$/u.test(value) ? value : null;
@@ -43,8 +55,23 @@ function fromLegacy(item) {
 
 function load(storage) {
   try {
-    const parsed = JSON.parse(storage.getItem(STORAGE_KEY) ?? "null");
+    const parsed = JSON.parse(storage.getItem(storageKey()) ?? "null");
     if (Array.isArray(parsed)) return parsed.filter(validItem).slice(0, MAX_ITEMS);
+    // The lists from before networks were kept apart, this version's or the
+    // first one's, become the first network's to open here, and only its:
+    // both are removed once it holds them.
+    if (network) {
+      const before = JSON.parse(storage.getItem(STORAGE_KEY) ?? "null");
+      const first = Array.isArray(before) ? null : JSON.parse(storage.getItem(LEGACY_KEY) ?? "null");
+      if (!Array.isArray(before) && !Array.isArray(first)) return [];
+      const items = (Array.isArray(before) ? before.filter(validItem) : first.map(fromLegacy).filter(Boolean)).slice(0, MAX_ITEMS);
+      try {
+        storage.setItem(storageKey(), JSON.stringify(items));
+        storage.removeItem(STORAGE_KEY);
+        storage.removeItem(LEGACY_KEY);
+      } catch {}
+      return items;
+    }
     const legacy = JSON.parse(storage.getItem(LEGACY_KEY) ?? "[]");
     return Array.isArray(legacy)
       ? legacy.map(fromLegacy).filter(Boolean).slice(0, MAX_ITEMS)
@@ -62,7 +89,7 @@ const unsaved = new WeakMap();
 function save(items, storage) {
   const kept = items.slice(0, MAX_ITEMS);
   try {
-    storage.setItem(STORAGE_KEY, JSON.stringify(kept));
+    storage.setItem(storageKey(), JSON.stringify(kept));
     unsaved.delete(storage);
   } catch {
     unsaved.set(storage, kept);
@@ -119,5 +146,5 @@ export function findActivity(id, storage = defaultStorage()) {
 }
 
 export function clearActivity(storage = defaultStorage()) {
-  storage?.removeItem(STORAGE_KEY);
+  storage?.removeItem(storageKey());
 }

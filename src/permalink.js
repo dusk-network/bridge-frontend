@@ -34,6 +34,12 @@ function decodePart(part) {
   }
 }
 
+/**
+ * Whether a page quotes fees or times, so a new gas price or route time draws
+ * it again. Look up quotes neither: nothing redraws it while a hash is typed.
+ */
+export const quotesOn = (page) => ["home", "move", "transfer", "transfers"].includes(page?.page);
+
 export function parseLocation(hash) {
   const path = String(hash ?? "").replace(/^#\/?/u, "").replace(/\/+$/u, "");
   const [head, ...rest] = path.split("/").map(decodePart);

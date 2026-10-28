@@ -5,10 +5,13 @@ import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
 import { bridgeTasks } from "./names.js";
-import { actionLead, actionPrivacy, availableLine, landingTasks, pricedReview, receiptModel, reviewChecks, transfersModel } from "./page-models.js";
-import { buildQuote } from "./quote.js";
-import { contractsSheet, footer, formPage, formRegions, header, landing, networkSheet, receiptPage, reviewSheet, transfersPage, walletLines } from "./views.js";
+import { actionLead, actionPrivacy, availableLine, pricedReview, receiptModel, reviewChecks, routeLine, transfersModel } from "./page-models.js";
+import { buildQuote, withdrawalStepMax } from "./quote.js";
+import { withdrawalGasLimit } from "./gas.js";
+import { transferView } from "./transfer-view.js";
+import { activityPanel, cardPage, cardRegions, contractsSheet, footer, header, networkSheet, receiptPage, reviewSheet, walletLines } from "./views.js";
 import { encodeDepositArgs } from "./dusk-deposit.js";
+import { chainMark, pairMark } from "./icons.js";
 import { approveLines, duskCallLines, duskTransferLines, middle, migrateLines, walletFee } from "./wallet-lines.js";
 
 const DUSKEVM = {
@@ -29,42 +32,64 @@ const mainnet = profile("mainnet");
 const routesOf = (cfg) => Object.fromEntries(buildRoutes(cfg).map((route) => [route.mode, route]));
 const T = routesOf(testnet);
 const ACCOUNT = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
+
+/** The card as the controller builds it: Dusk to DuskEVM, 25, both wallets connected. */
+function cardVmFor(patch = {}) {
+  return {
+    amount: "25",
+    amountError: "",
+    button: { action: "review", enabled: true, label: "Review bridge" },
+    canFlip: true,
+    canMax: true,
+    error: "",
+    from: { balance: "174.0037 DUSK", balanceLabel: "Public balance", net: { id: "dusk", name: "Dusk" } },
+    fromChoices: [],
+    hint: "",
+    menu: null,
+    needsCount: 1,
+    notice: null,
+    privacy: "Public on Dusk and DuskEVM, and linked: your Dusk account wallet-both.dusk (21n5nc…fMMLNz), 0xd63b…8df4 and the amount.",
+    quote: buildQuote(T["duskevm-deposit"], "25", { balance: 174_003_700_000n, cfg: testnet, gasPrice: 1n }),
+    receive: "25",
+    receiveUnit: "DUSK",
+    routeLine: routeLine(T["duskevm-deposit"], testnet),
+    routeOpen: false,
+    steps: "One, in Dusk Wallet",
+    tab: "bridge",
+    to: { editing: false, error: "", fix: "", input: "", label: "Recipient on DuskEVM", line: 'to your MetaMask <b class="mono">0xd63b…8df4</b>', looking: "", net: { id: "dusk-evm", name: "DuskEVM" }, placeholder: "0x…", resolved: null },
+    toChoices: [],
+    unit: "DUSK",
+    ...patch,
+  };
+}
 const EVM = "0xd63bB1959D64E236f63DDC62c37248708ffE8df4";
 const explorer = { explorer: (network, address) => explorerAddressUrl(testnet, network, address) };
 // The lookalike that must never appear where addresses are checked.
 const TIMES = "×";
 
-test("the start page gives each task its time and cost, and on phones whether it works there", () => {
-  const tasks = landingTasks(testnet, bridgeTasks(testnet, buildRoutes(testnet)), { phone: true });
-  assert.deepEqual(
-    tasks.map((task) => [task.title, task.meta, task.phoneTag?.text]),
-    [
-      ["Move old DUSK to Dusk", "About an hour · two wallet steps · a network fee in ETH", "Works on this phone"],
-      ["Move DUSK to DuskEVM", "Usually arrives within a minute · network fee up to 0.005 DUSK", "Needs a computer"],
-      // A claim's limit is 50M plus the withdrawal's own gas, so the most a step costs is above 0.05.
-      ["Move DUSK from DuskEVM to Dusk", "Three steps over about 7 days · up to 0.051 DUSK per step on Dusk", "Step 1 works here. Prove and claim need a computer."],
-      ["Send DUSK to Ethereum (Sepolia)", "Usually within an hour · 1 DUSK bridge fee, taken from the amount", "Needs a computer"],
-    ],
-  );
-  // With Dusk Wallet installed, the phone notes go.
-  assert.ok(landingTasks(testnet, bridgeTasks(testnet, buildRoutes(testnet)), { duskInstalled: true, phone: true }).every((task) => !task.phoneTag));
-
-  const main = landingTasks(mainnet, bridgeTasks(mainnet, buildRoutes(mainnet)));
-  assert.deepEqual(main.map((task) => task.title), ["Move old DUSK to Dusk", "Move DUSK to DuskEVM", "Send DUSK to BNB Smart Chain"]);
-  assert.equal(main[1].unavailable, "DuskEVM · not on Mainnet yet");
-  assert.match(main[0].meta, /a network fee in ETH or BNB$/u);
-  const html = landing({ canShare: false, dusk: { getUrl: "https://docs.dusk.network/use/wallets/#dusk-wallet", state: "missing" }, evm: { state: "connect" }, pageUrl: "", phone: false, tasks: main });
-  assert.match(html, /DuskEVM · not on Mainnet yet/u);
-  assert.doesNotMatch(html, /href="#\/move\/to-duskevm"/u);
+test("the card's route row gives each route its time and cost in one line", () => {
+  const line = (mode, cfg = testnet, timing) => routeLine(routesOf(cfg)[mode], cfg, { timing });
+  assert.equal(line("duskevm-deposit"), "~1 min · fee up to 0.005 DUSK");
+  // The withdrawal's time is the chain's: none until it's read.
+  assert.equal(line("duskevm-withdrawal"), "Three steps · up to 0.051 DUSK a step on Dusk");
+  const read = { chain: { withdrawal: { finalitySeconds: 302_400, maturitySeconds: 604_800, outputSeconds: 1_700 } } };
+  assert.equal(line("duskevm-withdrawal", testnet, read), "~7 days · three steps · up to 0.051 DUSK a step on Dusk");
+  // No time is known for the testnet payouts: the cost alone.
+  assert.equal(line("service-transfer"), "1 DUSK bridge fee");
+  assert.equal(line("migration"), "Two wallet steps · fee in ETH");
+  // Mainnet's own times.
+  assert.equal(line("service-transfer", mainnet), "~10 hours · 1 DUSK bridge fee");
+  const from = (id) => buildRoutes(mainnet).find((route) => route.from.id === id);
+  assert.equal(routeLine(from("ethereum"), mainnet), "~70 min · two wallet steps · fee in ETH");
+  assert.equal(routeLine(from("bsc"), mainnet), "~1 hour · two wallet steps · fee in BNB");
 });
-
 test("the review checks the facts first, then lists the wallet's lines with full addresses", async () => {
   const route = T.migration;
   const lux = 1_000_000_000_000n;
   const reads = { migration: { allowanceWei: 0n, balanceWei: 2_500n * 10n ** 18n, gasCoinWei: 21_300_000_000_000_000n, gasPriceWei: 2_000_000_000n } };
   const quote = buildQuote(route, "1000", { allowanceWei: 0n, balance: reads.migration.balanceWei, cfg: testnet, evmGas: { approve: 46_000n, migrate: 70_000n, priceWei: 2_000_000_000n } });
   const checks = reviewChecks(route, { cfg: testnet, destination: ACCOUNT, duskAccount: ACCOUNT, evm: { account: EVM, walletName: "MetaMask" }, quote, reads });
-  assert.deepEqual(checks.map((check) => check.ok), [true, true, true, true]);
+  assert.deepEqual(checks.map((check) => check.ok), [true, true, true]);
   assert.match(checks[0].html, /2,500 old DUSK<\/b> at <code class="mono">0xd63b…8df4<\/code> on Ethereum \(Sepolia\)/u);
   assert.match(checks[1].html, /0\.0213 ETH<\/b> for the network fee, about 0\.00023 ETH needed for both steps/u);
   // Not enough ETH is caught before the wallet opens.
@@ -282,11 +307,16 @@ test("a receipt is a record without balances, with both hashes and its own link"
   assert.doesNotMatch(html, /balance|now holds/iu);
   assert.ok(!html.includes(TIMES));
 
-  // While pending: what is usual and what to do when it's late. No contact is named unless configured.
-  const pending = receiptModel({ ...entry, destinationHash: undefined, status: "pending" }, { cfg: testnet, now: entry.sourceAt + 60_000, route: T["duskevm-deposit"], url });
-  assert.match(pending.notes.at(-1).html, /^Usually within a minute\. Not there after 15 minutes\? Keep the receipt link/u);
+  // While pending: how long it takes on this network, and a note only once it's late.
+  const waiting = { ...entry, destinationHash: undefined, status: "pending" };
+  const pending = receiptModel(waiting, { cfg: testnet, now: entry.sourceAt + 60_000, route: T["duskevm-deposit"], url });
+  assert.equal(pending.caption, "Takes ~1 min");
+  assert.deepEqual(pending.notes, []);
+  const late = receiptModel(waiting, { cfg: testnet, now: entry.sourceAt + 3_600_000, route: T["duskevm-deposit"], url });
+  assert.deepEqual(late.notes.map((note) => note.html), ["<b>Taking longer than usual.</b>"]);
+  // A contact only where the deployment names one.
   const supported = profile("testnet", { ...DUSKEVM, VITE_SUPPORT_LABEL: "Dusk support", VITE_SUPPORT_URL: "https://support.example.org" });
-  const withSupport = receiptModel({ ...entry, status: "pending" }, { cfg: supported, route: routesOf(supported)["duskevm-deposit"], url });
+  const withSupport = receiptModel(waiting, { cfg: supported, now: entry.sourceAt + 3_600_000, route: routesOf(supported)["duskevm-deposit"], url });
   assert.match(withSupport.notes.at(-1).html, /Contact <a href="https:\/\/support\.example\.org" target="_blank" rel="noreferrer">Dusk support<\/a> with the receipt link\./u);
 });
 
@@ -317,7 +347,7 @@ test("My transfers groups the connected accounts' transfers and offers the next 
   assert.equal(claim.subline, "Ready to claim since Sat 24 Oct, 02:00 CEST");
   assert.equal(claim.action.kind, "finalize");
   assert.equal(claim.href, `#/transfer/0x${"01".repeat(32)}`);
-  const html = transfersPage({ empty: "", groups: model.groups, lede: "x", more: false, syncText: "" });
+  const html = activityPanel({ empty: "", groups: model.groups, lede: "x", more: false, syncText: "" });
   assert.match(html, /data-action="withdrawal-finalize" data-id="a">Claim<span class="sr-only"> 120 DUSK from DuskEVM to Dusk<\/span>/u);
   assert.match(html, /<h2 class="sec-t">Needs you<\/h2>/u);
 });
@@ -358,78 +388,70 @@ test("the Contracts sheet lists every address in full, per route, with an operat
   assert.match(networkSheet({ badge: "Mainnet", isTestnet: false, networks: contractGroups(mainnet)[0].rows, otherName: "Testnet", otherSite: "" }), /Real DUSK\. Testnet has its own bridge\./u);
 });
 
-test("the form labels its amount and says what is public", () => {
-  const quote = buildQuote(T["duskevm-deposit"], "25", { balance: 1_483_920_000_000n, cfg: testnet, gasPrice: 1n });
-  const html = formPage({
-    amount: "25",
-    amountError: "",
-    available: "1,483.915 DUSK",
-    balanceNote: "Your public balance. Shielded and staked DUSK aren't included.",
-    canMax: true,
-    canReview: true,
-    firstTime: true,
-    from: { balance: "", chain: "dusk", label: "From Dusk", value: "x" },
-    notice: null,
-    privacy: "Your Dusk account 21n5nc…fMMLNz, 0xd63b…8df4 and the amount are visible on Dusk and DuskEVM, and linked to each other.",
-    quote,
-    reviewLabel: "Review",
-    routeId: "dusk-to-dusk-evm",
-    sources: [{ id: "dusk-to-dusk-evm", name: "Dusk" }],
-    title: "Move DUSK to DuskEVM",
-    to: { chain: "dusk-evm", label: "To DuskEVM", value: EVM, valueNote: "your MetaMask, on DuskEVM" },
-    unit: "DUSK",
-  });
-  assert.match(html, /<label for="amount" class="amount-label">Amount<\/label>/u);
-  assert.match(html, /First time\? Try a small amount first\./u);
-  assert.match(html, /Leaves your Dusk account: <span class="num">up to 25\.005 DUSK<\/span>/u);
-  assert.match(html, /<b>Public\.<\/b>/u);
-  assert.ok(!html.includes(TIMES));
+test("the card reads as a bridge: From, a flip, To, the route, then one button", () => {
+  const vm = cardVmFor();
+  const page = cardPage(vm);
+  const order = ['aria-current="page">Bridge', 'data-side="from"', 'id="amount"', 'data-action="flip"', 'data-side="to"', 'data-region="receive"', 'class="route"', 'data-action="review"'];
+  const at = order.map((part) => page.indexOf(part));
+  assert.ok(at.every((index, i) => index > (at[i - 1] ?? -1)), JSON.stringify(at));
+  assert.ok(page.includes('value="25"') && page.includes('aria-label="Amount, in DUSK"'));
+  assert.match(page, /<span class="token">.*DUSK<\/span>/u);
+  assert.match(page, /<span>Public balance<\/span><span class="bal"><span class="num">174\.0037 DUSK<\/span><button type="button" class="mini" data-action="max">Max<\/button><\/span>/u);
+  assert.match(page, /<p class="recip">to your MetaMask <b class="mono">0xd63b…8df4<\/b> · <button type="button" class="linkish" data-action="recipient-edit">Change<\/button><\/p>/u);
+  // The route row, one line until it's opened: steps, fees, what's public.
+  assert.match(page, /<summary>.*<span>~1 min · fee up to 0\.005 DUSK<\/span>/u);
+  assert.match(page, /<p class="pubnote"><b>Public on Dusk and DuskEVM, and linked:<\/b> your Dusk account wallet-both\.dusk \(21n5nc…fMMLNz\), 0xd63b…8df4 and the amount\.<\/p>/u);
+  // The time is the route row's, not a second line in it.
+  assert.doesNotMatch(cardRegions(vm).route, />Arrives</u);
+  assert.match(page, /Activity<span class="cnt" aria-label="1 need you">1<\/span>/u);
+  // No way back: the flip can't be pressed. Dusk Wallet missing: the button is its link.
+  assert.match(cardPage(cardVmFor({ canFlip: false })), /data-action="flip" aria-label="Swap From and To" disabled/u);
+  assert.match(cardPage(cardVmFor({ button: { action: "get-dusk", enabled: true, href: "https://wallet.example", label: "Get Dusk Wallet" } })), /<a class="btn pri full" href="https:\/\/wallet\.example" target="_blank"/u);
+  assert.match(cardPage(cardVmFor({ button: { action: null, enabled: false, label: "Enter an amount" } })), /<button type="button" class="btn pri full" data-action="none" disabled>Enter an amount<\/button>/u);
 });
-
-test("everything in the form that follows balances is a region the page refreshes while you type", () => {
-  const quote = buildQuote(T["duskevm-deposit"], "25", { balance: 1_483_920_000_000n, cfg: testnet, gasPrice: 1n });
-  const vm = {
-    amount: "25",
-    amountError: "",
-    available: "1,483.915 DUSK",
-    canMax: true,
-    canReview: true,
-    from: { balance: '<b class="num">1,483.92 DUSK</b>public balance', chain: "dusk", label: "From Dusk", value: "x" },
-    privacy: "p",
-    quote,
-    reviewLabel: "Review",
-    routeId: "dusk-to-dusk-evm",
-    sources: [{ id: "dusk-to-dusk-evm", name: "Dusk" }],
-    title: "Move DUSK to DuskEVM",
-    to: { chain: "dusk-evm", label: "To DuskEVM", value: EVM },
-    unit: "DUSK",
-  };
-  const regions = formRegions(vm);
-  assert.match(regions.from, /1,483\.92 DUSK/u);
-  assert.match(regions.avail, /Available <span class="num">1,483\.915 DUSK<\/span><\/span><button type="button" class="mini" data-action="max">Max<\/button>/u);
-  const page = formPage(vm);
-  // Each region is rendered as the refresh will replace it.
-  assert.ok(page.includes(`<div data-region="from">${regions.from}</div>`));
-  assert.ok(page.includes(`data-region="avail">${regions.avail}</div>`));
+test("everything in the card that follows balances is a region the page refreshes while you type", () => {
+  const vm = cardVmFor();
+  const regions = cardRegions(vm);
+  const page = cardPage(vm);
   for (const name of Object.keys(regions)) assert.ok(page.includes(`data-region="${name}"`), name);
+  assert.ok(page.includes(`data-region="from-foot">${regions["from-foot"]}</div>`));
+  assert.ok(page.includes(`data-region="cta">${regions.cta}</div>`));
 });
 
+test("a network the chosen one has no route to is listed, disabled, saying why", () => {
+  const page = cardPage(
+    cardVmFor({
+      from: { balance: "", balanceLabel: "Balance", net: { id: "dusk-evm", name: "DuskEVM" } },
+      menu: "to",
+      to: { ...cardVmFor().to, net: { id: "dusk", name: "Dusk" } },
+      toChoices: [
+        { disabled: "No route from DuskEVM", id: "ethereum", name: "Ethereum (Sepolia)" },
+        { id: "dusk", name: "Dusk", note: "≈ 7 days, three steps · up to 0.051 DUSK a step on Dusk", selected: true },
+        { disabled: "It's where it comes from", id: "dusk-evm", name: "DuskEVM" },
+      ],
+    }),
+  );
+  assert.match(page, /<div class="netmenu" role="listbox" aria-label="Where it goes"><p class="netmenu-t">Where it goes<\/p>/u);
+  assert.match(page, /data-net="ethereum" aria-selected="false" aria-disabled="true">.*<span class="nm">Ethereum \(Sepolia\)<\/span><span class="sb">No route from DuskEVM<\/span>/u);
+  assert.match(page, /data-net="dusk" aria-selected="true">.*<span class="sb">≈ 7 days, three steps/u);
+  assert.match(page, /data-side="to" aria-haspopup="listbox" aria-expanded="true"/u);
+});
 test("a proof's review says it moves no DUSK and what it costs; a claim, where the DUSK goes", () => {
   const amountLux = 1_008n * 10n ** 9n;
   const other = { destination: testnet.service.account };
   // Paying another account than Dusk Wallet's says so, by the wallet's .dusk name.
-  const prove = actionLead("prove", other, { account: ACCOUNT, amountLux, maxLux: 51_000_000n, name: "alice.dusk" });
+  const prove = actionLead("prove", other, { account: ACCOUNT, amountLux, maxLux: 51_000_000n, name: "alice.dusk", wait: 604_800 });
   assert.deepEqual(prove, {
     amount: "0.051",
     label: "Proving costs up to",
-    line: "No DUSK moves now. The 1,008 DUSK stays in the DuskEVM bridge until it's claimed, about 7 days after the proof.",
-    notYours: "This withdrawal pays 25z9o6…5Etftt, not your alice.dusk. Proving it doesn't change that.",
+    line: "No DUSK moves now. Claim ~7 days after the proof.",
+    notYours: "This withdrawal pays 25z9o6…5Etftt, not your alice.dusk.",
   });
   const claim = actionLead("finalize", { destination: ACCOUNT }, { account: ACCOUNT, amountLux, maxLux: 51_000_000n });
   assert.deepEqual(claim, { amount: "1,008", chain: "dusk", label: "You claim", line: "To 21n5nc…fMMLNz on Dusk · costs up to 0.051 DUSK", notYours: "" });
   assert.equal(
     actionLead("finalize", other, { account: ACCOUNT, amountLux, maxLux: 1n }).notYours,
-    "This withdrawal pays 25z9o6…5Etftt, not your connected Dusk account. The claim sends the DUSK there.",
+    "This withdrawal pays 25z9o6…5Etftt, not your connected Dusk account.",
   );
 
   const sheet = reviewSheet({
@@ -476,10 +498,10 @@ test("the footer names who runs each route only where that's configured", () => 
 test("a proof's review says the account that proves becomes public too", () => {
   assert.equal(
     actionPrivacy("prove", "The amount is public.", { account: ACCOUNT, name: "alice.dusk" }),
-    "The amount is public. Your Dusk account alice.dusk will be visible too, as the account that proved it.",
+    "The amount is public. So is your Dusk account alice.dusk, as the one that proves it.",
   );
-  assert.match(actionPrivacy("finalize", "x", { account: ACCOUNT }), /Your Dusk account 21n5nc…fMMLNz will be visible too, as the account that claimed it\.$/u);
-  assert.match(actionPrivacy("prove", "x"), /Your Dusk account will be visible too/u);
+  assert.match(actionPrivacy("finalize", "x", { account: ACCOUNT }), / So is your Dusk account 21n5nc…fMMLNz, as the one that claims it\.$/u);
+  assert.match(actionPrivacy("prove", "x"), / So is your Dusk account, as the one that proves it\.$/u);
 });
 
 test("a withdrawal claimed outside this browser reads as claimed", () => {
@@ -500,66 +522,84 @@ test("your Dusk account shows by the .dusk name Dusk Wallet sent", () => {
 });
 
 test("a typed .dusk name shows the account it points to, and wrong capitals offer the fix", () => {
-  const quote = buildQuote(T["duskevm-withdrawal"], "1", { balance: null, cfg: testnet, gasPrice: 1n });
-  const vm = {
-    amount: "1",
-    amountError: "",
-    available: "",
-    from: { balance: "", chain: "dusk-evm", label: "From DuskEVM", value: "x" },
-    privacy: "p",
-    quote,
-    reviewLabel: "Review",
-    routeId: "dusk-evm-to-dusk",
-    sources: [{ id: "dusk-evm-to-dusk", name: "DuskEVM" }],
-    title: "Move DUSK to Dusk",
-    to: { chain: "dusk", editing: true, input: "alice.dusk", label: "To Dusk", resolved: { address: ACCOUNT, name: "alice.dusk" }, value: ACCOUNT },
-    unit: "DUSK",
-  };
-  const page = formPage(vm);
+  const to = { ...cardVmFor().to, editing: true, input: "alice.dusk", label: "Recipient on Dusk", net: { id: "dusk", name: "Dusk" }, placeholder: "A Dusk account or .dusk name", resolved: { address: ACCOUNT, name: "alice.dusk" } };
+  const vm = cardVmFor({ to });
+  const page = cardPage(vm);
   // The field wraps, so the whole address shows on a phone.
   assert.match(page, /<textarea id="recipient" name="recipient" class="mono-input wrap-input" rows="2"[^>]*>alice\.dusk<\/textarea>/u);
   assert.ok(page.includes(`alice.dusk points to <code class="mono wrap">${ACCOUNT}</code>`));
-  const note = (to) => formRegions({ ...vm, to: { ...vm.to, resolved: null, ...to } })["recipient-note"];
+  const note = (patch) => cardRegions({ ...vm, to: { ...to, resolved: null, ...patch } })["recipient-note"];
   assert.equal(note({ looking: "alice.dusk" }), "Looking up alice.dusk…");
   assert.match(note({ error: "x", fix: EVM }), /<button type="button" class="linkish" data-action="recipient-fix">If every character is right, fix the capitals<\/button>/u);
   assert.equal(note({}), "");
 });
-
-test("the wallet cards say which account is connected", () => {
-  const html = landing({
-    canShare: false,
-    dusk: { account: ACCOUNT, name: "alice.dusk", state: "connected" },
-    evm: { account: EVM, state: "connected" },
-    pageUrl: "",
-    phone: true,
-    tasks: [],
-  });
-  assert.match(html, /Connected · <span class="who">alice\.dusk<\/span>/u);
-  assert.match(html, /Connected · <span class="who">0xd63b…8df4<\/span>/u);
-  assert.match(landing({ canShare: false, dusk: { account: ACCOUNT, state: "connected" }, evm: { state: "connect" }, pageUrl: "", phone: false, tasks: [] }), /Connected · <span class="who">21n5nc…fMMLNz<\/span>/u);
-});
-
-test("the footer names, in one line, the servers the page reads from", async () => {
+test("About this page names, in one line, the servers the page reads from", async () => {
   const line = serversLine(testnet);
   assert.equal(
     line,
     "This page reads from testnet.nodes.dusk.network (the Dusk node and its archive), rpc.testnet.evm.dusk.network (DuskEVM), ethereum-sepolia-rpc.publicnode.com (Ethereum (Sepolia)) and testnet.dusk.domains (for .dusk names).",
   );
-  assert.match(footer({ links: {}, officialSite: "", servers: line }), /<p class="small t2 servers">This page reads from testnet\.nodes\.dusk\.network/u);
+  // In the About sheet the footer opens, with the contracts.
+  assert.match(footer({ links: {}, officialSite: "" }), /<button type="button" class="linkish" data-action="open-about" aria-haspopup="dialog">About this page<\/button>/u);
+  const sheet = contractsSheet({ badge: "Testnet", groups: contractGroups(testnet), servers: line });
+  assert.match(sheet, /<h3 class="gt">Servers<\/h3><p class="card about-servers">This page reads from testnet\.nodes\.dusk\.network/u);
+  assert.ok(sheet.indexOf("Servers") < sheet.indexOf("Bridge contract on Dusk"));
   // The names' host is the one each release fetches its lens driver from.
   const { default: releases } = await import("./dusk-domains-releases.js");
   for (const release of Object.values(releases)) assert.ok(serversLine({ ...testnet, dusk: { ...testnet.dusk, chainId: release.chainId } }).includes(`${new URL(release.artifactBaseUrl).host} (for .dusk names)`));
 });
 
 test("My transfers can follow a Dusk account without a wallet, and stop", () => {
-  const page = (watch) => transfersPage({ empty: "e", groups: {}, lede: "l", syncText: "", watch });
+  const page = (watch) => activityPanel({ empty: "e", groups: {}, lede: "l", syncText: "", watch });
   const form = page({ busy: false, error: "", following: "", input: "" });
   assert.match(form, /<form class="group pad watch" data-form="watch">\s*<label for="watch" class="l1">Follow a Dusk account<\/label>/u);
   assert.match(form, /placeholder="A Dusk account or \.dusk name"/u);
   assert.match(page({ busy: false, error: "bob.dusk isn't an active .dusk name.", following: "", input: "bob.dusk" }), /role="alert">bob\.dusk isn&#039;t an active \.dusk name\.<\/p>/u);
   const following = page({ following: "alice.dusk" });
-  assert.match(following, /Following alice\.dusk on this device\. Nothing can be sent from here\. <button type="button" class="linkish" data-action="unwatch">Stop following<\/button>/u);
+  assert.match(following, /Following alice\.dusk\. <button type="button" class="linkish" data-action="unwatch">Stop following<\/button>/u);
   assert.doesNotMatch(following, /data-form="watch"/u);
   // With Dusk Wallet connected, there's nothing to follow.
   assert.doesNotMatch(page(null), /Follow a Dusk account|Following/u);
+});
+
+test("a route is two marks with an arrow, and DuskEVM is told apart from Dusk", () => {
+  assert.match(pairMark("dusk", "dusk-evm"), /^<span class="pair" aria-hidden="true"><span class="cm" aria-hidden="true">.*<\/span><svg class="ic pa"[^>]*><path d="M5 12h14"\/>.*<span class="cm evm" aria-hidden="true">.*<span class="evm-tag">EVM<\/span><\/span><\/span>$/u);
+  assert.doesNotMatch(chainMark("dusk"), /evm-tag/u);
+  for (const chain of ["ethereum", "bsc"]) assert.match(chainMark(chain), /<svg class="mk-svg" viewBox="0 0 24 24"[^>]*><path /u, chain);
+});
+
+test("the card, its quote, the review, the receipt and the transfer quote one fee a step", () => {
+  const gasPrice = 2n;
+  const route = T["duskevm-withdrawal"];
+  const withdrawalGas = 519_542n;
+  // Before the withdrawal exists: the card's route row and its quote.
+  assert.match(routeLine(route, testnet, { gasPrice }), /· up to 0\.102 DUSK a step on Dusk$/u);
+  const form = buildQuote(route, "1", { balance: null, cfg: testnet, gasPrice });
+  assert.equal(form.rows.find((row) => row.key === "fee-dusk").value, "up to 0.102 DUSK a step");
+  // Once it exists, with its own gas: the card, the receipt, and the review's request.
+  const entry = { amountLux: "1000000000", hash: `0x${"0c".repeat(32)}`, id: "w", routeId: route.id, sourceAt: Date.UTC(2026, 9, 1), stage: "ready_to_prove", status: "pending", withdrawalGas: withdrawalGas.toString() };
+  assert.equal(receiptModel(entry, { cfg: testnet, gasPrice, route, url: "https://bridge.example/#/transfer/w" }).actionFee, "Network fee up to 0.102 DUSK, from your public balance");
+  const request = withdrawalGasLimit(withdrawalGas) * gasPrice;
+  assert.equal(request, withdrawalStepMax({ gasPrice, withdrawalGas }));
+  assert.equal(actionLead("prove", entry, { maxLux: request }).amount, "0.102");
+  assert.match(actionLead("finalize", entry, { maxLux: request }).line, /costs up to 0\.102 DUSK$/u);
+});
+
+test("the pages say what's public and what to do, without explaining what they already show", () => {
+  const route = T["duskevm-deposit"];
+  const entry = { amountLux: "25000000000", destination: EVM, hash: "38".repeat(32), id: "x", routeId: route.id, sender: ACCOUNT, sourceAt: Date.UTC(2026, 9, 26, 9, 31), status: "pending" };
+  const receipt = receiptPage({ ...receiptModel(entry, { cfg: testnet, now: entry.sourceAt + 60_000, route, url: "https://bridge.example/#/transfer/x" }), canAct: true });
+  const review = reviewSheet({ canConfirm: true, cfgLinks: explorer, checks: [], confirmLabel: "Send", feeRows: [], privacy: cardVmFor().privacy, receive: { amount: "25", chain: "dusk-evm", unit: "DUSK", where: "DuskEVM" }, send: { amount: "25", chain: "dusk", unit: "DUSK", where: "Dusk" }, steps: [{ current: true, lines: [], title: "Send from Dusk", walletName: "Dusk Wallet", what: "", when: "Now" }], sub: "Dusk to DuskEVM", walletCheckName: "Dusk Wallet" });
+  const card = cardPage(cardVmFor({ routeOpen: true }));
+  const about = contractsSheet({ badge: "Testnet", groups: contractGroups(testnet), servers: serversLine(testnet) });
+  for (const page of [receipt, review, card, about]) {
+    // Reassurance and lines that repeat the page are gone.
+    assert.doesNotMatch(page, /doesn't let anyone move|public balances only|You can close this page|public on both networks anyway|Keep the receipt link|holds the DUSK while|safety window|First time\?|What it reads from/u);
+  }
+  // What's public, what to check, and what sharing shows stay, once each.
+  assert.equal(review.match(/Public on Dusk and DuskEVM, and linked:/gu)?.length, 1);
+  assert.match(review, /Check each line against Dusk Wallet\./u);
+  assert.equal(receipt.match(/Anyone with the link can see this transfer\./gu)?.length, 1);
+  // The deposit's step says nothing the hero, the caption or the details don't.
+  assert.deepEqual(receiptModel(entry, { cfg: testnet, now: entry.sourceAt + 60_000, route, url: "x" }).view.steps.map((step) => step.detail), ["", "", ""]);
 });
