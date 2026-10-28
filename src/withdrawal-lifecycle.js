@@ -83,13 +83,6 @@ export function withdrawalActionFailure(stage, error = "") {
   return "";
 }
 
-/**
- * Dusk's Portal lets only the account that proved a withdrawal claim with
- * that proof, so another account's proof doesn't spare the user their own.
- */
-export const PROVEN_BY_OTHER_ACCOUNT =
-  "Someone else sent a proof for this withdrawal. Your DUSK isn't affected; prove it yourself to claim it.";
-
 export function withdrawalSentMessage(waitingPeriodSeconds = null) {
   const total =
     WITHDRAWAL_REPORT_SECONDS +

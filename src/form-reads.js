@@ -55,6 +55,18 @@ export function createFormReads({ services, onChange = () => {} }) {
     if (fresh()) onChange();
   }
 
+  /** The node's gas price alone, for pages without a form; whether it changed. */
+  async function price() {
+    try {
+      const next = await services.node.gasPrice();
+      if (next === reads.gasPrice) return false;
+      reads.gasPrice = next;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Gas estimates for the amount and recipient as they are now. */
   async function estimate({ evm, gas = {}, route }) {
     if (!evm) return;
@@ -90,5 +102,5 @@ export function createFormReads({ services, onChange = () => {} }) {
     for (const key of keys) reads[key] = null;
   }
 
-  return Object.freeze({ estimate, load, reads, reset });
+  return Object.freeze({ estimate, load, price, reads, reset });
 }

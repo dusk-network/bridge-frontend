@@ -39,3 +39,32 @@ test("the connected account's verified primary name is read through the lens, on
   const none = createDuskNames({ chainId: "dusk:9", load: async () => ({ createLensReader: async () => assert.fail(), releases }), nodeUrl: "x" });
   assert.equal(await none.primaryName(ACCOUNT), "");
 });
+
+test("a .dusk name's public account is read through the lens, and kept a minute", async () => {
+  const asked = [];
+  let fail = true;
+  const accounts = { "alice.dusk": ACCOUNT };
+  const names = createDuskNames({
+    chainId: "dusk:2",
+    load: async () => ({
+      createLensReader: async () => ({
+        resolveMoonlightAccount: async (name) => {
+          asked.push(name);
+          if (fail) throw Object.assign(new Error("read"), { reason: "read" });
+          return accounts[name] ? { account: accounts[name], status: "Active" } : { status: "Expired" };
+        },
+      }),
+      releases: { testnet: { artifactBaseUrl: "https://example/", chainId: "dusk:2" } },
+    }),
+    nodeUrl: "https://node.example",
+  });
+  await assert.rejects(names.resolveName("Alice.dusk", { now: 0 }));
+  fail = false;
+  assert.deepEqual(await names.resolveName("Alice.dusk", { now: 1 }), { account: ACCOUNT });
+  assert.deepEqual(await names.resolveName("alice.dusk", { now: 59_000 }), { account: ACCOUNT });
+  assert.deepEqual(await names.resolveName("bob.dusk", { now: 2 }), { status: "Expired" });
+  assert.deepEqual(asked, ["alice.dusk", "alice.dusk", "bob.dusk"]);
+  // A minute on, the name is read again: it may point elsewhere by now.
+  await names.resolveName("alice.dusk", { now: 61_001 });
+  assert.equal(asked.length, 4);
+});

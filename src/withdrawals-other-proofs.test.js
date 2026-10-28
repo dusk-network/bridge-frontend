@@ -2,9 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { toRlp } from "viem";
 
-import { transferView } from "./transfer-view.js";
+import { provenByOtherLine, transferView } from "./transfer-view.js";
 import { PROVED_BY_ANOTHER_ACCOUNT, createWithdrawals, hashOutputRootProof } from "./withdrawals.js";
-import { PROVEN_BY_OTHER_ACCOUNT } from "./withdrawal-lifecycle.js";
 
 // The web wallet's 10 DUSK withdrawal fixture, sent at L2 block 0x3564.
 const messagePassedLog = {
@@ -161,10 +160,10 @@ test("a withdrawal proven only by another account still needs the user's own pro
 
   // The entry says so, reassuring first, and keeps Prove: the other proof
   // can't be claimed with.
-  assert.match(PROVEN_BY_OTHER_ACCOUNT, /^Someone else sent a proof for this withdrawal\. Your DUSK isn't affected;/u);
   assert.match(PROVED_BY_ANOTHER_ACCOUNT, /^Another account proved this withdrawal\. Your DUSK isn't affected,/u);
   const view = transferView({ hash: TX, provenByOther: true, stage: "ready_to_prove", status: "pending" }, { cfg, route });
-  assert.equal(proveStep(view).detail, PROVEN_BY_OTHER_ACCOUNT);
+  assert.equal(proveStep(view).detail, provenByOtherLine({}));
+  assert.match(proveStep(view).detail, /^Someone else proved it\. The DUSK still pays the Dusk account in the withdrawal\./u);
   assert.equal(proveStep(view).state, "turn");
   assert.equal(view.action.kind, "prove");
 
@@ -201,7 +200,7 @@ test("another account's rejected or blacklisted proof leaves a plain ready to pr
     assert.equal(status.stage, "ready_to_prove");
     assert.equal(status.provenByOther, false);
     const view = transferView({ hash: TX, provenByOther: false, stage: "ready_to_prove", status: "pending" }, { cfg, route });
-    assert.notEqual(proveStep(view).detail, PROVEN_BY_OTHER_ACCOUNT);
+    assert.doesNotMatch(proveStep(view).detail, /Someone else proved it/u);
   }
 });
 

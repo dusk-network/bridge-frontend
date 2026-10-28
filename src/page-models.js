@@ -4,7 +4,7 @@
 
 import { explorerAddressUrl } from "./contracts.js";
 import { groupTransfers, shownFor } from "./discovery.js";
-import { aboutFee, formatDateTime, formatDusk, formatFee, formatLux, formatUnitsGrouped } from "./format.js";
+import { aboutFee, formatDateTime, formatDusk, formatFee, formatLux, formatMaxFee, formatUnitsGrouped } from "./format.js";
 import { gasCoin, networkName, networkNames, routeTitle } from "./names.js";
 import { transferHref } from "./permalink.js";
 import { arrivalText, buildQuote, routeDuskFees } from "./quote.js";
@@ -32,9 +32,9 @@ export const evmWalletName = (evm) => evm?.walletName || "your EVM wallet";
 // ---------------------------------------------------------------------------
 
 /** The start page's task rows, with time and cost, and on phones whether they work there. */
-export function landingTasks(cfg, tasks, { duskInstalled = false, phone = false } = {}) {
+export function landingTasks(cfg, tasks, { duskInstalled = false, gasPrice = 1n, phone = false } = {}) {
   const names = networkNames(cfg);
-  const fees = (mode) => routeDuskFees({ mode }, { gasPrice: 1n });
+  const fees = (mode) => routeDuskFees({ mode }, { gasPrice });
   const phoneLimited = phone && !duskInstalled;
   const rows = tasks.map((task) => {
     const route = task.routes[0];
@@ -45,10 +45,10 @@ export function landingTasks(cfg, tasks, { duskInstalled = false, phone = false 
       meta = `About ${roughDuration(cfg.migrationDelaySeconds ?? 3_600)} · two wallet steps · a network fee in ${coins}`;
       phoneTag = { ok: true, text: "Works on this phone" };
     } else if (route.mode === "duskevm-deposit") {
-      meta = `Usually arrives within a minute · network fee up to ${formatFee(fees("duskevm-deposit").send.maxLux, 9, { round: "up" })} DUSK`;
+      meta = `Usually arrives within a minute · network fee up to ${formatMaxFee(fees("duskevm-deposit").send.maxLux)} DUSK`;
       phoneTag = { ok: false, text: "Needs a computer" };
     } else if (route.mode === "duskevm-withdrawal") {
-      meta = `Three steps over about ${roughDuration(WITHDRAWAL_REPORT_SECONDS + WITHDRAWAL_WAITING_PERIOD_SECONDS)} · up to ${formatFee(fees("duskevm-withdrawal").claim.maxLux, 9, { round: "up" })} DUSK per step on Dusk`;
+      meta = `Three steps over about ${roughDuration(WITHDRAWAL_REPORT_SECONDS + WITHDRAWAL_WAITING_PERIOD_SECONDS)} · up to ${formatMaxFee(fees("duskevm-withdrawal").claim.maxLux)} DUSK per step on Dusk`;
       phoneTag = { ok: true, text: "Step 1 works here. Prove and claim need a computer." };
     } else {
       meta = `Usually within ${roughDuration(cfg.service?.delaySeconds ?? 3_600)} · ${formatDusk(cfg.service.feeLux)} bridge fee, taken from the amount`;
@@ -216,10 +216,14 @@ export function actionPrivacy(kind, base, { account = "", name = "" } = {}) {
  */
 export function actionLead(kind, entry, { account = "", amountLux = null, maxLux, name = "" }) {
   const moving = amountLux === null ? "The DUSK" : `The ${formatLux(amountLux)} DUSK`;
-  const cost = formatFee(BigInt(maxLux), 9, { round: "up" });
+  const cost = formatMaxFee(maxLux);
   const pays = entry.destination ?? "";
   const payee = !pays ? "the withdrawal's Dusk account" : /^[0-9a-f]{64}$/u.test(pays) ? `the Dusk contract ${short(pays)}` : short(pays);
-  const notYours = account && pays && pays !== account ? `This withdrawal pays ${payee}, not ${name ? `your ${name}` : "your account"}.` : "";
+  // Said before the steps: the step doesn't change where the DUSK goes.
+  const notYours =
+    account && pays && pays !== account
+      ? `This withdrawal pays ${payee}, not ${name ? `your ${name}` : "your connected Dusk account"}. ${kind === "prove" ? "Proving it doesn't change that." : "The claim sends the DUSK there."}`
+      : "";
   return kind === "prove"
     ? {
         amount: cost,
@@ -237,8 +241,8 @@ export function actionLead(kind, entry, { account = "", amountLux = null, maxLux
 }
 
 /** The receipt of one transfer. No balances: the link may be shared. */
-export function receiptModel(entry, { cfg, now = Date.now(), own = null, route, submitter = null, timeZone, url }) {
-  const view = transferView(entry, { cfg, now, route, submitter, timeZone, year: true });
+export function receiptModel(entry, { cfg, gasPrice = 1n, now = Date.now(), own = null, route, submitter = null, timeZone, url }) {
+  const view = transferView(entry, { account: own?.account ?? "", cfg, gasPrice, now, route, submitter, timeZone, year: true });
   const from = networkName(cfg, route.from.id);
   const to = networkName(cfg, route.to.id);
   // Your own Dusk account by its .dusk name, others by their short code.
@@ -305,10 +309,10 @@ export function receiptModel(entry, { cfg, now = Date.now(), own = null, route, 
 
   const fees =
     route.mode === "duskevm-withdrawal"
-      ? routeDuskFees(route, { gasPrice: 1n, withdrawalGas: entry.withdrawalGas ? BigInt(entry.withdrawalGas) : undefined })
+      ? routeDuskFees(route, { gasPrice, withdrawalGas: entry.withdrawalGas ? BigInt(entry.withdrawalGas) : 0n })
       : null;
   return {
-    actionFee: view.action ? `Network fee up to ${formatFee((view.action.kind === "prove" ? fees.prove : fees.claim).maxLux, 9, { round: "up" })} DUSK, from your public balance` : "",
+    actionFee: view.action ? `Network fee up to ${formatMaxFee((view.action.kind === "prove" ? fees.prove : fees.claim).maxLux)} DUSK, from your public balance` : "",
     caption,
     details,
     fromTo: `From ${fromAccount} to ${toAccount}`,
@@ -328,12 +332,12 @@ function txHtml(cfg, network, hash, label) {
 // My transfers
 // ---------------------------------------------------------------------------
 
-export function transfersModel(entries, { accounts, cfg, now = Date.now(), routeOf, submitter = null, timeZone }) {
+export function transfersModel(entries, { account = "", accounts, cfg, gasPrice = 1n, now = Date.now(), routeOf, submitter = null, timeZone }) {
   const shown = entries.filter((entry) => routeOf(entry.routeId) && shownFor(entry, accounts));
   const groups = groupTransfers(shown, routeOf);
   const row = (entry) => {
     const route = routeOf(entry.routeId);
-    const view = transferView(entry, { cfg, now, route, submitter, timeZone });
+    const view = transferView(entry, { account, cfg, gasPrice, now, route, submitter, timeZone });
     return {
       action: view.action,
       amountText: view.amountText,
@@ -342,7 +346,7 @@ export function transfersModel(entries, { accounts, cfg, now = Date.now(), route
       pair: view.pair,
       status: view.status,
       statusWord: view.statusWord,
-      subline: transferSubline(view, entry, route, cfg, { now, timeZone }),
+      subline: transferSubline(view, entry, route, cfg, { account, now, timeZone }),
       title: routeTitle(cfg, route),
       tracker: view.tracker,
     };

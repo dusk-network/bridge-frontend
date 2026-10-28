@@ -13,7 +13,6 @@ import {
 } from "./transfer-view.js";
 import { receiptModel } from "./page-models.js";
 import { receiptPage, transferRow } from "./views.js";
-import { PROVEN_BY_OTHER_ACCOUNT } from "./withdrawal-lifecycle.js";
 
 const cfg = {
   dusk: { explorerUrl: "https://apps.testnet.dusk.network/explorer/" },
@@ -102,7 +101,9 @@ test("a withdrawal shows its three steps, their times and the next action", () =
     ["Claim on Dusk", "todo"],
   ]);
   assert.equal(ready.steps[0].atText, "Fri 23 Oct, 16:20 CEST");
-  assert.equal(ready.steps[1].detail, "Ready now · network fee up to 0.05 DUSK");
+  assert.equal(ready.steps[1].detail, "Ready now · network fee up to 0.051 DUSK");
+  // At the node's price, as the quote and the review figure it.
+  assert.equal(transferView({ ...ready.entry ?? {}, hash: L2_HASH, id: "w", sourceAt: sentAt, stage: "ready_to_prove", status: "pending" }, { cfg, gasPrice: 2n, route: withdrawal }).steps[1].detail, "Ready now · network fee up to 0.102 DUSK");
   assert.equal(ready.steps[2].detail, "About 7 days after the proof");
   assert.deepEqual(ready.action, { blocked: "", failure: "", kind: "prove", label: "Prove on Dusk" });
   assert.equal(ready.title, "Prove your withdrawal of 200 DUSK");
@@ -110,7 +111,14 @@ test("a withdrawal shows its three steps, their times and the next action", () =
 
   // Proven only by another account: the user still proves, and is told why.
   const other = transferView({ hash: L2_HASH, provenByOther: true, sourceAt: sentAt, stage: "ready_to_prove", status: "pending" }, { cfg, route: withdrawal });
-  assert.equal(other.steps[1].detail, PROVEN_BY_OTHER_ACCOUNT);
+  assert.equal(other.steps[1].detail, "Someone else proved it. The DUSK still pays the Dusk account in the withdrawal. Prove it yourself to claim it.");
+  // Whom it still pays, by account: the list and the review say the same.
+  const paying = (destination, account) =>
+    transferView({ destination, hash: L2_HASH, provenByOther: true, sourceAt: sentAt, stage: "ready_to_prove", status: "pending" }, { account, cfg, route: withdrawal }).steps[1].detail;
+  assert.equal(paying(ACCOUNT, ACCOUNT), "Someone else proved it. The DUSK still pays your Dusk account. Prove it yourself to claim it.");
+  const stranger = `25z9o6${"x".repeat(40)}5Etftt`;
+  assert.equal(paying(stranger, ACCOUNT), "Someone else proved it. The DUSK still pays 25z9o6…5Etftt, not your connected Dusk account. Prove it yourself to claim it.");
+  assert.equal(paying(stranger, ""), "Someone else proved it. The DUSK still pays 25z9o6…5Etftt. Prove it yourself to claim it.");
   assert.equal(other.action.kind, "prove");
   assert.equal(other.tracker[1].label, "Proven by another");
 
@@ -177,6 +185,11 @@ test("a waiting withdrawal counts down to its claim time, across a clock change"
 });
 
 test("what becomes public names the accounts themselves, not a label", () => {
+  // By its .dusk name too, as the wallet's window says it.
+  assert.equal(
+    privacyLine(deposit, cfg, { dusk: ACCOUNT, evm: EVM, name: "alice.dusk" }),
+    "Your Dusk account alice.dusk (21n5nc…fMMLNz), 0x3E5B…a11d and the amount are visible on Dusk and DuskEVM, and linked to each other.",
+  );
   assert.equal(
     privacyLine(deposit, cfg, { dusk: ACCOUNT, evm: EVM }),
     "Your Dusk account 21n5nc…fMMLNz, 0x3E5B…a11d and the amount are visible on Dusk and DuskEVM, and linked to each other.",
@@ -207,4 +220,26 @@ test("a rejected proof isn't shown as proven, and promises no claim", () => {
   const rejected = { hash: L2_HASH, proofRejected: true, provenAt: at, sourceAt: at - 3_600_000, stage: "proven_waiting", status: "pending" };
   const view = transferView(rejected, { cfg, now: at + 86_400_000, route: withdrawal });
   assert.equal(transferSubline(view, rejected, withdrawal, cfg, { now: at + 86_400_000 }), "The proof was rejected. Prove again once DuskEVM reports a new output.");
+});
+
+test("a withdrawal's card dates each step: sent, proven, and from when it can be claimed", () => {
+  const sentAt = Date.UTC(2026, 8, 24, 10, 0);
+  const provenAt = Date.UTC(2026, 8, 25, 10, 0);
+  const waiting = transferView(
+    { amountLux: "1008000000000", hash: L2_HASH, provenAt, sourceAt: sentAt, stage: "proven_waiting", status: "pending" },
+    { cfg, now: provenAt + 60_000, route: withdrawal, timeZone: AMS },
+  );
+  assert.deepEqual(waiting.tracker.map(({ label, when }) => [label, when]), [
+    ["Sent", "24 Sept"],
+    ["Proven", "25 Sept"],
+    ["Claim", "from about 2 Oct"],
+  ]);
+  const html = transferRow({ amountText: "1,008 DUSK", href: "#/t", id: "w", pair: ["dusk-evm", "dusk"], status: "pending", statusWord: "Pending", subline: "", title: "DuskEVM to Dusk", tracker: waiting.tracker });
+  assert.match(html, /<span>Sent<\/span><span class="when">24 Sept<\/span>/u);
+  assert.match(html, /Claim from about 2 Oct: in progress/u);
+  // Claimed: its day; not sent yet: none.
+  const claimedAt = Date.UTC(2026, 9, 2, 12, 0);
+  const claimed = transferView({ claimAt: claimedAt, hash: L2_HASH, provenAt, sourceAt: sentAt, stage: "finalized", status: "completed" }, { cfg, route: withdrawal, timeZone: AMS });
+  assert.deepEqual(claimed.tracker.map(({ when }) => when), ["24 Sept", "25 Sept", "2 Oct"]);
+  assert.deepEqual(transferView({ hash: L2_HASH, stage: "submitted", status: "pending" }, { cfg, route: withdrawal }).tracker.map(({ when }) => when), ["", "", ""]);
 });

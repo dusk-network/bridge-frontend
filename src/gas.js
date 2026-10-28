@@ -41,15 +41,25 @@ export const WITHDRAWAL_GAS_REFUSAL =
   "This withdrawal needs more gas than the wallet allows, so it wasn't sent.";
 
 /**
- * The limit to prove or claim a withdrawal with: the withdrawal limit plus
- * the gas the withdrawal itself asks for. Above the bound it isn't sent, since
- * less gas could leave the withdrawal's call short.
+ * The limit for each Dusk step of a withdrawal, its proof and its claim
+ * alike: the withdrawal limit plus the gas the withdrawal itself asks for,
+ * and never less than the bound the quote uses before that's known. One
+ * limit for both steps gives one "up to" fee everywhere it's shown.
+ */
+export function withdrawalStepGas(withdrawalGas = 0n) {
+  const own = BigInt(withdrawalGas);
+  return WITHDRAWAL_GAS_LIMIT + (own > WITHDRAWAL_RELAY_GAS_BOUND ? own : WITHDRAWAL_RELAY_GAS_BOUND);
+}
+
+/**
+ * The limit to prove or claim a withdrawal with. Above the bound it isn't
+ * sent, since less gas could leave the withdrawal's call short.
  */
 export function withdrawalGasLimit(
   withdrawalGas = 0n,
   upper = DEFAULT_GAS_LIMIT_UPPER,
 ) {
-  const limit = WITHDRAWAL_GAS_LIMIT + BigInt(withdrawalGas);
+  const limit = withdrawalStepGas(withdrawalGas);
   if (limit > BigInt(upper)) throw new Error(WITHDRAWAL_GAS_REFUSAL);
   return limit;
 }

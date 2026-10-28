@@ -8,7 +8,7 @@
 
 import { decodeDepositArgs } from "./dusk-deposit.js";
 import { sha256Hex, toHex } from "./data-driver.js";
-import { aboutFee, formatDusk, formatLux, formatUnitsGrouped } from "./format.js";
+import { aboutFee, formatDusk, formatLux, formatMaxFee } from "./format.js";
 import { OldTokenName, networkName } from "./names.js";
 import { normalizeEvmAddress } from "./validation.js";
 
@@ -53,13 +53,7 @@ export const middle = (value, head, tail) => {
  * rounded up past them so it never reads lower than it can be, trailing
  * zeros trimmed.
  */
-export function walletFee(lux) {
-  const value = BigInt(lux);
-  if (value <= 0n) return "0 DUSK";
-  const units = (value + 99_999n) / 100_000n;
-  const fraction = (units % 10_000n).toString().padStart(4, "0").replace(/0+$/u, "");
-  return `${formatUnitsGrouped(units / 10_000n, 0)}${fraction ? `.${fraction}` : ""} DUSK`;
-}
+export const walletFee = (lux) => `${formatMaxFee(lux)} DUSK`;
 
 /** A withdrawal's amount: DuskEVM counts 18 decimals, Dusk 9. Anything finer than a Lux keeps all 18. */
 export function withdrawalAmount(wei) {

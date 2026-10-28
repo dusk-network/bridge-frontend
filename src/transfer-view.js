@@ -9,13 +9,13 @@ import {
   durationWords,
   formatDateTime,
   formatDusk,
-  formatFee,
+  formatMaxFee,
+  formatShortDay,
 } from "./format.js";
 import { networkName } from "./names.js";
 import { routeDuskFees } from "./quote.js";
 import { STATUS_WORDS } from "./tracking.js";
 import {
-  PROVEN_BY_OTHER_ACCOUNT,
   WITHDRAWAL_REPORT_SECONDS,
   WITHDRAWAL_WAITING_PERIOD_SECONDS,
   roughDuration,
@@ -75,6 +75,21 @@ export const switchToProver = (entry) =>
     ? `Switch Dusk Wallet to ${short(entry.proofAccount)}, the account that proved it. Only that account can claim.`
     : "Switch Dusk Wallet to the account that proved it. Only that account can claim.";
 
+/**
+ * A proof by another account, in the list and on the receipt: whom the DUSK
+ * still pays, by name of account, and that proving it yourself lets you
+ * claim. `account` is the connected Dusk account, when there is one.
+ */
+export function provenByOtherLine(entry, account = "") {
+  const pays = entry?.destination ?? "";
+  const payee = !pays
+    ? "the Dusk account in the withdrawal"
+    : pays === account
+      ? "your Dusk account"
+      : `${short(pays)}${account ? ", not your connected Dusk account" : ""}`;
+  return `Someone else proved it. The DUSK still pays ${payee}. Prove it yourself to claim it.`;
+}
+
 const amountOf = (entry) =>
   entry.amountLux !== undefined && entry.amountLux !== null ? BigInt(entry.amountLux) : null;
 
@@ -99,9 +114,12 @@ export function custodyLine(route, cfg, entry = {}) {
   return `Until it's claimed, the DUSK waits in the DuskEVM bridge contract on Dusk. A claim always pays ${recipient}.`;
 }
 
-/** What becomes public, in one line, naming the accounts themselves. */
-export function privacyLine(route, cfg, { dusk, evm } = {}) {
-  const duskText = dusk ? `Dusk account ${short(dusk)}` : "Dusk account";
+/**
+ * What becomes public, in one line, naming the accounts themselves: the Dusk
+ * one by its .dusk name too, when it has one (`name`), as the wallet shows it.
+ */
+export function privacyLine(route, cfg, { dusk, evm, name = "" } = {}) {
+  const duskText = dusk ? `Dusk account ${name ? `${name} (${short(dusk)})` : short(dusk)}` : "Dusk account";
   const evmText = evm ? short(evm) : "your EVM address";
   const from = networkName(cfg, route.from.id);
   const to = networkName(cfg, route.to.id);
@@ -128,14 +146,14 @@ function claimTiming(entry, now) {
 
 const REJECTED_PROOF = "The proof was rejected. Prove again once DuskEVM reports a new output.";
 
-function withdrawalSteps(entry, cfg, { now, timeZone, year }) {
+function withdrawalSteps(entry, cfg, { account, gasPrice = 1n, now, timeZone, year }) {
   const stage = entry.stage ?? "submitted";
   const time = (ms) => (ms ? formatDateTime(ms, { timeZone, year }) : "");
   // The current stage decides: a proof the Portal rejected leaves the
   // withdrawal ready to prove again, whatever proof times are kept.
   const proved = ["proven_waiting", "ready_to_finalize", "finalize_submitted", "finalized"].includes(stage);
   const claimed = stage === "finalized";
-  const fees = routeDuskFees({ mode: "duskevm-withdrawal" }, { gasPrice: 1n });
+  const fees = routeDuskFees({ mode: "duskevm-withdrawal" }, { gasPrice, withdrawalGas: entry.withdrawalGas ?? 0n });
   const sent = step("sent", `Sent on ${networkName(cfg, "dusk-evm")}`, entry.sourceAt ? "done" : "now", {
     at: entry.sourceAt ?? null,
     atText: time(entry.sourceAt),
@@ -157,8 +175,8 @@ function withdrawalSteps(entry, cfg, { now, timeZone, year }) {
       detail: entry.pendingAction === "prove"
         ? "Proof sent, waiting for Dusk"
         : entry.provenByOther
-          ? PROVEN_BY_OTHER_ACCOUNT
-          : `Ready now · network fee up to ${formatFee(fees.prove.maxLux, 9, { round: "up" })} DUSK`,
+          ? provenByOtherLine(entry, account)
+          : `Ready now · network fee up to ${formatMaxFee(fees.prove.maxLux)} DUSK`,
       hash: entry.pendingHash ?? null,
       network: "dusk",
     });
@@ -286,12 +304,14 @@ function titleFor(entry, route, cfg, amount) {
  * @param {string} [options.timeZone] for tests; the viewer's own otherwise
  * @param {boolean} [options.year] dates as records: with the year
  * @param {string|null} [options.submitter] Dusk Wallet's account, as the Portal knows provers
+ * @param {bigint} [options.gasPrice] the node's gas price, for the most a step can cost
+ * @param {string} [options.account] the connected Dusk account
  */
-export function transferView(entry, { cfg, now = Date.now(), route, submitter = null, timeZone, year = false }) {
+export function transferView(entry, { account = "", cfg, gasPrice = 1n, now = Date.now(), route, submitter = null, timeZone, year = false }) {
   const status = entry.status === "completed" || entry.status === "failed" ? entry.status : "pending";
   const amount = amountOf(entry);
   const withdrawal = route.mode === "duskevm-withdrawal";
-  const options = { now, timeZone, year };
+  const options = { account, gasPrice, now, timeZone, year };
   const steps = (withdrawal ? withdrawalSteps(entry, cfg, options) : sourceSteps({ ...entry, status }, route, cfg, options)).map(
     (item) => ({ ...item, href: item.hash && item.network ? explorerTxUrl(cfg, item.network, item.hash) : null }),
   );
@@ -349,7 +369,9 @@ export function transferView(entry, { cfg, now = Date.now(), route, submitter = 
     title: titleFor({ ...entry, status }, route, cfg, amount),
     to: { account: entry.destination ?? null, network: toNetwork },
     trackingError: entry.trackingError ? "Status unavailable. Trying again." : "",
-    tracker: withdrawal ? steps.map((item) => ({ label: trackerLabel(item, entry, now), state: item.state })) : null,
+    tracker: withdrawal
+      ? steps.map((item) => ({ label: trackerLabel(item, entry, now), state: item.state, when: trackerWhen(item, entry, now, timeZone) }))
+      : null,
   };
 }
 
@@ -360,6 +382,16 @@ function lateText(route, cfg) {
   if (route.mode === "migration")
     return `Taking longer than usual. Migrations are usually paid out within ${roughDuration(cfg.migrationDelaySeconds ?? 3_600)}.`;
   return `Taking longer than usual. DuskEVM usually reports a withdrawal to Dusk within ${roughDuration(WITHDRAWAL_REPORT_SECONDS)}.`;
+}
+
+/** The date under a withdrawal's step on its card: when it happened, or from when it can. */
+function trackerWhen(item, entry, now, timeZone) {
+  const day = (ms) => formatShortDay(ms, { timeZone });
+  if (item.key === "sent") return entry.sourceAt ? day(entry.sourceAt) : "";
+  if (item.state === "done") return item.at ? day(item.at) : "";
+  if (item.key !== "claim" || entry.stage !== "proven_waiting" || entry.proofRejected) return "";
+  const timing = claimTiming(entry, now);
+  return timing.at ? `from ${timing.exact ? "" : "about "}${day(timing.at)}` : "";
 }
 
 function trackerLabel(item, entry, now) {
@@ -379,7 +411,7 @@ function trackerLabel(item, entry, now) {
 }
 
 /** The line under a transfer in My transfers. */
-export function transferSubline(view, entry, route, cfg, { now = Date.now(), timeZone } = {}) {
+export function transferSubline(view, entry, route, cfg, { account = "", now = Date.now(), timeZone } = {}) {
   const time = (ms) => formatDateTime(ms, { timeZone });
   if (view.status === "failed") return view.note || "This transfer didn't go through.";
   if (route.mode === "duskevm-withdrawal") {
@@ -389,7 +421,7 @@ export function transferSubline(view, entry, route, cfg, { now = Date.now(), tim
     if (entry.pendingAction === "prove" || stage === "prove_submitted") return "Proof sent, waiting for Dusk";
     if (entry.pendingAction === "finalize" || stage === "finalize_submitted") return "Claim sent, waiting for Dusk";
     if (stage === "ready_to_prove")
-      return entry.provenByOther ? PROVEN_BY_OTHER_ACCOUNT : "Ready to prove on Dusk";
+      return entry.provenByOther ? provenByOtherLine(entry, account) : "Ready to prove on Dusk";
     if (stage === "ready_to_finalize")
       return entry.readyAt ? `Ready to claim since ${time(Number(entry.readyAt) * 1_000)}` : "Ready to claim on Dusk";
     // A rejected proof never matures: it's proved again, once there's a new output.
