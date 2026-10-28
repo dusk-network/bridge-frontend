@@ -91,7 +91,7 @@ function setup({
   gasUpper = 1_000_000_000n,
   submitterCount = 1,
   l2 = null,
-  registry = { call: { isGameProper: fn(async () => true), isGameRespected: fn(async () => true) } },
+  registry = { call: { isGameProper: fn(async () => true), isGameRespected: fn(async () => true), respectedGameTypeUpdatedAt: fn(async () => 0n) } },
 } = {}) {
   const portal = {
     call: {
@@ -560,9 +560,10 @@ const rootOf = (l2) =>
  * start at `firstL2`. Game i sits at factory index i × `stride`: other game
  * types take the indexes between. The registry the Portal asks calls the
  * `blacklisted` and `retired` games improper, and the `unrespected` ones not
- * respected; without the registry (`registry: false`), none is checked.
+ * respected; the respected game type last changed at `updatedAt`. Without
+ * the registry (`registry: false`), none is checked.
  */
-function provingSetup({ blacklisted = [], firstL2, registry = true, retired = [], stride = 1, unrespected = [] }) {
+function provingSetup({ blacklisted = [], firstL2, registry = true, retired = [], stride = 1, unrespected = [], updatedAt = 0n }) {
   const l2Of = (i) => firstL2 + i * 100;
   const searched = (i) => ({
     extra_data: u256(l2Of(i)),
@@ -588,6 +589,7 @@ function provingSetup({ blacklisted = [], firstL2, registry = true, retired = []
           call: {
             isGameProper: fn(async (address) => ![...blacklisted, ...retired].includes(indexOf(address))),
             isGameRespected: fn(async (address) => !unrespected.includes(indexOf(address))),
+            respectedGameTypeUpdatedAt: fn(async () => updatedAt),
           },
         }
       : null,
@@ -799,4 +801,24 @@ test("a claim isn't ready before its date, even when the Portal's check says yes
   assert.deepEqual(early.sent, []);
   // From its date, the Portal's yes counts.
   assert.equal((await setup(CLAIMABLE).withdrawals.loadWithdrawalStatus(TX)).stage, "ready_to_finalize");
+});
+
+test("a game created at or before the respected game type last changed is passed over, as the web wallet does", async () => {
+  // The registry's time of the change: no input, a u64 back, as the hubs' are read.
+  assert.deepEqual(GAME_REGISTRY_DRIVER.encodeInputFn("respectedGameTypeUpdatedAt", "null"), new Uint8Array(0));
+  assert.equal(GAME_REGISTRY_DRIVER.decodeOutputFn("respectedGameTypeUpdatedAt", Uint8Array.of(0x10, 0x27, 0, 0, 0, 0, 0, 0)), 10_000n);
+  // Changed just after game 28 was created: 29, the newest resolved, is the one.
+  const after28 = provingSetup({ firstL2: 13_000, updatedAt: createdAtOf(28) });
+  const proved = await after28.withdrawals.prepareProve(TX);
+  assert.deepEqual(proved.args[1], u256(29));
+  assert.equal(proved.claim.exact, true);
+  // Read once, with the hub and the newest games.
+  assert.equal(after28.registry.call.respectedGameTypeUpdatedAt.calls.length, 1);
+  // Changed when game 29 was created: every resolved game is retired, so the newest covering game, as with none.
+  const at29 = provingSetup({ firstL2: 13_000, updatedAt: createdAtOf(29) });
+  const newest = await at29.withdrawals.prepareProve(TX);
+  assert.deepEqual(newest.args[1], u256(GAMES - 1));
+  assert.equal(newest.claim.exact, false);
+  // None of the retired games was asked about.
+  assert.deepEqual(at29.registry.call.isGameProper.calls, []);
 });

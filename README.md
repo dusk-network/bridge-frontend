@@ -160,9 +160,11 @@ others count block time, a second later for their strict comparisons.
 - A claim is ready once the Portal's check passes and its date has come.
 - A proof goes against a game that covers the withdrawal, has already
   resolved, and that the Portal would take, where there is one: the anchor
-  state registry calls it proper and respected. Its date is then exact when
-  the proof is made ("If you prove now, you can claim from …"). Otherwise the
-  proof goes against the newest covering game.
+  state registry calls it proper and respected, and it was created after the
+  respected game type last changed (`respectedGameTypeUpdatedAt`), as the web
+  wallet requires. Its date is then exact when the proof is made ("If you
+  prove now, you can claim from …"). Otherwise the proof goes against the
+  newest covering game.
 
 Several contract reads on one screen go to the node as one Multicall for Dusk
 query (`93de287b…6ce1d4`, mainnet and testnet). A read that fails inside a
