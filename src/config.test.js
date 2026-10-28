@@ -5,7 +5,7 @@ import { networks } from "@dusk-network/networks";
 
 import { buildRoutes } from "./bridge-routes.js";
 import { decodeBase58 } from "./base58.js";
-import { adapterL1Url, loadConfig } from "./config.js";
+import { loadConfig } from "./config.js";
 
 // The accounts the networks' files name: the Dusk → BSC bridge account, which
 // pays out BSC's migrations too, Ethereum's migration payer, and Sepolia's
@@ -253,7 +253,8 @@ test("a profile takes everything from its network's file: testnet runs DuskEVM w
     ["l1_standard_bridge", "optimism_portal", "dispute_game_factory", "anchor_state_registry"].map((name) => evm.contracts[name].contractId),
   );
   assert.deepEqual(cfg.duskEvm.predeploys, evm.predeploys);
-  assert.deepEqual([cfg.duskEvm.chainId, cfg.duskEvm.rpcUrl, cfg.duskEvm.l1BridgeRpcUrl, cfg.duskEvm.depositSeconds], [745, evm.rpcUrl, "https://rpc.testnet.evm.dusk.network/l1", 60]);
+  assert.deepEqual([cfg.duskEvm.chainId, cfg.duskEvm.rpcUrl, cfg.duskEvm.l1BridgeRpcUrl, cfg.duskEvm.depositSeconds], [745, evm.rpcUrl, evm.l1AdapterUrl, 60]);
+  assert.equal(evm.l1AdapterUrl, "https://rpc.testnet.evm.dusk.network/l1");
   assert.deepEqual({ ...cfg.duskEvm.optimismPortalDriver }, { sha256: evm.drivers.optimismPortal.sha256, url: "/drivers/optimism_portal_dd_opt.wasm" });
   assert.deepEqual(routes.map((route) => route.id), ["ethereum-to-dusk", "dusk-to-ethereum", "dusk-to-dusk-evm", "dusk-evm-to-dusk"]);
   // Its chains, accounts and fee are the file's too.
@@ -262,13 +263,10 @@ test("a profile takes everything from its network's file: testnet runs DuskEVM w
   assert.equal(cfg.dusk.explorerUrl, networks.testnet.apps.explorer);
 });
 
-test("DuskEVM's L1 RPC is the network file's, or /l1 on the RPC's path with its query kept", () => {
-  // A keyed RPC: /l1 goes on its path, not into its query.
+test("DuskEVM's L1 RPC is the one the network's file names, unless a setting names another", () => {
+  // Another RPC for DuskEVM, keyed: the adapter's L1 RPC stays the file's.
   const keyed = withConfig({ VITE_BRIDGE_PROFILE: "testnet", VITE_DUSKEVM_RPC_URL: "https://evm.example.org/rpc/?key=abc" }).cfg;
-  assert.equal(keyed.duskEvm.l1BridgeRpcUrl, "https://evm.example.org/rpc/l1?key=abc");
+  assert.equal(keyed.duskEvm.l1BridgeRpcUrl, networks.testnet.duskEvm.l1AdapterUrl);
   assert.equal(keyed.duskEvm.enabled, true);
-  // A file that names it (from @dusk-network/networks 0.2.0) is taken as it is; a setting still wins.
-  assert.equal(adapterL1Url({ l1AdapterUrl: "https://adapter.example.org/l1" }, "https://evm.example.org/rpc?key=abc"), "https://adapter.example.org/l1");
   assert.equal(withConfig({ VITE_BRIDGE_PROFILE: "testnet", VITE_DUSKEVM_L1_BRIDGE_RPC_URL: "https://l1.example.org/" }).cfg.duskEvm.l1BridgeRpcUrl, "https://l1.example.org/");
-  assert.equal(adapterL1Url(undefined, ""), "");
 });
