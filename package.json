@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "check": "npm test && npm run build",
+    "check": "npm test && npm run build && npm run audit:prod",
+    "audit:prod": "npm audit --omit=dev --audit-level=high",
     "dev": "vite",
     "preview": "vite preview",
     "test": "node --test"
@@ -14,6 +15,14 @@
     "vite": "8.0.16"
   },
   "dependencies": {
-    "@dusk/connect": "npm:@jsr/dusk__connect@0.2.0"
+    "@dusk/connect": "npm:@jsr/dusk__connect@0.2.0",
+    "@dusk/evm-sdk": "npm:@jsr/dusk__evm-sdk@0.1.0-beta.3",
+    "@reown/appkit": "1.8.23",
+    "@reown/appkit-adapter-wagmi": "1.8.23",
+    "viem": "2.55.19"
+  },
+  "overrides": {
+    "@base-org/account": "2.5.10",
+    "axios": "1.19.0"
   }
 }
