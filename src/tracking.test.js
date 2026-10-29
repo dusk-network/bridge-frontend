@@ -10,12 +10,12 @@ import {
 } from "viem";
 
 import { networks } from "@dusk-network/networks";
+import { encodeDepositArgs, evmAddressOf } from "@dusk-network/networks/duskevm";
 
 // Two accounts the networks' files name: the BSC and the Sepolia bridge accounts.
 const MAINNET_BSC_BRIDGE_ACCOUNT = networks.mainnet.routes.services[0].account;
 const TESTNET_REGGIO_BRIDGE_ACCOUNT = networks.testnet.routes.services[0].account;
-import { encodeDepositArgs } from "./dusk-deposit.js";
-import { createScheduler, createTracking, duskAccountEvmAddress, orderAmongAlike, takenByAnother } from "./tracking.js";
+import { createScheduler, createTracking, orderAmongAlike, takenByAnother } from "./tracking.js";
 import { NOT_A_DUSK_WITHDRAWAL } from "./withdrawals.js";
 
 const SENDER = MAINNET_BSC_BRIDGE_ACCOUNT; // any valid Dusk account works here
@@ -23,11 +23,14 @@ const RECIPIENT = "0x3E5B8223e638CB414BEF8CF95393460cA1C3a11d";
 const DUSK_HASH = "ab".repeat(32);
 const EVM_HASH = `0x${"cd".repeat(32)}`;
 
+// Testnet's DuskEVM bridge on Dusk, which deposits go to.
+const BRIDGE = networks.testnet.duskEvm.contracts.l1_standard_bridge.contractId;
+
 const cfg = {
   profile: "testnet",
   dusk: {},
   duskEvm: {
-    l1StandardBridgeContractId: "11".repeat(32),
+    l1StandardBridgeContractId: BRIDGE,
     predeploys: { l2StandardBridge: "0x4200000000000000000000000000000000000010" },
     name: "DuskEVM Testnet",
   },
@@ -41,6 +44,7 @@ const cfg = {
     network: "ethereum",
     payoutAddress: "",
   },
+  network: networks.testnet,
 };
 
 const ROUTES = {
@@ -206,7 +210,7 @@ test("two equal deposits don't both arrive on one credit", async () => {
     duskTx({
       blockTimestamp: BigInt(at),
       callData: {
-        contractId: "11".repeat(32),
+        contractId: BRIDGE,
         data: Buffer.from(encodeDepositArgs({ amountLux: 100_000_000n, minGasLimit: 200_000, to: RECIPIENT })).toString("hex"),
         fnName: "depositETHToWithValue",
       },
@@ -216,7 +220,7 @@ test("two equal deposits don't both arrive on one credit", async () => {
   const credit = (hash) => ({
     blockNumber: toHex(1_900n),
     data: encodeAbiParameters([{ type: "uint256" }, { type: "bytes" }], [10n ** 17n, "0x"]),
-    topics: [toEventSelector("ETHBridgeFinalized(address,address,uint256,bytes)"), pad(duskAccountEvmAddress(SENDER).toLowerCase()), pad(RECIPIENT.toLowerCase())],
+    topics: [toEventSelector("ETHBridgeFinalized(address,address,uint256,bytes)"), pad(evmAddressOf(SENDER).toLowerCase()), pad(RECIPIENT.toLowerCase())],
     transactionHash: hash,
   });
   const rpc = fakeRpc({
@@ -302,7 +306,7 @@ test("a deposit on a device that only knows it leaves the earlier equal deposit'
       blockHeight: BigInt(height),
       blockTimestamp: BigInt(at),
       callData: {
-        contractId: "11".repeat(32),
+        contractId: BRIDGE,
         data: Buffer.from(encodeDepositArgs({ amountLux: 100_000_000n, minGasLimit: 200_000, to: RECIPIENT })).toString("hex"),
         fnName: "depositETHToWithValue",
       },
@@ -310,13 +314,13 @@ test("a deposit on a device that only knows it leaves the earlier equal deposit'
     });
   const earlier = "ef".repeat(32);
   const txs = { [DUSK_HASH]: deposit(1_792_980_200, 5_000), [earlier]: deposit(1_792_980_100, 4_990) };
-  const intoBridge = { data: { receiver: "11".repeat(32), sender: SENDER, value: 100_000_000 }, target: `01${"0".repeat(62)}`, topic: "deposit" };
+  const intoBridge = { data: { receiver: BRIDGE, sender: SENDER, value: 100_000_000 }, target: `01${"0".repeat(62)}`, topic: "deposit" };
   let history = [listed(earlier, intoBridge), listed(DUSK_HASH, intoBridge)];
   const queries = [];
   const credit = (hash, block) => ({
     blockNumber: toHex(block),
     data: encodeAbiParameters([{ type: "uint256" }, { type: "bytes" }], [10n ** 17n, "0x"]),
-    topics: [toEventSelector("ETHBridgeFinalized(address,address,uint256,bytes)"), pad(duskAccountEvmAddress(SENDER).toLowerCase()), pad(RECIPIENT.toLowerCase())],
+    topics: [toEventSelector("ETHBridgeFinalized(address,address,uint256,bytes)"), pad(evmAddressOf(SENDER).toLowerCase()), pad(RECIPIENT.toLowerCase())],
     transactionHash: hash,
   });
   let credits = [credit("0x34", 1_900n)];
@@ -400,7 +404,7 @@ test("a Dusk → Sepolia transfer completes when the bridge pays the memo addres
 test("a deposit is followed to its DuskEVM credit through the bridge event when the adapter can't map hashes", async () => {
   const depositTx = duskTx({
     callData: {
-      contractId: "11".repeat(32),
+      contractId: BRIDGE,
       data: Buffer.from(encodeDepositArgs({ amountLux: 100_000_000n, minGasLimit: 200_000, to: RECIPIENT })).toString("hex"),
       fnName: "depositETHToWithValue",
     },
@@ -416,7 +420,7 @@ test("a deposit is followed to its DuskEVM credit through the bridge event when 
       assert.equal(filter.address, cfg.duskEvm.predeploys.l2StandardBridge);
       assert.deepEqual(filter.topics, [
         finalized,
-        pad(duskAccountEvmAddress(SENDER).toLowerCase()),
+        pad(evmAddressOf(SENDER).toLowerCase()),
         pad(RECIPIENT.toLowerCase()),
       ]);
       return credited
@@ -450,7 +454,7 @@ test("a deposit is followed to its DuskEVM credit through the bridge event when 
 
 test("a deposit waits while the adapter hasn't seen it, and fails with its Dusk transaction", async () => {
   const call = {
-    contractId: "11".repeat(32),
+    contractId: BRIDGE,
     data: Buffer.from(encodeDepositArgs({ amountLux: 1n, minGasLimit: 1, to: RECIPIENT })).toString("hex"),
     fnName: "depositETHToWithValue",
   };
@@ -647,7 +651,7 @@ test("a credit from before the deposit was sent here isn't taken as its credit",
   // As for a payout: the DuskEVM head read before sending (block 1,700) bounds the first scan.
   const depositTx = duskTx({
     callData: {
-      contractId: "11".repeat(32),
+      contractId: BRIDGE,
       data: Buffer.from(encodeDepositArgs({ amountLux: 100_000_000n, minGasLimit: 200_000, to: RECIPIENT })).toString("hex"),
       fnName: "depositETHToWithValue",
     },
@@ -675,7 +679,7 @@ test("a credit from before the deposit was sent here isn't taken as its credit",
 
 test("a failed deposit whose call data doesn't read as a deposit ends as failed", async () => {
   const depositTx = duskTx({
-    callData: { contractId: "11".repeat(32), data: "ab", fnName: "depositETHToWithValue" },
+    callData: { contractId: BRIDGE, data: "ab", fnName: "depositETHToWithValue" },
     error: "Panic: invalid arguments",
     json: { sender: SENDER },
   });

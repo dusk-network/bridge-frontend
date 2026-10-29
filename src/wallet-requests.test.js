@@ -13,8 +13,8 @@ const { config } = await import("./config.js");
 const { networks } = await import("@dusk-network/networks");
 const { sendDuskContractCall, sendDuskTransfer, useDuskWallet } = await import("./dusk-wallet.js");
 const { serviceTransferRequest } = await import("./service-transfer.js");
-const { decodeDepositArgs, depositRequest } = await import("./dusk-deposit.js");
-const { fromHex } = await import("./data-driver.js");
+const { decodeBridgeCall } = await import("@dusk-network/networks/duskevm");
+const { depositRequest } = await import("./dusk-deposit.js");
 
 // What the review prepares and then sends, as the account it was reviewed for.
 const submitServiceTransfer = async ({ account, ...options }) => sendDuskTransfer(await serviceTransferRequest(options), { account });
@@ -97,9 +97,10 @@ test("a DuskEVM deposit carries the typed recipient, its own gas and a label", a
   assert.equal(params.privacy, "public");
   // 5M gas at the node's price, not the wallet's 500M contract-call default.
   assert.deepEqual(params.gas, { limit: "5000000", price: "1" });
-  const args = decodeDepositArgs(fromHex(params.fnArgs));
-  assert.equal(args.to, getAddress(TYPED));
-  assert.equal(args.amountLux, 100_000_000n);
+  // Read as a deposit to the deployment's bridge: it forwards DuskEVM's SDK
+  // default, 200,000 gas, to its call there.
+  const args = decodeBridgeCall(config.network, { args: params.fnArgs, contractId: params.contractId, fnName: params.fnName });
+  assert.deepEqual([args.kind, args.recipient, args.amountLux, args.minGasLimit], ["deposit", getAddress(TYPED), 100_000_000n, 200_000]);
   assert.deepEqual(params.display, {
     label: "Bridge 0.1 DUSK to DuskEVM",
     recipient: getAddress(TYPED),

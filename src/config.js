@@ -5,6 +5,7 @@
 // Vite env at build time or from `window.__DUSK_BRIDGE_CONFIG__` at runtime.
 
 import { networks, routes } from "@dusk-network/networks";
+import { evmAddressOf } from "@dusk-network/networks/duskevm";
 
 const env = import.meta.env ?? {};
 
@@ -50,12 +51,6 @@ const isContractId = (id) => /^[0-9a-f]{64}$/u.test(id);
  * addresses on every DuskEVM.
  */
 export const DUSKEVM_PREDEPLOYS = networks.testnet.duskEvm.predeploys;
-
-/** Multicall for Dusk's data driver, bundled in `public/drivers` and pinned by SHA-256. */
-export const MULTICALL_DRIVER = Object.freeze({
-  sha256: "d2ed9e7b89d81f12b877f787a7830b90405357c82c9c28f75f0e048530e91462",
-  url: "/drivers/dusk_multicall_driver.wasm",
-});
 
 /** A DuskEVM contract's data driver, from `public/drivers`, as the network's file pins it. */
 const bundledDriver = ({ file, sha256 }) => Object.freeze({ sha256, url: `/drivers/${file}` });
@@ -150,6 +145,20 @@ function duskEvmConfig(net) {
   return Object.freeze(duskEvm);
 }
 
+/**
+ * The network's file with this deployment's DuskEVM bridge and Portal in
+ * place of its own where they differ, so the bridge's calls and withdrawals
+ * are read on the contracts this page sends them to.
+ */
+function withDuskEvmContracts(net, duskEvm) {
+  const contracts = net.duskEvm?.contracts ?? {};
+  const own = { l1_standard_bridge: duskEvm.l1StandardBridgeContractId, optimism_portal: duskEvm.optimismPortalContractId };
+  const set = Object.entries(own).filter(([name, id]) => isContractId(id) && id !== contracts[name]?.contractId);
+  if (!net.duskEvm || !set.length) return net;
+  const replaced = Object.fromEntries(set.map(([name, contractId]) => [name, { contractId, evmAddress: evmAddressOf(contractId) }]));
+  return { ...net, duskEvm: { ...net.duskEvm, contracts: { ...contracts, ...replaced } } };
+}
+
 export function loadConfig() {
   const requested = value("VITE_BRIDGE_PROFILE", "mainnet").toLowerCase();
   const profile = requested === "testnet" ? "testnet" : "mainnet";
@@ -182,11 +191,13 @@ export function loadConfig() {
           delaySeconds: seconds("VITE_SERVICE_BRIDGE_DELAY_SECONDS", offered.typicalSeconds),
           feeLux: BigInt(positiveInteger("VITE_SERVICE_BRIDGE_FEE_LUX", Number(offered.feeLux))),
           network: serviceNetwork,
-          payoutAddress: value("VITE_SERVICE_BRIDGE_PAYOUT_ADDRESS"),
+          // The address the route pays out from, where the network's file knows it.
+          payoutAddress: offered.payoutAddress ?? "",
         })
       : null;
 
   const multicallId = contractId("VITE_DUSK_MULTICALL_CONTRACT_ID", net.contracts.multicall ?? "");
+  const duskEvm = duskEvmConfig(net);
   // The Terms of use and Privacy policy the network's file links, as on the explorer.
   const { privacyUrl, termsUrl } = net.operator;
 
@@ -212,16 +223,14 @@ export function loadConfig() {
       terms: url("VITE_TERMS_URL", termsUrl),
     }),
     dusk,
-    duskEvm: duskEvmConfig(net),
+    duskEvm,
     evmNetworks,
     gasLimitUpper: BigInt(positiveInteger("VITE_GAS_LIMIT_UPPER", 1_000_000_000)),
     migrations,
-    multicall: Object.freeze({
-      contractId: isContractId(multicallId) ? multicallId : "",
-      driver: MULTICALL_DRIVER,
-    }),
-    // The network's file, for its routes and labels.
-    network: net,
+    multicall: Object.freeze({ contractId: isContractId(multicallId) ? multicallId : "" }),
+    // The network's file, for its routes and labels, and this deployment's
+    // DuskEVM contracts.
+    network: withDuskEvmContracts(net, duskEvm),
     // Routes shown but not running now, by route ID: those the network's
     // file says aren't running, unless set; `none` runs them all.
     pausedRoutes: Object.freeze(list("VITE_PAUSED_ROUTES", routes(net).filter((route) => !route.running).map((route) => route.id))),

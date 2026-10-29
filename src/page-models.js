@@ -2,11 +2,11 @@
 // checked without a browser. The controller fetches and stores; views.js
 // writes the HTML.
 
+import { claimAfterProving, proveNowText } from "@dusk-network/networks/duskevm";
 import { formatEvmAddress } from "@dusk-network/networks/format";
 
 import { explorerAddressUrl } from "./contracts.js";
 import { groupTransfers, shownFor } from "./discovery.js";
-import { claimAfterProving, proveNowText } from "./claim-date.js";
 import { aboutFee, formatDateTime, formatDusk, formatExactFee, formatLux, formatMaxFee, formatUnitsGrouped } from "./format.js";
 import { gasCoin, networkName, routeTitle, tokenName } from "./names.js";
 import { transferHref } from "./permalink.js";

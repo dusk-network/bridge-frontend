@@ -134,7 +134,8 @@ receipt link or a looked-up hash opens the same transfer on any device.
   is known (the mainnet defaults, `VITE_ETHEREUM_PAYOUT_ACCOUNT`,
   `VITE_BSC_PAYOUT_ACCOUNT`, or `VITE_MIGRATION_PAYOUT_ACCOUNT` for both).
 - **Dusk → BSC** completes when the bridge pays the memo address: an ERC-20
-  `Transfer` of the amount minus the fee, found with `eth_getLogs`.
+  `Transfer` of the amount minus the fee, found with `eth_getLogs`, from the
+  address the network's file says pays the route out, where it names one.
 - **Deposits** complete on their DuskEVM credit. Where the adapter's L1 RPC
   serves `duskevm_getTransactionHashByDuskHash`, the SDK follows the derived
   deposit transaction. Otherwise the bridge watches the L2 bridge's
@@ -173,8 +174,10 @@ time, a second later for their strict comparisons.
   newest covering game.
 
 Several contract reads on one screen go to the node as one Multicall for Dusk
-query (`93de287b…6ce1d4`, mainnet and testnet). A read that fails inside a
-batch fails alone; a batch the node refuses is retried one read at a time.
+query (`93de287b…6ce1d4`, mainnet and testnet), through
+`@hdauven/dusk-multicall`; a read alone goes as it is. A read that fails
+inside a batch fails alone, and one that runs out of gas there is read again
+alone; a batch the node refuses is retried one read at a time.
 
 ## Times
 
@@ -183,7 +186,7 @@ only this network's:
 
 - **DuskEVM withdrawals**: the Portal's proof maturity and dispute game
   finality delays, and how often outputs come, from the gaps between the
-  dispute game factory's latest games: two Multicall for Dusk queries. With
+  dispute game factory's latest games: two node queries. With
   fewer than two games of the Portal's type, the delays are still shown.
 - **DuskEVM deposits**: how far DuskEVM trails Dusk, its latest block against
   Dusk's own time for the Dusk block it last took in (the L1Block predeploy).

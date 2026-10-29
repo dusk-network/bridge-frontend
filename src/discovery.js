@@ -6,12 +6,12 @@
 // per visit and kept here per network and account; a transfer found twice, or
 // found and also sent from this browser, is one entry.
 
+import { decodeBridgeCall } from "@dusk-network/networks/duskevm";
 import { decodeFunctionData } from "viem";
 
 import { syncDuskHistory } from "./dusk-history.js";
 import { syncWithdrawals } from "./l2-withdrawals.js";
 import { entryId } from "./activity.js";
-import { decodeDepositArgs, DEPOSIT_FN_NAME } from "./dusk-deposit.js";
 import { MIGRATION_ABI } from "./legacy-migration.js";
 import { sentToSomeoneElse, withdrawalNextAction } from "./transfer-view.js";
 
@@ -238,7 +238,7 @@ export async function verifyPayouts(records, { account, cfg, rpcBatch }) {
 }
 
 /** Times and recipients for new archive records: one aliased node request. */
-async function addDetails(records, node) {
+async function addDetails(records, { cfg, node }) {
   const missing = records.filter(
     (record) => !record.rejected && (record.kind === "payout" ? record.payoutAt : record.sourceAt) === undefined,
   );
@@ -249,8 +249,9 @@ async function addDetails(records, node) {
         const at = tx?.blockTimestamp ? Number(tx.blockTimestamp) * 1_000 : null;
         if (record.kind === "payout") record.payoutAt = at;
         else record.sourceAt = at;
-        if (record.kind === "deposit" && tx?.callData?.fnName === DEPOSIT_FN_NAME && !record.destination)
-          record.destination = decodeDepositArgs(tx.callData.data).to;
+        const call = tx?.callData;
+        const deposit = call ? decodeBridgeCall(cfg.network, { args: call.data, contractId: call.contractId, fnName: call.fnName }) : null;
+        if (record.kind === "deposit" && deposit?.kind === "deposit" && !record.destination) record.destination = deposit.recipient;
       } catch {
         // Left for the tracker, which reads the transaction anyway.
       }
@@ -280,7 +281,7 @@ export function createDiscovery({ cfg, node, rpc, rpcBatch, storage = defaultSto
     });
     const records = Object.values(state.entries);
     await verifyPayouts(records, { account, cfg, rpcBatch });
-    await addDetails(records, node);
+    await addDetails(records, { cfg, node });
     saveState(key, state, storage);
     return { entries: records.map((record) => entryFromHistory(record, account, cfg)).filter(Boolean), state };
   }

@@ -6,6 +6,9 @@
 // - a DuskEVM deposit: how far DuskEVM's view of Dusk trails Dusk (chain);
 // - any route but a withdrawal, without that: what this browser's recent
 //   transfers on the route took, or else the network's configured value.
+// Times are written as every Dusk app writes an estimate (aboutTime).
+
+import { aboutTime } from "@dusk-network/networks/format";
 
 /** Dusk makes a block every 10 seconds: a deposit waits for one. */
 const DUSK_BLOCK_SECONDS = 10;
@@ -73,29 +76,6 @@ export function routeTime(route, cfg, { chain = null, now = Date.now(), transfer
   if (route.mode === "duskevm-deposit") return configured(cfg.duskEvm?.depositSeconds);
   if (route.mode === "migration") return configured(cfg.evmNetworks?.[route.from.id]?.migrationSeconds);
   return configured(cfg.service?.delaySeconds);
-}
-
-/**
- * A time as an estimate, rounded up on a scale that reads at a glance:
- * "~1 min", "~15 min", "~1 hour", "~70 min", "~10 hours", "~7 days".
- */
-export function aboutTime(seconds) {
-  let minutes = Math.max(1, Math.ceil(Number(seconds) / 60));
-  if (minutes > 10 && minutes < 60) minutes = Math.ceil(minutes / 5) * 5;
-  else if (minutes > 60 && minutes <= 90) minutes = Math.ceil(minutes / 10) * 10;
-  if (minutes < 60) return `~${minutes} min`;
-  if (minutes === 60) return "~1 hour";
-  if (minutes <= 90) return `~${minutes} min`;
-  const hours = Math.round(minutes / 60);
-  return hours < 48 ? `~${hours} hours` : `~${Math.round(minutes / 1_440)} days`;
-}
-
-/** The same in words: "about 30 minutes", "about 1 hour", "about 7 days". */
-export function aboutWords(seconds) {
-  const text = aboutTime(seconds);
-  const minutes = /^~(\d+) min$/u.exec(text);
-  if (minutes) return `about ${minutes[1]} minute${minutes[1] === "1" ? "" : "s"}`;
-  return text.replace(/^~/u, "about ");
 }
 
 /** The route's time as every page writes it, or "" when it isn't known. */

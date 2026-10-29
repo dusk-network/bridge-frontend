@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { decodeBase58 } from "@dusk-network/networks/account";
+import { resolveAccounts } from "@duskdomains/sdk/accounts";
+import { releaseFor } from "@duskdomains/sdk/releases";
+
 import { createDuskNames } from "./dusk-names.js";
 
 const ACCOUNT = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
+const ACCOUNT_BYTES = decodeBase58(ACCOUNT);
 
 test("the connected account's verified primary name is read through the lens, once", async () => {
   const reads = [];
@@ -12,7 +17,9 @@ test("the connected account's verified primary name is read through the lens, on
     chainId: "dusk:2",
     load: async () => ({
       createLensReader: async (release, options) => {
-        assert.equal(release.chainId, "dusk:2");
+        // Testnet's pinned release, its lens driver from its own site.
+        assert.equal(release, releaseFor("dusk:2"));
+        assert.equal(options.artifactBaseUrl, "https://testnet.dusk.domains/");
         assert.equal(options.nodeUrl, "https://node.example");
         return {
           verifyPrimary: async (endpoint) => {
@@ -22,8 +29,10 @@ test("the connected account's verified primary name is read through the lens, on
           },
         };
       },
-      releases: { testnet: { artifactBaseUrl: "https://example/", chainId: "dusk:2" } },
+      releaseFor,
     }),
+    // The check of a name's account isn't needed for a primary name.
+    loadAccounts: async () => assert.fail("loaded the account check"),
     nodeUrl: "https://node.example",
   });
   // A failed read isn't kept: the next lookup reads again.
@@ -35,27 +44,31 @@ test("the connected account's verified primary name is read through the lens, on
   assert.equal(await names.primaryName("not an account"), "");
 
   // A network without a Dusk Domains release has no names to read.
-  const releases = { testnet: { artifactBaseUrl: "https://example/", chainId: "dusk:2" } };
-  const none = createDuskNames({ chainId: "dusk:9", load: async () => ({ createLensReader: async () => assert.fail(), releases }), nodeUrl: "x" });
+  const none = createDuskNames({ chainId: "dusk:9", load: async () => ({ createLensReader: async () => assert.fail(), releaseFor }), nodeUrl: "x" });
   assert.equal(await none.primaryName(ACCOUNT), "");
 });
 
-test("a .dusk name's public account is read through the lens, and kept a minute", async () => {
+test("a .dusk name's public account is read through the lens, checked as a key, and kept a minute", async () => {
   const asked = [];
   let fail = true;
-  const accounts = { "alice.dusk": ACCOUNT };
+  // What each name's records hold: carol.dusk's isn't a valid key.
+  const records = { "alice.dusk": [...ACCOUNT_BYTES], "carol.dusk": Array(96).fill(0xff) };
   const names = createDuskNames({
     chainId: "dusk:2",
     load: async () => ({
       createLensReader: async () => ({
-        resolveMoonlightAccount: async (name) => {
+        resolve: async (name, keys) => {
           asked.push(name);
           if (fail) throw Object.assign(new Error("read"), { reason: "read" });
-          return accounts[name] ? { account: accounts[name], status: "Active" } : { status: "Expired" };
+          const value = records[name];
+          return value
+            ? { height: 7n, records: keys.map((k) => (k === "moonlight_address" ? { key: k, value } : null)), status: "Active" }
+            : { height: 7n, records: keys.map(() => null), status: "Expired" };
         },
       }),
-      releases: { testnet: { artifactBaseUrl: "https://example/", chainId: "dusk:2" } },
+      releaseFor,
     }),
+    loadAccounts: async () => ({ resolveAccounts }),
     nodeUrl: "https://node.example",
   });
   await assert.rejects(names.resolveName("Alice.dusk", { now: 0 }));
@@ -63,8 +76,10 @@ test("a .dusk name's public account is read through the lens, and kept a minute"
   assert.deepEqual(await names.resolveName("Alice.dusk", { now: 1 }), { account: ACCOUNT });
   assert.deepEqual(await names.resolveName("alice.dusk", { now: 59_000 }), { account: ACCOUNT });
   assert.deepEqual(await names.resolveName("bob.dusk", { now: 2 }), { status: "Expired" });
-  assert.deepEqual(asked, ["alice.dusk", "alice.dusk", "bob.dusk"]);
+  // An active name whose record isn't a valid key names no account.
+  assert.deepEqual(await names.resolveName("carol.dusk", { now: 3 }), { status: "Active" });
+  assert.deepEqual(asked, ["alice.dusk", "alice.dusk", "bob.dusk", "carol.dusk"]);
   // A minute on, the name is read again: it may point elsewhere by now.
   await names.resolveName("alice.dusk", { now: 61_001 });
-  assert.equal(asked.length, 4);
+  assert.equal(asked.length, 5);
 });

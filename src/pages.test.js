@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { encodeDepositArgs } from "@dusk-network/networks/duskevm";
+import { releaseFor } from "@duskdomains/sdk/releases";
+import { parseMessagePassedReceipt } from "@dusk/evm-sdk";
+
 import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
@@ -9,10 +13,12 @@ import { actionLead, actionPrivacy, availableLine, pricedReview, receiptModel, r
 import { buildQuote, withdrawalStepMax } from "./quote.js";
 import { withdrawalGasLimit } from "./gas.js";
 import { activityPanel, cardPage, cardRegions, contractsSheet, footer, header, networkSheet, receiptPage, reviewSheet, walletLines } from "./views.js";
-import { encodeDepositArgs } from "./dusk-deposit.js";
 import { formatDateTime } from "./format.js";
 import { chainMark, pairMark } from "./icons.js";
-import { approveLines, duskCallLines, duskTransferLines, migrateLines, walletFee } from "./wallet-lines.js";
+import { approveLines, duskCallLines, duskTransferLines, migrateLines, walletFee, withdrawalAmount } from "./wallet-lines.js";
+import { driverJson, loadDataDriver } from "./data-driver.js";
+import { withdrawalToDriverInput } from "./withdrawals.js";
+import { contractCreditLog, messagePassedLog, u256 } from "./withdrawals.fixtures.js";
 
 const DUSKEVM = {
   VITE_DUSKEVM_DISPUTE_GAME_FACTORY_CONTRACT_ID: "3b7d562aa0e6b94ce29c5ce2a6f0587ad771afdace86abb0baf66f93e49548cd",
@@ -32,6 +38,13 @@ const mainnet = profile("mainnet");
 const routesOf = (cfg) => Object.fromEntries(buildRoutes(cfg).map((route) => [route.mode, route]));
 const T = routesOf(testnet);
 const ACCOUNT = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
+// Whom testnet's 1,008 DUSK withdrawal (the fixture) pays.
+const PAID = "213qXNRaEAXrgJTFxXsPMeFasiEtPVJwZ3x2wKgZog2kXtXE7ovGRFfn1spfKBU4AUitAS91nM5T7HSvwRiyYCHLRaTTnJQbZn1TKnDySEiKZxX8vyodtWorbMuybDV5JJ9Y";
+// A Portal call as the bridge sends it: its arguments, encoded by the Portal's own data driver.
+const portalDriver = await loadDataDriver(readFileSync(new URL("../public/drivers/optimism_portal_dd_opt.wasm", import.meta.url)));
+const portalCall = (fnName, args) => portalDriver.encodeInputFn(fnName, driverJson(args));
+const withdrawalInput = (log) => withdrawalToDriverInput(parseMessagePassedReceipt({ logs: [log] }).withdrawal);
+const OUTPUT_ROOT_PROOF = { latest_blockhash: Array(32).fill(1), message_passer_storage_root: Array(32).fill(2), state_root: Array(32).fill(3), version: Array(32).fill(0) };
 
 /** The card as the controller builds it: Dusk to DuskEVM, 25, both wallets connected. */
 function cardVmFor(patch = {}) {
@@ -224,16 +237,15 @@ test("a deposit lists Dusk Wallet's bridge window: what it does, the fee and the
 });
 
 test("a proof or claim lists what the withdrawal pays, to whom, and who sent it", async () => {
-  const withdrawal = { amountWei: 1_008n * 10n ** 18n, from: "0x7568a1b3cc6b2f2e3e8fdd2fa77e0c5a0dbcb72d", recipient: ACCOUNT, value: 1_008n * 10n ** 18n };
+  // Testnet's 1,008 DUSK withdrawal to an account, proved, as the Portal's driver encodes the call.
   const portal = {
     chainId: "dusk:2",
     contractId: DUSKEVM.VITE_DUSKEVM_OPTIMISM_PORTAL_CONTRACT_ID,
     display: { label: "Prove a DuskEVM withdrawal" },
-    fnArgs: Uint8Array.from([1, 2, 3]),
+    fnArgs: portalCall("proveWithdrawalTransaction", [withdrawalInput(messagePassedLog), u256(29), OUTPUT_ROOT_PROOF, [[0x20, 0x01]]]),
     fnName: "proveWithdrawalTransaction",
     from: ACCOUNT,
     gas: { limit: "50519542", price: "1" },
-    withdrawal,
   };
   const prove = await duskCallLines(portal);
   // As the window leads since wallet#149: what it costs, then the withdrawal it's for.
@@ -245,13 +257,13 @@ test("a proof or claim lists what the withdrawal pays, to whom, and who sent it"
     sub: "Proving moves no DUSK. You claim it once the waiting period ends.",
     tag: "Known DuskEVM bridge call",
     title: "Prove a DuskEVM withdrawal",
-    to: "21n5nc…fMMLNz",
-    toFull: ACCOUNT,
+    to: "213qXN…V5JJ9Y",
+    toFull: PAID,
     where: "on Dusk",
   });
   assert.match(
     walletLines(prove, explorer),
-    /<div class="wlt">Prove a DuskEVM withdrawal<\/div><div class="wlto">Costs up to <span class="num">0\.0506 DUSK<\/span><\/div><div class="wlto">for a 1,008 DUSK withdrawal that pays <code class="mono" title="21n5nc[^"]+">21n5nc…fMMLNz<\/code> on Dusk<\/div><div class="wlto">Proving moves no DUSK\. You claim it once the waiting period ends\.<\/div>/u,
+    /<div class="wlt">Prove a DuskEVM withdrawal<\/div><div class="wlto">Costs up to <span class="num">0\.0506 DUSK<\/span><\/div><div class="wlto">for a 1,008 DUSK withdrawal that pays <code class="mono" title="213qXN[^"]+">213qXN…V5JJ9Y<\/code> on Dusk<\/div><div class="wlto">Proving moves no DUSK\. You claim it once the waiting period ends\.<\/div>/u,
   );
   assert.deepEqual(labelsOf(prove), [
     "Pays to", "Amount", "Sent from DuskEVM",
@@ -259,35 +271,31 @@ test("a proof or claim lists what the withdrawal pays, to whom, and who sent it"
     "Contract", "Method", "Call data",
     "From the site, not checked by the wallet",
   ]);
-  assert.equal(valueOf(prove, "Pays to").address, ACCOUNT);
+  assert.equal(valueOf(prove, "Pays to").address, PAID);
   assert.equal(valueOf(prove, "Amount").value, "1,008 DUSK");
   // The sender as the window checksums it.
-  assert.equal(valueOf(prove, "Sent from DuskEVM").address, "0x7568A1b3Cc6B2f2E3e8FdD2FA77e0C5A0dBCb72d");
+  assert.equal(valueOf(prove, "Sent from DuskEVM").address, "0x75685f9D88749B583732B40d56fe007cD404b72D");
   // A maximum rounds up past 4 decimals, so it never reads lower than it can be.
   assert.equal(valueOf(prove, "Network fee").value, "up to 0.0506 DUSK");
   assert.equal(valueOf(prove, "Total").value, "up to 0.0506 DUSK");
   assert.deepEqual([valueOf(prove, "Contract").name, valueOf(prove, "Contract").value], ["DuskEVM bridge portal", "14eeb3…3fb1b9"]);
-  assert.equal(valueOf(prove, "Call data").value, "3 bytes · sha256=039058c6f2c0…011cfb81");
+  assert.match(valueOf(prove, "Call data").value, /^\d+ bytes · sha256=[0-9a-f]{12}…[0-9a-f]{8}$/u);
 
-  // A claim for a contract, and an amount finer than a Lux, read as the window reads them.
-  const contractId = `21a5cb174bbd7dd0ae${"1".repeat(46)}`;
-  const claim = await duskCallLines({
-    ...portal,
-    fnName: "finalizeWithdrawalTransaction",
-    withdrawal: { ...withdrawal, amountWei: 10n ** 18n + 1n, recipient: contractId, value: 10n ** 18n + 1n },
-  });
+  // Testnet's 10 DUSK withdrawal that credits a contract, claimed.
+  const claim = await duskCallLines({ ...portal, fnArgs: portalCall("finalizeWithdrawalTransaction", withdrawalInput(contractCreditLog)), fnName: "finalizeWithdrawalTransaction" });
   assert.deepEqual(
     [claim[0].title, claim[0].prefix, claim[0].to, claim[0].where, claim[0].sub],
-    ["Claim a DuskEVM withdrawal", "for a 1.000000000000000001 DUSK withdrawal that pays", "21a5cb…111111", "on Dusk, a contract", "Claiming pays this DUSK to the account above. You pay only the network fee."],
+    ["Claim a DuskEVM withdrawal", "for a 10 DUSK withdrawal that pays", "ed7176…44a0af", "on Dusk, a contract", "Claiming pays this DUSK to the account above. You pay only the network fee."],
   );
-  assert.deepEqual([rowsOf(claim)[0].label, rowsOf(claim)[0].value], ["Pays to contract", contractId]);
+  assert.deepEqual([rowsOf(claim)[0].label, rowsOf(claim)[0].value], ["Pays to contract", "ed7176a3a7845a577732395887494965ae49c0daf29672d4370121b51844a0af"]);
+  // An amount finer than a Lux keeps all 18 decimals.
+  assert.equal(withdrawalAmount(10n ** 18n + 1n), "1.000000000000000001 DUSK");
 
-  // A withdrawal the window can't read (none, or amounts that differ) is a plain contract call.
-  for (const unread of [undefined, { ...withdrawal, value: 1n }]) {
-    const plain = await duskCallLines({ ...portal, withdrawal: unread });
-    assert.deepEqual(plain[0], { amount: "", kind: "head", title: "Contract call" });
-    assert.deepEqual(labelsOf(plain), ["From", "Contract", "Method", "Call data", "Network fee", "Total", "From the site, not checked by the wallet"]);
-  }
+  // A call the window can't read is a plain contract call.
+  const plain = await duskCallLines({ ...portal, fnArgs: Uint8Array.from([1, 2, 3]) });
+  assert.deepEqual(plain[0], { amount: "", kind: "head", title: "Contract call" });
+  assert.deepEqual(labelsOf(plain), ["From", "Contract", "Method", "Call data", "Network fee", "Total", "From the site, not checked by the wallet"]);
+  assert.equal(valueOf(plain, "Call data").value, "3 bytes · sha256=039058c6f2c0…011cfb81");
 });
 
 test("a transfer to the bridge's account lists Dusk Wallet's bridge window: where it goes, what arrives, then from, to and the recipient", () => {
@@ -514,7 +522,9 @@ test("the Contracts sheet lists every address in full, per route, and names no o
   // Mainnet: BSC both ways, its account paying out migrations too; Ethereum one way, with its payer.
   const main = contractGroups(mainnet);
   assert.deepEqual(main.map((group) => group.title), ["Networks", "BNB Smart Chain ↔ Dusk", "Ethereum → Dusk", "Used to read Dusk"]);
-  assert.deepEqual(main[1].rows.map((row) => row.label), ["BEP20 DUSK", "Migration contract", "Bridge account on Dusk"]);
+  assert.deepEqual(main[1].rows.map((row) => row.label), ["BEP20 DUSK", "Migration contract", "Bridge account on Dusk", "Pays out from"]);
+  // The address the network's file says pays the route out, linked on BscScan.
+  assert.deepEqual([main[1].rows[3].value, main[1].rows[3].href], [mainnet.service.payoutAddress, `https://bscscan.com/address/${mainnet.service.payoutAddress}`]);
   assert.match(main[1].rows[2].note, /It also pays out what comes from BNB Smart Chain\.$/u);
   assert.deepEqual(main[2].rows.map((row) => [row.label, row.value]), [
     ["ERC20 DUSK", mainnet.evmNetworks.ethereum.tokenContract],
@@ -740,9 +750,8 @@ test("About this page names, in one line, the servers the page reads from", asyn
   const sheet = contractsSheet({ badge: "Testnet", groups: contractGroups(testnet), servers: line });
   assert.match(sheet, /<h3 class="gt">Servers<\/h3><p class="card about-servers">This page reads from testnet\.nodes\.dusk\.network/u);
   assert.ok(sheet.indexOf("Servers") < sheet.indexOf("Bridge contract on Dusk"));
-  // The names' host is the one each release fetches its lens driver from.
-  const { default: releases } = await import("./dusk-domains-releases.js");
-  for (const release of Object.values(releases)) assert.ok(serversLine({ ...testnet, dusk: { ...testnet.dusk, chainId: release.chainId } }).includes(`${new URL(release.artifactBaseUrl).host} (for .dusk names)`));
+  // The names' host is the one each network's pinned release fetches its lens driver from.
+  for (const cfg of [testnet, mainnet]) assert.ok(serversLine(cfg).includes(`${new URL(releaseFor(cfg.dusk.chainId).artifactBaseUrl).host} (for .dusk names)`));
 });
 
 test("My transfers can follow a Dusk account without a wallet, and stop", () => {

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { networks } from "@dusk-network/networks";
 import { toRlp } from "viem";
 
 import { provenByOtherLine, transferView } from "./transfer-view.js";
@@ -72,7 +73,8 @@ function setup({ own = null, others = [], games = {} }) {
       gameCount: async () => u256(6),
       gameMetadataAtIndex: async () => ({
         extraData: [],
-        l2SequenceNumber: u256(13_678),
+        // A game covering the withdrawal, 10 blocks past it.
+        l2SequenceNumber: u256(Number(BigInt(messagePassedLog.blockNumber)) + 10),
         rootClaim: bytes(ROOT_CLAIM),
       }),
       gameContractId: async () => Array(32).fill(0xd5),
@@ -113,6 +115,7 @@ function setup({ own = null, others = [], games = {} }) {
       throw new Error(`unexpected ${method}`);
     },
     latestBlock: async () => TIP,
+    network: networks.testnet,
     portal,
     proofSubmitter: () => OWN,
   });

@@ -4,8 +4,9 @@ import {
   prepareNativeWithdrawal,
 } from "@dusk/evm-sdk";
 
+import { decodeBase58 } from "@dusk-network/networks/account";
+
 import { duskToLux } from "./amount.js";
-import { decodeBase58 } from "./base58.js";
 import { config } from "./config.js";
 import { ensureDuskConnected } from "./dusk-wallet.js";
 import { ensureEvmChain, getEvmClients } from "./evm-wallet.js";

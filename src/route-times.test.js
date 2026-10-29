@@ -5,7 +5,7 @@ import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 import { actionLead, receiptModel, reviewChecks, routeLine, transfersModel } from "./page-models.js";
 import { buildQuote } from "./quote.js";
-import { aboutTime, measuredSeconds, routeTime, routeTimeText } from "./route-times.js";
+import { measuredSeconds, routeTime, routeTimeText } from "./route-times.js";
 import { transferView } from "./transfer-view.js";
 
 const DUSKEVM = {
@@ -30,12 +30,6 @@ const text = (cfg, id, timing) => routeTimeText(routeTime(byId(cfg, id), cfg, ti
 const CHAIN = Object.freeze({
   deposit: { lagSeconds: 35 },
   withdrawal: { finalitySeconds: 302_400, maturitySeconds: 604_800, outputSeconds: 1_700 },
-});
-
-test("a time reads as an estimate, rounded up on a scale that reads at a glance", () => {
-  assert.deepEqual([45, 172, 600, 660, 3_400, 3_600, 4_000, 5_400, 5_460, 36_000, 608_200].map(aboutTime), [
-    "~1 min", "~3 min", "~10 min", "~15 min", "~1 hour", "~1 hour", "~70 min", "~90 min", "~2 hours", "~10 hours", "~7 days",
-  ]);
 });
 
 test("each network has its own times, and another network's never stands in", () => {

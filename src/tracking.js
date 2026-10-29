@@ -2,19 +2,17 @@
 // rebuilt from the route and the source transaction hash; stored fields only
 // save work (where a search left off) or remember what this browser sent.
 
-import { observeDepositStatus, compressedDuskBlsPublicKeyToRaw } from "@dusk/evm-sdk";
+import { BRIDGE_FUNCTIONS, decodeBridgeCall, evmAddressOf } from "@dusk-network/networks/duskevm";
+import { observeDepositStatus } from "@dusk/evm-sdk";
 import {
   decodeEventLog,
   decodeFunctionData,
-  keccak256,
   pad,
   parseAbi,
   toEventSelector,
   toHex,
 } from "viem";
 
-import { decodeBase58 } from "./base58.js";
-import { decodeDepositArgs, DEPOSIT_FN_NAME } from "./dusk-deposit.js";
 import { MIGRATION_ABI } from "./legacy-migration.js";
 import { networkName } from "./names.js";
 import { normalizeEvmAddress } from "./validation.js";
@@ -48,12 +46,6 @@ export function duskFeePaid(tx) {
 const pending = (note, extra = {}) => ({ ...extra, note, status: "pending" });
 const failed = (note, extra = {}) => ({ ...extra, note, status: "failed" });
 const completed = (extra = {}) => ({ ...extra, note: "", status: "completed" });
-
-/** The EVM-shaped address Dusk's L1 bridge uses for a Dusk account. */
-export function duskAccountEvmAddress(account) {
-  const raw = compressedDuskBlsPublicKeyToRaw(decodeBase58(account));
-  return `0x${keccak256(raw).slice(-40)}`;
-}
 
 function memoText(hex) {
   if (!hex) return "";
@@ -157,6 +149,11 @@ export function createTracking(deps) {
       .map((other) => ({ at: other.sourceAt, hash: other.hash }));
   const settledHashes = (others) =>
     new Set(others.filter((other) => other.status === "completed" && other.destinationHash).map((other) => lower(other.hash)));
+  /** A Dusk call's deposit to DuskEVM, read from its arguments, or null for any other call. */
+  const depositOf = (call) => {
+    const read = call ? decodeBridgeCall(config.network, { args: call.data, contractId: call.contractId, fnName: call.fnName }) : null;
+    return read?.kind === "deposit" ? read : null;
+  };
 
   /** When each Dusk transaction was sent, leaving out failed ones; one query for all. */
   async function sentTimes(hashes) {
@@ -229,13 +226,8 @@ export function createTracking(deps) {
       ),
     ].filter((hash) => DUSK_HASH.test(hash) && hash !== lower(entry.hash));
     const alike = (await sentTimes(candidates)).filter(({ tx }) => {
-      if (tx.callData?.fnName !== DEPOSIT_FN_NAME) return false;
-      try {
-        const args = decodeDepositArgs(tx.callData.data);
-        return sameAddress(args.to, recipient) && args.amountLux === BigInt(amountLux);
-      } catch {
-        return false;
-      }
+      const deposit = depositOf(tx.callData);
+      return Boolean(deposit) && sameAddress(deposit.recipient, recipient) && deposit.amountLux === BigInt(amountLux);
     });
     const result = { alike, complete, reach: bottom === 0 ? Infinity : top - bottom };
     if (complete && items.some((item) => lower(item?.origin) === lower(entry.hash))) alikeRead.set(key, result);
@@ -487,7 +479,7 @@ export function createTracking(deps) {
         address: config.duskEvm.predeploys.l2StandardBridge,
         topics: [
           ETH_BRIDGE_FINALIZED_TOPIC,
-          sender ? pad(duskAccountEvmAddress(sender).toLowerCase()) : null,
+          sender ? pad(evmAddressOf(sender).toLowerCase()) : null,
           pad(recipient.toLowerCase()),
         ],
       },
@@ -517,23 +509,20 @@ export function createTracking(deps) {
     const sourceAt = tx.blockTimestamp ? Number(tx.blockTimestamp) * 1_000 : null;
     const call = tx.callData;
     if (
-      call?.fnName !== DEPOSIT_FN_NAME ||
+      call?.fnName !== BRIDGE_FUNCTIONS.deposit ||
       String(call.contractId).toLowerCase() !== config.duskEvm.l1StandardBridgeContractId
     )
       return failed("This transaction isn't a DuskEVM deposit.", { sourceAt });
-    let args;
-    try {
-      args = decodeDepositArgs(call.data);
-    } catch {
-      // Arguments that don't read as a deposit's never put DUSK in the bridge.
+    const args = depositOf(call);
+    // Arguments that don't read as a deposit's never put DUSK in the bridge.
+    if (!args)
       return failed(
         tx.error ? "The Dusk transaction failed, so the deposit didn't enter the bridge." : "This transaction isn't a DuskEVM deposit.",
         { feeLux: duskFeePaid(tx), sender: tx.json?.sender, sourceAt },
       );
-    }
     const patch = {
       amountLux: args.amountLux.toString(),
-      destination: args.to,
+      destination: args.recipient,
       feeLux: duskFeePaid(tx),
       sender: tx.json?.sender,
       sourceAt,
@@ -547,7 +536,7 @@ export function createTracking(deps) {
     if (viaAdapter === null) return pending(`Waiting for ${name("dusk-evm")}.`, patch);
     const credit = await eventCredit(
       entry,
-      { amountLux: args.amountLux, height: tx.blockHeight, recipient: args.to, sender: tx.json?.sender, sentAt: sourceAt },
+      { amountLux: args.amountLux, height: tx.blockHeight, recipient: args.recipient, sender: tx.json?.sender, sentAt: sourceAt },
       others,
     );
     if (credit.ambiguous)

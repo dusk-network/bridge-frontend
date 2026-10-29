@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { networks } from "@dusk-network/networks";
+import { decodeBase58 } from "@dusk-network/networks/account";
+import { encodeDuskExternalAssetRecipient } from "@dusk/evm-sdk";
 import { encodeAbiParameters, encodeEventTopics, encodeFunctionData, parseAbi } from "viem";
 
 import { loadConfig } from "./config.js";
@@ -23,20 +26,23 @@ const ABI = parseAbi([
   "function finalizeBridgeERC20(address _localToken, address _remoteToken, address _from, address _to, uint256 _amount, bytes _extraData)",
 ]);
 const MESSENGER = "0x4200000000000000000000000000000000000007";
+// Dusk's messenger and bridge, as DuskEVM testnet's withdrawals reach them.
+const { l1_cross_domain_messenger: L1_MESSENGER, l1_standard_bridge: L1_BRIDGE } = networks.testnet.duskEvm.contracts;
 const USER = "0xeb9ea22334e679cdbc669cf9ad2d713b559708b1";
+const ACCOUNT = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
 const TX = `0x${"57".repeat(32)}`;
 
-/** A receipt whose one MessagePassed event carries `message`, relayed from the L2 bridge. */
-function receipt(message, value) {
-  const data = encodeFunctionData({ abi: ABI, args: [7n, "0x4200000000000000000000000000000000000010", USER, value, 200_000n, message], functionName: "relayMessage" });
-  const withdrawal = { data, gasLimit: 519_542n, nonce: 7n, sender: MESSENGER, target: USER, value };
+/** A receipt whose one MessagePassed event carries `message`, relayed from the L2 bridge to `target`. */
+function receipt(message, value, target = L1_MESSENGER.evmAddress) {
+  const data = encodeFunctionData({ abi: ABI, args: [7n, "0x4200000000000000000000000000000000000010", L1_BRIDGE.evmAddress, value, 200_000n, message], functionName: "relayMessage" });
+  const withdrawal = { data, gasLimit: 519_542n, nonce: 7n, sender: MESSENGER, target, value };
   return {
     blockNumber: "0x3564",
     logs: [
       {
         address: "0x4200000000000000000000000000000000000016",
         data: encodeAbiParameters([{ type: "uint256" }, { type: "uint256" }, { type: "bytes" }, { type: "bytes32" }], [value, withdrawal.gasLimit, data, hashWithdrawal(withdrawal)]),
-        topics: encodeEventTopics({ abi: ABI, args: { nonce: 7n, sender: MESSENGER, target: USER }, eventName: "MessagePassed" }),
+        topics: encodeEventTopics({ abi: ABI, args: { nonce: 7n, sender: MESSENGER, target }, eventName: "MessagePassed" }),
       },
     ],
     status: "0x1",
@@ -51,8 +57,11 @@ test("a DuskEVM hash opens as a withdrawal only when it withdraws DUSK through t
       node: { transaction: async () => null },
       rpc: async (network, method) => (network === "dusk-evm" && method === "eth_getTransactionReceipt" ? answer : null),
     });
-  const dusk = receipt(encodeFunctionData({ abi: ABI, args: [USER, USER, 10n ** 19n, "0x"], functionName: "finalizeBridgeETH" }), 10n ** 19n);
+  const pays = encodeFunctionData({ abi: ABI, args: [USER, USER, 10n ** 19n, encodeDuskExternalAssetRecipient(decodeBase58(ACCOUNT))], functionName: "finalizeBridgeETH" });
+  const dusk = receipt(pays, 10n ** 19n);
   assert.deepEqual(await resolve(dusk), { hash: TX, routeId: "dusk-evm-to-dusk" });
+  // The same call, sent somewhere other than Dusk's messenger.
+  assert.deepEqual(await resolve(receipt(pays, 10n ** 19n, USER)), { message: "That DuskEVM transaction isn't a withdrawal of DUSK." });
 
   // A token withdrawal passes the same contracts, but isn't DUSK.
   const token = receipt(encodeFunctionData({ abi: ABI, args: [USER, USER, USER, USER, 5n, "0x"], functionName: "finalizeBridgeERC20" }), 0n);

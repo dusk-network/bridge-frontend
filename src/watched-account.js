@@ -3,7 +3,9 @@
 // connected account's. Nothing can be sent from it. Kept per network, in
 // this browser only.
 
-import { checkDuskRecipient, isDuskName } from "./recipient.js";
+import { isDuskName } from "@duskdomains/sdk/names";
+
+import { checkDuskRecipient } from "./recipient.js";
 import { normalizeDuskAddress } from "./validation.js";
 
 const keyFor = (profile) => `dusk-bridge:watched:${profile}`;
@@ -41,10 +43,9 @@ export async function watchTarget(input, { resolveName }) {
     const checked = checkDuskRecipient(typed);
     return checked.address ? { account: checked.address, name: "" } : { error: checked.error };
   }
-  const name = typed.toLowerCase();
   // A name Dusk Domains can't hold isn't looked up.
-  const invalid = checkDuskRecipient(name).error;
-  if (invalid) return { error: invalid };
+  const { error, name } = checkDuskRecipient(typed);
+  if (error) return { error };
   let found;
   try {
     found = await resolveName(name);

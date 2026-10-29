@@ -5,24 +5,22 @@ import test from "node:test";
 
 import { networks } from "@dusk-network/networks";
 
-import { MULTICALL_DRIVER, loadConfig } from "./config.js";
+import { loadConfig } from "./config.js";
 import { createDriverLoader, driverJson, toHex } from "./data-driver.js";
 
 const read = (url) => readFile(new URL(`../public${url}`, import.meta.url));
 
-// The drivers testnet's DuskEVM contracts use, as its network's file pins them, and Multicall for Dusk's.
+// The drivers testnet's DuskEVM contracts use, as its network's file pins them.
 globalThis.__DUSK_BRIDGE_CONFIG__ = { VITE_BRIDGE_PROFILE: "testnet" };
 const { duskEvm } = loadConfig();
 delete globalThis.__DUSK_BRIDGE_CONFIG__;
-const BUNDLED = { disputeGameFactory: duskEvm.disputeGameFactoryDriver, multicall: MULTICALL_DRIVER, optimismPortal: duskEvm.optimismPortalDriver };
+const BUNDLED = { disputeGameFactory: duskEvm.disputeGameFactoryDriver, optimismPortal: duskEvm.optimismPortalDriver };
 
 test("bundled data drivers match their reviewed artifacts", async () => {
   assert.deepEqual(
     Object.fromEntries(Object.entries(BUNDLED).map(([name, { sha256 }]) => [name, sha256])),
     {
       disputeGameFactory: "dd07f5a584779940bf116fb2ea32f455f8afbe3399c8e1f125f99f98d499afca",
-      // Multicall for Dusk v0.1.0 release asset.
-      multicall: "d2ed9e7b89d81f12b877f787a7830b90405357c82c9c28f75f0e048530e91462",
       optimismPortal: "9220bf0e96f8d1d20ae8c56459c75d402045bb0fa63851b9413c7db57749b360",
     },
   );

@@ -13,7 +13,7 @@ import {
   transferView,
 } from "./transfer-view.js";
 import { receiptModel } from "./page-models.js";
-import { duskAccountEvmAddress } from "./tracking.js";
+import { proofSubmitterFor } from "./services.js";
 import { receiptPage, reviewSheet, transferRow } from "./views.js";
 
 const cfg = {
@@ -189,7 +189,7 @@ test("a withdrawal that pays someone else asks nothing of you: no turn of yours,
     assert.deepEqual([own.action.quiet, own.steps[1].state], [false, "turn"]);
   }
   // Once you proved it, only you can claim with that proof: a Claim like any other.
-  const proved = { ...entry, provenByOther: false, stage: "ready_to_finalize", stageSubmitter: duskAccountEvmAddress(ACCOUNT) };
+  const proved = { ...entry, provenByOther: false, stage: "ready_to_finalize", stageSubmitter: proofSubmitterFor(ACCOUNT) };
   const claim = transferView(proved, { account: ACCOUNT, cfg, route: withdrawal });
   assert.deepEqual([claim.action.kind, claim.action.quiet, claim.steps[2].state], ["finalize", false, "turn"]);
 });
