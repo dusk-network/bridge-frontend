@@ -5,7 +5,7 @@ import { ensureEvmChain, getEvmClients } from "./evm-wallet.js";
 import { normalizeDuskAddress, normalizeEvmAddress } from "./validation.js";
 
 /** The migration contracts' one function, the same on Ethereum and BNB Smart Chain. */
-export const MIGRATION_ABI = parseAbi(["function migrate(uint256 amount, string mainnetDuskAddress)"]);
+export const MIGRATION_ABI = parseAbi(["function migrate(uint256 amount, string targetAddress)"]);
 
 export function parseMigrationAmount(amount) {
   const value = parseUnits(String(amount).trim(), 18);

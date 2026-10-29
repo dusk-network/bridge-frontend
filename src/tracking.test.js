@@ -87,7 +87,7 @@ const node = (overrides = {}) => ({
 
 test("a migration is pending until Messina pays it out on Dusk", async () => {
   const input = encodeFunctionData({
-    abi: parseAbi(["function migrate(uint256 amount, string mainnetDuskAddress)"]),
+    abi: parseAbi(["function migrate(uint256 amount, string targetAddress)"]),
     args: [3_000_000_000_000_000_000n, SENDER],
     functionName: "migrate",
   });
@@ -136,7 +136,7 @@ test("a migration is pending until Messina pays it out on Dusk", async () => {
 
 test("only the migrated amount counts as a payout, and only from the payout account when it's known", async () => {
   const input = encodeFunctionData({
-    abi: parseAbi(["function migrate(uint256 amount, string mainnetDuskAddress)"]),
+    abi: parseAbi(["function migrate(uint256 amount, string targetAddress)"]),
     args: [3_000_000_000_000_000_000n, SENDER],
     functionName: "migrate",
   });

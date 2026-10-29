@@ -276,6 +276,8 @@ h1 { font-size: 28px; font-weight: 500; letter-spacing: -0.01em; line-height: 1.
 .recip-edit { margin-top: 10px; }
 .recip-edit .linkish { margin-top: 8px; font-size: 13px; }
 .panel .field-error { margin-top: 4px; }
+/* The swap button sits over the From panel's last 18px: its error clears it. */
+.panel > .field-error { margin-bottom: 10px; }
 
 .swap { width: 100%; max-width: 72rem; margin: 0 auto; padding: 40px 16px 8px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
 .bcard { position: relative; width: 100%; max-width: 472px; padding: 8px 8px 10px; border-radius: 24px; background: var(--surface); box-shadow: 0 0 0 1px var(--hair); }
@@ -421,6 +423,7 @@ h1 { font-size: 28px; font-weight: 500; letter-spacing: -0.01em; line-height: 1.
 .wls .mono.wrap { color: var(--text); font-size: 12.5px; }
 .wl-name { color: var(--text); }
 .wl-id { white-space: nowrap; }
+.req .note.wl-visible { margin: 0 0 10px; font-size: 13px; }
 .wl-note { color: var(--text-2); font-size: 12.5px; }
 .wl-more { margin-top: 6px; border-top: 1px solid var(--hair); }
 .wl-more > summary { padding: 8px 0; color: var(--text-2); font-size: 13px; cursor: pointer; }

@@ -358,7 +358,7 @@ test("a withdrawal that pays someone else is the user's to finish once the user 
 
 const migrateInput = (amountLux, account) =>
   encodeFunctionData({
-    abi: parseAbi(["function migrate(uint256 amount, string mainnetDuskAddress)"]),
+    abi: parseAbi(["function migrate(uint256 amount, string targetAddress)"]),
     args: [BigInt(amountLux) * 1_000_000_000n, account],
     functionName: "migrate",
   });

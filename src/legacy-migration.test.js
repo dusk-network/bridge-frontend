@@ -28,5 +28,5 @@ test("the token and migration calls are encoded as the contracts take them", () 
   // The SDK's ERC-20 ABI, as the token contracts' own functions.
   const selector = (abi, name) => toFunctionSelector(abi.find((item) => item.name === name));
   assert.deepEqual(["allowance", "approve", "balanceOf"].map((name) => selector(erc20Abi, name)), ["0xdd62ed3e", "0x095ea7b3", "0x70a08231"]);
-  assert.equal(selector(MIGRATION_ABI, "migrate"), toFunctionSelector("function migrate(uint256 amount, string mainnetDuskAddress)"));
+  assert.equal(selector(MIGRATION_ABI, "migrate"), toFunctionSelector("function migrate(uint256 amount, string targetAddress)"));
 });

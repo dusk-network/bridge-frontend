@@ -110,9 +110,11 @@ test("the review checks the facts first, then lists the wallet's lines with full
   assert.equal(amountLine.value, "1000000000000000000000");
   assert.match(amountLine.note, /^= 1,000 DUSK\./u);
   assert.equal(migrate.find((line) => line.label === "Estimated change").value, "−1,000 ERC20 DUSK");
-  assert.match(migrate.find((line) => line.label === "mainnetDuskAddress").note, /^Your Dusk account that receives the DUSK/u);
+  // The deployed migration contract names its account argument targetAddress, on BSC and Ethereum alike.
+  const target = migrate.find((line) => line.label === "targetAddress");
+  assert.deepEqual([target.address, target.note], [ACCOUNT, "Your Dusk account that receives the DUSK."]);
 
-  const sheet = reviewSheet({
+  const vm = {
     canConfirm: true,
     cfgLinks: explorer,
     checks,
@@ -127,7 +129,8 @@ test("the review checks the facts first, then lists the wallet's lines with full
     ],
     sub: "",
     walletCheckName: "MetaMask",
-  });
+  };
+  const sheet = reviewSheet(vm);
   // Every address in full, with a copy button and an explorer link: never 4 + 4 alone.
   for (const address of [testnet.evmNetworks.ethereum.migrationContract, testnet.evmNetworks.ethereum.tokenContract, ACCOUNT]) {
     assert.ok(sheet.includes(`<code class="mono">${address}</code>`), address);
@@ -136,11 +139,15 @@ test("the review checks the facts first, then lists the wallet's lines with full
   assert.ok(sheet.includes(`https://sepolia.etherscan.io/address/${testnet.evmNetworks.ethereum.migrationContract}`));
   assert.match(sheet, />Cancel<\/button><button type="button" class="btn pri" data-action="confirm" >Approve 1,000 ERC20 DUSK in MetaMask</u);
   assert.ok(!sheet.includes(TIMES));
+  // Each step's tag follows the review: once the approval is confirmed, it's done and the migration is now.
+  const tags = (html) => [...html.matchAll(/<h3 id="req-\d+">[\s\S]*?<span class="tag">([^<]*)<\/span><\/h3>/gu)].map((match) => match[1]);
+  assert.deepEqual(tags(sheet), ["Now", "After step 1"]);
+  assert.deepEqual(tags(reviewSheet({ ...vm, steps: vm.steps.map((step, index) => ({ ...step, current: index === 1 })) })), ["Done", "Now"]);
 });
 
 // Dusk Wallet's approval windows (ux/extension-approvals): each line's label
 // and value as the window prints it, group by group.
-const rowsOf = (lines) => lines.filter((line) => line.kind !== "head");
+const rowsOf = (lines) => lines.filter((line) => !line.kind);
 const labelsOf = (lines) => rowsOf(lines).map((line) => line.label);
 const valueOf = (lines, label) => rowsOf(lines).find((line) => line.label === label);
 const groupsOf = (lines) => rowsOf(lines).filter((line) => line.gap).map((line) => line.label);
@@ -299,6 +306,9 @@ test("a transfer to the bridge's account lists Dusk Wallet's bridge window: wher
     toFull: EVM,
     where: "on BNB Smart Chain",
   });
+  // What everyone sees, as the window says it under the amount, before the fee.
+  assert.deepEqual(bsc[1], { kind: "visible", text: "Visible to everyone: amount, the recipient on BNB Smart Chain, and your name alice.dusk." });
+  assert.equal(transfer(mainnet, { fromName: "" })[1].text, "Visible to everyone: amount, the recipient on BNB Smart Chain, and your account.");
   assert.deepEqual(labelsOf(bsc), ["Network fee", "Total", "From", "To", "Recipient on BNB Smart Chain"]);
   assert.deepEqual(groupsOf(bsc), ["Network fee", "From"]);
   assert.equal(valueOf(bsc, "Network fee").value, "up to 0.0025 DUSK");
@@ -308,7 +318,7 @@ test("a transfer to the bridge's account lists Dusk Wallet's bridge window: wher
   assert.deepEqual({ ...valueOf(bsc, "Recipient on BNB Smart Chain") }, { address: EVM, label: "Recipient on BNB Smart Chain", network: "bsc" });
   assert.match(
     walletLines(bsc, { explorer: (network, address) => explorerAddressUrl(mainnet, network, address) }),
-    /<div class="wlt">Bridge to BNB Smart Chain<\/div><div class="wlto"><span class="num">2 DUSK<\/span> to <code class="mono" title="0xd63b[^"]+">0xd63b…8df4<\/code> on BNB Smart Chain<\/div><div class="wlto">2 DUSK sent · 1 DUSK bridge fee · 1 DUSK arrives on BNB Smart Chain<\/div><span class="tag">.*Known bridge account<\/span>/u,
+    /<div class="wlt">Bridge to BNB Smart Chain<\/div><div class="wlto"><span class="num">2 DUSK<\/span> to <code class="mono" title="0xd63b[^"]+">0xd63b…8df4<\/code> on BNB Smart Chain<\/div><div class="wlto">2 DUSK sent · 1 DUSK bridge fee · 1 DUSK arrives on BNB Smart Chain<\/div><span class="tag">.*Known bridge account<\/span><\/div><p class="note wl-visible">[\s\S]*?<span>Visible to everyone: amount, the recipient on BNB Smart Chain, and your name alice\.dusk\.<\/span><\/p><dl class="wls">/u,
   );
   // Testnet's to Sepolia, which the bridge doesn't pay out on now: the window says nothing arrives.
   const sepolia = transfer(testnet);
@@ -326,6 +336,7 @@ test("a transfer to the bridge's account lists Dusk Wallet's bridge window: wher
   // An account the wallet doesn't know as the bridge's: its Pay window, the memo last.
   const pay = transfer(mainnet, { to: ACCOUNT });
   assert.deepEqual(pay[0], { amount: "2 DUSK", kind: "head", title: "Pay", to: "21n5nc…fMMLNz", toFull: ACCOUNT });
+  assert.equal(pay[1].text, "Visible to everyone: amount, memo, and your name alice.dusk.");
   assert.deepEqual(labelsOf(pay), ["Network fee", "Total", "From", "To", "Memo"]);
   assert.equal(valueOf(pay, "Memo").value, EVM);
 });

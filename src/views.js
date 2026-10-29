@@ -239,6 +239,8 @@ function walletHead(head) {
 
 export function walletLines(lines, cfgLinks) {
   const head = lines.find((line) => line.kind === "head");
+  // What everyone sees, under the window's head and before its fee, as the window says it.
+  const visible = lines.find((line) => line.kind === "visible");
   const row = (line) => {
     const text = `<span class="${line.mono ? "mono wrap" : "num"}"${line.full ? ` title="${html(line.full)}"` : ""}>${html(line.value)}</span>`;
     // A contract by its network's name reads "DuskEVM bridge · 2257e5…a1b31d", the "·" kept with its ID.
@@ -251,10 +253,10 @@ export function walletLines(lines, cfgLinks) {
           : text;
     return `<div class="wl${line.gap ? " gap" : ""}"><dt>${html(line.label)}</dt><dd>${value}${line.note ? `<span class="wl-note">${html(line.note)}</span>` : ""}</dd></div>`;
   };
-  const shown = lines.filter((line) => line.kind !== "head" && !line.fold);
+  const shown = lines.filter((line) => !line.kind && !line.fold);
   // What the window folds under Details: the function, the hash, the site's words.
   const folded = lines.filter((line) => line.fold);
-  return `${head ? walletHead(head) : ""}<dl class="wls">${shown.map(row).join("")}</dl>${
+  return `${head ? walletHead(head) : ""}${visible ? `<p class="note wl-visible">${icon("eye")}<span>${html(visible.text)}</span></p>` : ""}<dl class="wls">${shown.map(row).join("")}</dl>${
     folded.length ? `<details class="wl-more"><summary>Details</summary><dl class="wls">${folded.map(row).join("")}</dl></details>` : ""
   }`;
 }
@@ -268,6 +270,10 @@ const actionLead = (lead) =>
   `<div class="flow group lead"><div><div class="k">${html(lead.label)}</div><div class="v num">${html(lead.amount)}<span class="u">DUSK</span></div><div class="w">${lead.chain ? chainMark(lead.chain, "xs") : ""}<span>${html(lead.line)}</span></div></div></div>`;
 
 export function reviewSheet(vm) {
+  // Each step's tag follows the review: done once confirmed, now while it's
+  // the one to confirm, and after the step before it until then.
+  const at = Math.max(0, vm.steps.findIndex((step) => step.current));
+  const tag = (index) => (index < at ? "Done" : index === at ? "Now" : `After step ${index}`);
   const checks = vm.checks.length
     ? `<ul class="ck" aria-label="Checked">${vm.checks
         .map((check) => `<li class="${check.ok ? "ok" : "bad"}">${icon(check.ok ? "check" : "info")}<span>${check.html}</span></li>`)
@@ -276,7 +282,7 @@ export function reviewSheet(vm) {
   const steps = vm.steps
     .map(
       (step, index) => `<section class="req${step.current ? "" : " wait"}" aria-labelledby="req-${index}">
-      <h3 id="req-${index}"><span class="no">${index + 1}</span>${html(step.title)}<span class="tag">${html(step.when)}</span></h3>
+      <h3 id="req-${index}"><span class="no">${index + 1}</span>${html(step.title)}<span class="tag">${html(tag(index))}</span></h3>
       ${step.what ? `<p>${step.what}</p>` : ""}
       ${step.custody ? `<p class="small t2">${html(step.custody)}</p>` : ""}
       <div class="wlh">${html(step.walletName)} will show</div>

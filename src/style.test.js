@@ -47,6 +47,21 @@ test("text keeps at least 4.5:1 contrast on every surface it sits on, dark and l
   assert.equal(Object.keys(light).length, Object.keys(dark).length);
 });
 
+test("the amount's error clears the swap button, on a phone and a computer", () => {
+  // One declaration of a rule, in px.
+  const px = (selector, property, index = 0) => {
+    const rule = new RegExp(`(?:^|\\n)${selector.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")} \\{([^}]*)\\}`, "u").exec(css)?.[1] ?? "";
+    const value = new RegExp(`(?:^|;)\\s*${property}:\\s*([^;]+)`, "u").exec(rule)?.[1] ?? "0";
+    return Number.parseFloat(value.trim().split(/\s+/u)[index]);
+  };
+  // The button sits on the row between From and To, half of it over the
+  // From panel; the error is that panel's last line.
+  const overhang = px(".flip", "height") / 2 - px(".flip-row", "height") / 2;
+  const clearance = px(".panel", "padding", 2) + px(".panel > .field-error", "margin-bottom");
+  assert.ok(overhang > 0);
+  assert.ok(clearance >= overhang, `${clearance}px under the error, ${overhang}px of button`);
+});
+
 test("addresses render without ligatures or contextual alternates, so 0x stays 0x", () => {
   assert.match(css, /\.mono, code \{[^}]*font-variant-ligatures: none;[^}]*font-feature-settings: "liga" 0, "calt" 0;/u);
   assert.match(css, /\.mono-input \{[^}]*font-variant-ligatures: none;/u);

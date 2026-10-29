@@ -124,9 +124,9 @@ export function migrateLines({ amountLux, cfg, duskAccount, fee, network }) {
     },
     {
       address: duskAccount,
-      label: "mainnetDuskAddress",
+      label: "targetAddress",
       network: "dusk",
-      note: "Your Dusk account that receives the DUSK. The contract calls it mainnetDuskAddress on every network.",
+      note: "Your Dusk account that receives the DUSK.",
     },
     { label: "Estimated change", value: `−${formatLux(amountLux)} ${tokenName(network)}` },
     evmFeeLine(fee, chain.currency?.symbol ?? "ETH"),
@@ -251,9 +251,13 @@ const walletReadsAddress = (memo) =>
  */
 export function duskTransferLines({ amountLux, chainId, from, fromName = "", gas, memo, to }) {
   const service = walletServiceRoute(chainId, to);
+  // What everyone sees, as the window says it under the amount, before the
+  // fee: under the .dusk name Dusk Wallet sent, or else the account.
+  const me = fromName ? `your name ${fromName}` : "your account";
   if (!service)
     return [
       { amount: `${formatLux(amountLux)} DUSK`, kind: "head", title: "Pay", to: shortAccount(to), toFull: to },
+      { kind: "visible", text: memo ? `Visible to everyone: amount, memo, and ${me}.` : `Visible to everyone: amount and ${me}.` },
       ...feeLines(gas, amountLux),
       { ...fromLine(from, fromName), gap: true },
       { address: to, label: "To", network: "dusk" },
@@ -279,6 +283,7 @@ export function duskTransferLines({ amountLux, chainId, from, fromName = "", gas
       title: `Bridge to ${chain}`,
       ...(recipientOk ? { to: formatEvmAddress(recipient, { short: true }), toFull: recipient, where: `on ${chain}` } : {}),
     },
+    { kind: "visible", text: `Visible to everyone: amount, the recipient on ${chain}, and ${me}.` },
     ...feeLines(gas, sent),
     { ...fromLine(from, fromName), gap: true },
     { address: to, label: "To", network: "dusk", value: `The bridge's account for ${chain}` },
