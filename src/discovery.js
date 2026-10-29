@@ -13,7 +13,7 @@ import { syncWithdrawals } from "./l2-withdrawals.js";
 import { entryId } from "./activity.js";
 import { decodeDepositArgs, DEPOSIT_FN_NAME } from "./dusk-deposit.js";
 import { MIGRATION_ABI } from "./legacy-migration.js";
-import { withdrawalNextAction } from "./transfer-view.js";
+import { paysSomeoneElse, withdrawalNextAction } from "./transfer-view.js";
 
 const WEI_PER_LUX = 1_000_000_000n;
 const TERMINAL = new Set(["completed", "failed"]);
@@ -89,19 +89,24 @@ export function shownFor(entry, accounts) {
 const timeOf = (entry) =>
   entry.sourceAt ?? entry.destinationAt ?? (entry.createdAt ? Date.parse(entry.createdAt) : 0);
 
-/** Where a transfer goes on My transfers. */
-export function transferGroup(entry, route) {
+/**
+ * Where a transfer goes on My transfers. A withdrawal under way that pays
+ * another Dusk account than `owner`, the one the list is for, waits apart:
+ * it needs no one in particular.
+ */
+export function transferGroup(entry, route, owner = "") {
   if (entry.status === "completed") return "done";
   if (entry.status === "failed") return "failed";
+  if (paysSomeoneElse(entry, route, owner)) return "other";
   if (route?.mode === "duskevm-withdrawal" && !entry.pendingAction && withdrawalNextAction(entry.stage))
     return "needs";
   return "progress";
 }
 
-/** Needs you, In progress, Completed and Failed, newest first. */
-export function groupTransfers(entries, routeOf) {
-  const groups = { done: [], failed: [], needs: [], progress: [] };
-  for (const entry of entries) groups[transferGroup(entry, routeOf(entry.routeId))].push(entry);
+/** Needs you, In progress, Sent to someone else, Completed and Failed, newest first. */
+export function groupTransfers(entries, routeOf, owner = "") {
+  const groups = { done: [], failed: [], needs: [], other: [], progress: [] };
+  for (const entry of entries) groups[transferGroup(entry, routeOf(entry.routeId), owner)].push(entry);
   for (const list of Object.values(groups)) list.sort((a, b) => timeOf(b) - timeOf(a));
   return groups;
 }

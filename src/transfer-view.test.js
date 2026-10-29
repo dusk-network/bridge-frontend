@@ -128,7 +128,7 @@ test("a withdrawal shows its three steps, their times and the next action", () =
   const unread = transferView({ hash: L2_HASH, sourceAt: sentAt, stage: "waiting_for_output", status: "pending" }, { cfg, now, route: withdrawal, locale: GB, timeZone: AMS });
   assert.deepEqual(unread.steps.slice(1).map(({ detail }) => detail), ["", ""]);
   assert.equal(transferSubline(unread, { sourceAt: sentAt, stage: "waiting_for_output" }, withdrawal, cfg, { locale: GB, now, timeZone: AMS }), "Sent 23 Oct, 16:20 CEST");
-  assert.deepEqual(ready.action, { blocked: "", failure: "", kind: "prove", label: "Prove on Dusk" });
+  assert.deepEqual(ready.action, { blocked: "", failure: "", kind: "prove", label: "Prove on Dusk", quiet: false });
   assert.equal(ready.title, "Prove the withdrawal of 200 DUSK");
   assert.deepEqual(ready.tracker.map(({ label }) => label), ["Sent", "Prove now", "Claim"]);
 
@@ -168,6 +168,25 @@ test("a withdrawal shows its three steps, their times and the next action", () =
   assert.doesNotMatch(receipt, /data-action="withdrawal-finalize"/u);
   assert.match(transferRow({ action: elsewhere, amountText: "200 DUSK", href: "#", id: "w", pair: ["dusk-evm", "dusk"], status: "pending", statusWord: "Pending", subline: "", title: "DuskEVM to Dusk" }), /Switch account to claim/u);
   assert.match(receiptPage({ ...receiptModel(proved, { cfg, route: withdrawal, submitter: `0x${"2c".repeat(20)}`, url: "https://bridge.example/#/transfer/x" }), canAct: true }), /data-action="withdrawal-finalize"/u);
+});
+
+test("a withdrawal that pays someone else asks nothing of you: no turn of yours, and a quiet Prove", () => {
+  const stranger = `213qXN${"x".repeat(40)}V5JJ9Y`;
+  const entry = { amountLux: "1008000000000", destination: stranger, hash: L2_HASH, id: "w", provenByOther: true, sourceAt: Date.UTC(2026, 9, 7, 7, 7), stage: "ready_to_prove", status: "pending" };
+  const view = transferView(entry, { account: ACCOUNT, cfg, name: "alice.dusk", route: withdrawal, timing });
+  assert.equal(view.action.quiet, true);
+  assert.deepEqual(view.steps.map(({ state }) => state), ["done", "now", "todo"]);
+  assert.deepEqual(view.tracker.map(({ label, state }) => [label, state]), [["Sent", "done"], ["Proved by another", "now"], ["Claim", "todo"]]);
+  // Its receipt offers Prove as a quiet button.
+  const receipt = receiptPage({ ...receiptModel(entry, { cfg, own: { account: ACCOUNT, name: "alice.dusk" }, route: withdrawal, url: "https://bridge.example/#/transfer/x" }), canAct: true });
+  assert.match(receipt, /<button type="button" class="btn sec" data-action="withdrawal-prove" data-id="w">Prove on Dusk<\/button>/u);
+  // A followed account counts as the one it's for.
+  assert.equal(transferView(entry, { cfg, owner: ACCOUNT, route: withdrawal }).action.quiet, true);
+  // One that pays you, or with no Dusk account known, is yours to prove.
+  for (const [patch, options] of [[{ destination: ACCOUNT }, { account: ACCOUNT }], [{}, {}]]) {
+    const own = transferView({ ...entry, ...patch }, { ...options, cfg, route: withdrawal });
+    assert.deepEqual([own.action.quiet, own.steps[1].state], [false, "turn"]);
+  }
 });
 
 test("a waiting withdrawal counts down to its claim time, across a clock change", () => {

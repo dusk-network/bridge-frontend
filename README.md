@@ -92,8 +92,9 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   offers an .ics file made in the browser ("Add to calendar").
 - **My transfers**: the connected accounts' transfers, read from the networks
   (below), plus any sent or looked up on this device, each with whom it pays
-  and its transaction's short hash. "Look up a transfer" finds a transfer's
-  route from its hash alone.
+  and its transaction's short hash. A withdrawal under way that pays another
+  Dusk account is listed apart, under Sent to someone else, with a quiet
+  Prove. "Look up a transfer" finds a transfer's route from its hash alone.
 - **Contracts**: every address and contract ID each route uses, in full,
   with copy buttons and explorer links.
 
@@ -201,7 +202,8 @@ Dusk contract calls ask the wallet for their own limit at the node's price:
 claim that would need more than `VITE_GAS_LIMIT_UPPER` isn't sent. Transfers
 to the bridge account carry the wallet's public-transfer limit, 2.5M, at the
 node's price. The quote shows each limit as "up to" and the measured usual
-cost next to it.
+cost next to it. The node's price is the one the page last read: the quote,
+the review and the request all use it, so each step shows one fee.
 
 ## Configuration
 

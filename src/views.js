@@ -339,7 +339,7 @@ export function receiptPage(vm) {
       ? `<div class="action-box">${actionNeedsWallet(view.action.kind)}<span class="small t2">Dusk Wallet is a browser extension for computers.</span></div>`
       : view.action.blocked
         ? `<div class="action-box"><p class="note">${icon("info")}<span>${html(view.action.blocked)}</span></p></div>`
-        : `<div class="action-box">${view.action.failure ? messageLine(view.action.failure, { live: false }) : ""}<button type="button" class="btn pri" data-action="withdrawal-${view.action.kind}" data-id="${html(vm.id)}">${html(view.action.label)}</button><span class="small t2">${html(vm.actionFee ?? "")}</span></div>`
+        : `<div class="action-box">${view.action.failure ? messageLine(view.action.failure, { live: false }) : ""}<button type="button" class="btn ${view.action.quiet ? "sec" : "pri"}" data-action="withdrawal-${view.action.kind}" data-id="${html(vm.id)}">${html(view.action.label)}</button><span class="small t2">${html(vm.actionFee ?? "")}</span></div>`
     : "";
   const details = vm.details
     .map((row) => `<div class="kv"><dt class="k">${html(row.label)}</dt><dd class="v">${row.html ?? `<span class="num">${html(row.value)}</span>`}</dd></div>`)
@@ -389,7 +389,8 @@ export function transferRow(row, { canAct = true } = {}) {
   // A claim waiting for the account that proved it: its receipt says which.
   else if (row.action.blocked) right = `<span class="tag">${icon("info")}Switch account to claim</span>`;
   else
-    right = `<button type="button" class="btn pri xs" data-action="withdrawal-${row.action.kind}" data-id="${html(row.id)}">${html(row.action.kind === "prove" ? "Prove" : "Claim")}<span class="sr-only"> ${html(row.amountText)} from ${html(row.title)}</span></button>`;
+    // Someone else's withdrawal is offered quietly.
+    right = `<button type="button" class="btn ${row.action.quiet ? "sec" : "pri"} xs" data-action="withdrawal-${row.action.kind}" data-id="${html(row.id)}">${html(row.action.kind === "prove" ? "Prove" : "Claim")}<span class="sr-only"> ${html(row.amountText)} from ${html(row.title)}</span></button>`;
   // Whom it pays and its transaction, so equal transfers are told apart.
   const to = row.to ? `To ${row.to.name ? html(row.to.name) : `<code class="mono">${html(row.to.address)}</code>`}` : "";
   const meta = [to, row.hash ? `<code class="mono">${html(row.hash)}</code>` : ""].filter(Boolean).join(" · ");
@@ -419,7 +420,7 @@ export function activityPanel(vm) {
       : "";
   const body = vm.empty
     ? `<div class="empty"><p>${html(vm.empty)}</p>${vm.emptyActions ?? ""}</div>`
-    : `${group("Needs you", vm.groups.needs)}${group("In progress", vm.groups.progress)}${group("Completed", vm.groups.done)}${group("Didn't go through", vm.groups.failed)}`;
+    : `${group("Needs you", vm.groups.needs)}${group("In progress", vm.groups.progress)}${group("Sent to someone else", vm.groups.other ?? [])}${group("Completed", vm.groups.done)}${group("Didn't go through", vm.groups.failed)}`;
   return `<div class="act">
     <div class="act-h"><p class="lede">${vm.lede}</p><a class="btn sec sm" href="#/lookup">${icon("search")}Look up</a></div>
     <p class="small t2 sync" role="status" aria-live="polite">${html(vm.syncText)}</p>

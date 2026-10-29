@@ -225,9 +225,12 @@ export function actionLead(kind, entry, { account = "", amountLux = null, claim 
       };
 }
 
-/** The receipt of one transfer. No balances: the link may be shared. */
-export function receiptModel(entry, { cfg, gasPrice = 1n, locale, now = Date.now(), own = null, route, submitter = null, timeZone, timing, url }) {
-  const view = transferView(entry, { account: own?.account ?? "", cfg, locale, name: own?.name ?? "", now, route, submitter, timeZone, timing, year: true });
+/**
+ * The receipt of one transfer. No balances: the link may be shared. `owner`
+ * is the Dusk account the page is for, Dusk Wallet's (`own`) or a followed one.
+ */
+export function receiptModel(entry, { cfg, gasPrice = 1n, locale, now = Date.now(), own = null, owner = own?.account ?? "", route, submitter = null, timeZone, timing, url }) {
+  const view = transferView(entry, { account: own?.account ?? "", cfg, locale, name: own?.name ?? "", now, owner, route, submitter, timeZone, timing, year: true });
   const from = networkName(cfg, route.from.id);
   const to = networkName(cfg, route.to.id);
   // Your own Dusk account by its .dusk name, others by their short code.
@@ -313,12 +316,17 @@ function txHtml(cfg, network, hash, label) {
 // My transfers
 // ---------------------------------------------------------------------------
 
-export function transfersModel(entries, { account = "", accounts, cfg, locale, name = "", now = Date.now(), routeOf, submitter = null, timeZone, timing }) {
+/**
+ * My transfers, in groups. `owner` is the Dusk account the list is for: Dusk
+ * Wallet's (`account`), or a followed one. A withdrawal that pays another
+ * account waits apart from what needs the user.
+ */
+export function transfersModel(entries, { account = "", accounts, cfg, locale, name = "", now = Date.now(), owner = account, routeOf, submitter = null, timeZone, timing }) {
   const shown = entries.filter((entry) => routeOf(entry.routeId) && shownFor(entry, accounts));
-  const groups = groupTransfers(shown, routeOf);
+  const groups = groupTransfers(shown, routeOf, owner);
   const row = (entry) => {
     const route = routeOf(entry.routeId);
-    const view = transferView(entry, { account, cfg, locale, name, now, route, submitter, timeZone, timing });
+    const view = transferView(entry, { account, cfg, locale, name, now, owner, route, submitter, timeZone, timing });
     return {
       action: view.action,
       amountText: view.amountText,

@@ -300,23 +300,32 @@ test("My transfers shows the connected accounts' transfers and what this device 
   assert.ok(!shownFor({ parties: [ACCOUNT.toLowerCase()] }, [ACCOUNT]));
 });
 
-test("transfers group into Needs you, In progress, Completed and Failed", () => {
+test("transfers group into Needs you, In progress, Sent to someone else, Completed and Failed", () => {
   const routes = { w: { mode: "duskevm-withdrawal" }, d: { mode: "duskevm-deposit" } };
-  const groups = groupTransfers(
-    [
-      { id: "a", routeId: "w", stage: "ready_to_finalize", status: "pending", sourceAt: 3 },
-      { id: "b", routeId: "w", stage: "ready_to_prove", pendingAction: "prove", status: "pending", sourceAt: 4 },
-      { id: "c", routeId: "w", stage: "proven_waiting", status: "pending", sourceAt: 1 },
-      { id: "d", routeId: "d", status: "completed", sourceAt: 2 },
-      { id: "e", routeId: "d", status: "failed", sourceAt: 5 },
-      { id: "f", routeId: "w", stage: "ready_to_prove", status: "pending", sourceAt: 9 },
-    ],
-    (id) => routes[id],
-  );
-  assert.deepEqual(
-    Object.fromEntries(Object.entries(groups).map(([key, list]) => [key, list.map((entry) => entry.id)])),
-    { done: ["d"], failed: ["e"], needs: ["f", "a"], progress: ["b", "c"] },
-  );
+  const entries = [
+    { id: "a", routeId: "w", stage: "ready_to_finalize", status: "pending", sourceAt: 3 },
+    { id: "b", routeId: "w", stage: "ready_to_prove", pendingAction: "prove", status: "pending", sourceAt: 4 },
+    { id: "c", routeId: "w", stage: "proven_waiting", status: "pending", sourceAt: 1 },
+    { id: "d", routeId: "d", status: "completed", sourceAt: 2 },
+    { id: "e", routeId: "d", status: "failed", sourceAt: 5 },
+    { destination: ACCOUNT, id: "f", routeId: "w", stage: "ready_to_prove", status: "pending", sourceAt: 9 },
+    // Withdrawals that pay another Dusk account: apart while they're under way.
+    { destination: OTHER, id: "g", routeId: "w", stage: "ready_to_prove", status: "pending", sourceAt: 8 },
+    { destination: OTHER, id: "h", routeId: "w", stage: "proven_waiting", status: "pending", sourceAt: 7 },
+    { destination: OTHER, id: "i", routeId: "w", stage: "finalized", status: "completed", sourceAt: 6 },
+    // A deposit to another DuskEVM address stays where it is.
+    { destination: EVM, id: "j", routeId: "d", status: "pending", sourceAt: 10 },
+  ];
+  const ids = (groups) => Object.fromEntries(Object.entries(groups).map(([key, list]) => [key, list.map((entry) => entry.id)]));
+  assert.deepEqual(ids(groupTransfers(entries, (id) => routes[id], ACCOUNT)), {
+    done: ["i", "d"],
+    failed: ["e"],
+    needs: ["f", "a"],
+    other: ["g", "h"],
+    progress: ["j", "b", "c"],
+  });
+  // With no Dusk account to tell, every withdrawal is the user's.
+  assert.deepEqual(ids(groupTransfers(entries, (id) => routes[id])).needs, ["f", "g", "a"]);
 });
 
 const migrateInput = (amountLux, account) =>

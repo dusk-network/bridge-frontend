@@ -9,7 +9,7 @@ const WEI_PER_LUX = 1_000_000_000n;
  * @param {object} deps
  * @param {object} deps.services
  * @param {() => void} [deps.onChange] balances or estimates changed
- * @param {() => void} [deps.onPrice] the gas price moved, however it was learnt
+ * @param {() => void} [deps.onPrice] the gas price moved, read again on its own
  */
 export function createFormReads({ services, onChange = () => {}, onPrice = () => {} }) {
   const reads = { duskBalance: null, gasPrice: 1n, l2: null, migration: null };
@@ -61,27 +61,20 @@ export function createFormReads({ services, onChange = () => {}, onPrice = () =>
     if (fresh()) onChange();
   }
 
-  /** The node's gas price alone, for pages without a form; whether it changed. */
+  /**
+   * The node's gas price alone, for pages without a form; whether it
+   * changed. Where it moved, what quotes it is drawn again.
+   */
   async function price() {
     try {
       const next = await services.node.gasPrice();
       const moved = next !== reads.gasPrice;
-      usePrice(next);
+      reads.gasPrice = next;
+      if (moved) onPrice();
       return moved;
     } catch {
       return false;
     }
-  }
-
-  /**
-   * A gas price read elsewhere, as a review's request: the latest, for every
-   * page. Where it moved, what quotes it is drawn again.
-   */
-  function usePrice(next) {
-    const moved = next !== reads.gasPrice;
-    reads.gasPrice = next;
-    if (moved) onPrice();
-    return next;
   }
 
   /** Gas estimates for the amount and recipient as they are now. */
@@ -119,5 +112,5 @@ export function createFormReads({ services, onChange = () => {}, onPrice = () =>
     for (const key of keys) reads[key] = null;
   }
 
-  return Object.freeze({ estimate, load, price, reads, reset, usePrice });
+  return Object.freeze({ estimate, load, price, reads, reset });
 }

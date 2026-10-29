@@ -91,6 +91,13 @@ export function friendlyWalletError(error, wallet = "dusk") {
 export const proverMismatch = (entry, submitter) =>
   Boolean(entry?.proveHash && entry.proofSubmitter && submitter && String(entry.proofSubmitter).toLowerCase() !== String(submitter).toLowerCase());
 
+/**
+ * Whether a withdrawal pays a Dusk account other than `owner`, the one the
+ * page is for: Dusk Wallet's, or the followed one. None known, none is.
+ */
+export const paysSomeoneElse = (entry, route, owner) =>
+  route?.mode === "duskevm-withdrawal" && Boolean(owner) && Boolean(entry?.destination) && entry.destination !== owner;
+
 /** What to do when another account proved it. */
 export const switchToProver = (entry) =>
   entry?.proofAccount
@@ -291,17 +298,24 @@ function titleFor(entry, route, cfg, amount) {
  * @param {string|null} [options.submitter] Dusk Wallet's account, as the Portal knows provers
  * @param {string} [options.account] the connected Dusk account
  * @param {string} [options.name] its .dusk name, where it has one
+ * @param {string} [options.owner] the Dusk account the page is for: the connected one, or the followed one
  * @param {object} [options.timing] what `routeTime` reads the route's time from
  */
-export function transferView(entry, { account = "", cfg, locale, name = "", now = Date.now(), route, submitter = null, timeZone, timing, year = false }) {
+export function transferView(entry, { account = "", cfg, locale, name = "", now = Date.now(), owner = account, route, submitter = null, timeZone, timing, year = false }) {
   const status = entry.status === "completed" || entry.status === "failed" ? entry.status : "pending";
   const amount = amountOf(entry);
   const withdrawal = route.mode === "duskevm-withdrawal";
+  // Someone else's DUSK: its steps are never the user's turn, and its action is quiet.
+  const forOther = status === "pending" && paysSomeoneElse(entry, route, owner);
   // How long the route takes on this network, as every page says it.
   const time = routeTime(route, cfg, { ...timing, now });
   const options = { account, locale, name, now, time, timeZone, year };
   const steps = (withdrawal ? withdrawalSteps(entry, cfg, options) : sourceSteps({ ...entry, status }, route, cfg, options)).map(
-    (item) => ({ ...item, href: item.hash && item.network ? explorerTxUrl(cfg, item.network, item.hash) : null }),
+    (item) => ({
+      ...item,
+      href: item.hash && item.network ? explorerTxUrl(cfg, item.network, item.hash) : null,
+      state: forOther && item.state === "turn" ? "now" : item.state,
+    }),
   );
   const fromNetwork = route.from.id;
   const toNetwork = route.to.id;
@@ -350,6 +364,7 @@ export function transferView(entry, { account = "", cfg, locale, name = "", now 
               : ACTION_FAILURE[entry.stage],
           kind: actionKind,
           label: actionKind === "prove" ? "Prove on Dusk" : "Claim on Dusk",
+          quiet: forOther,
         }
       : null,
     amount,

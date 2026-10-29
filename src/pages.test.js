@@ -396,7 +396,7 @@ test("My transfers groups the connected accounts' transfers and offers the next 
   ];
   const model = transfersModel(entries, { accounts: [ACCOUNT, EVM], cfg: testnet, locale: "en-GB", now: Date.UTC(2026, 9, 26, 10), routeOf, timeZone: "Europe/Amsterdam" });
   assert.equal(model.needs, 1);
-  assert.deepEqual(Object.fromEntries(Object.entries(model.groups).map(([key, rows]) => [key, rows.map((row) => row.id)])), { done: ["b"], failed: [], needs: ["a"], progress: ["d"] });
+  assert.deepEqual(Object.fromEntries(Object.entries(model.groups).map(([key, rows]) => [key, rows.map((row) => row.id)])), { done: ["b"], failed: [], needs: ["a"], other: [], progress: ["d"] });
   const claim = model.groups.needs[0];
   assert.equal(claim.subline, "Ready to claim since 24 Oct, 02:00 CEST");
   assert.equal(claim.action.kind, "finalize");
@@ -422,6 +422,25 @@ test("each transfer in My transfers says whom it pays and its transaction, so eq
   assert.match(html, /<div class="t2">Arrived Yesterday, 06:52 CET<\/div><div class="t3">To <code class="mono">0x96BA…893e<\/code> · <code class="mono">ac6b2f…16bc24<\/code><\/div>/u);
   assert.match(html, /<div class="t3">To alice\.dusk · <code class="mono">0x04a8…3213<\/code><\/div>/u);
 });
+
+test("a withdrawal that pays someone else waits in its own group, with a quiet Prove and no count on Activity", () => {
+  const routeOf = (id) => buildRoutes(testnet).find((route) => route.id === id);
+  // The stand-in EVM address's 1,008 DUSK withdrawal, which pays 213qXN…V5JJ9Y.
+  const stranger = `213qXN${"x".repeat(40)}V5JJ9Y`;
+  const entry = { amountLux: "1008000000000", destination: stranger, hash: `0x04a8a8${"7".repeat(52)}1b3213`, id: "w", parties: [EVM.toLowerCase(), stranger], provenByOther: true, routeId: "dusk-evm-to-dusk", sourceAt: Date.UTC(2026, 9, 7, 7, 7), stage: "ready_to_prove", status: "pending" };
+  const model = transfersModel([entry], { account: ACCOUNT, accounts: [ACCOUNT, EVM], cfg: testnet, name: "alice.dusk", owner: ACCOUNT, routeOf });
+  assert.equal(model.needs, 0);
+  assert.deepEqual(Object.fromEntries(Object.entries(model.groups).map(([key, rows]) => [key, rows.map((row) => row.id)])), { done: [], failed: [], needs: [], other: ["w"], progress: [] });
+  const html = activityPanel({ empty: "", groups: model.groups, lede: "x", more: false, syncText: "" });
+  assert.match(html, /<h2 class="sec-t">Sent to someone else<\/h2>/u);
+  assert.doesNotMatch(html, /Needs you/u);
+  assert.match(html, /<button type="button" class="btn sec xs" data-action="withdrawal-prove" data-id="w">Prove<span class="sr-only">/u);
+  // Activity's tab carries no count for it.
+  assert.doesNotMatch(cardPage({ activity: html, needsCount: model.needs, tab: "activity" }), /class="cnt"/u);
+  // Followed without Dusk Wallet, the followed account is the one it's for.
+  assert.deepEqual(transfersModel([entry], { accounts: [ACCOUNT, EVM], cfg: testnet, owner: ACCOUNT, routeOf }).groups.other.map((row) => row.id), ["w"]);
+});
+
 
 test("the top bar names each wallet's account, in the form its wallet writes it, short enough for a phone", () => {
   const top = header({ badge: "Testnet", dusk: { account: ACCOUNT, state: "connected" }, evm: { account: SHOT.toLowerCase(), state: "connected", walletName: "MetaMask" }, isTestnet: true });

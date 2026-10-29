@@ -598,6 +598,16 @@ test("without a resolved covering game, a proof goes against the newest, and its
   assert.deepEqual(prepared.claim, { at: Number(TIP.timestamp + 604_800n) * 1_000, exact: false, overdue: false });
 });
 
+test("a proof or claim is priced at the gas price its page quoted, not at one read again", async () => {
+  // The node's price has moved to 2 since the page read 1: the review asks
+  // for what the page said, 51M at 1 LUX, as Sam's 0.051 DUSK a step.
+  const { withdrawals } = provingSetup({ firstL2: 13_000 });
+  assert.deepEqual((await withdrawals.prepareProve(TX, { gasPrice: 1n })).gas, { limit: "51000000", price: "1" });
+  assert.deepEqual((await setup(CLAIMABLE).withdrawals.prepareFinalize(TX, { gasPrice: 1n })).gas, { limit: "51000000", price: "1" });
+  // Without one, the node's.
+  assert.deepEqual((await setup(CLAIMABLE).withdrawals.prepareFinalize(TX)).gas, { limit: "51000000", price: "2" });
+});
+
 test("a waiting withdrawal's check is one Multicall query once its game is known", async () => {
   const queries = [];
   const answers = {

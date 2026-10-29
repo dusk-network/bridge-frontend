@@ -132,9 +132,10 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     else renderMain();
   }
   // Balances and gas for the form; an older answer never overwrites a newer
-  // one. A gas price from anywhere, as a review's request, is quoted at once.
+  // one. A gas price read again is quoted at once.
   const formReads = createFormReads({ onChange: () => refreshFormAndHeader(), onPrice: () => requote(), services });
-  // One gas price for every "up to" fee on the page: the node's, as last read.
+  // One gas price for every "up to" fee on the page, and for the requests its
+  // reviews send: the node's, as last read.
   const duskGasPrice = () => formReads.reads.gasPrice ?? 1n;
   /** Reads the gas price again; the page is drawn again where it moved. */
   const refreshPrice = () => formReads.price();
@@ -196,7 +197,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   const accounts = () => [listedDusk(), evmAccount()].filter(Boolean);
 
   function transfersVm() {
-    return transfersModel(state.activity, { account: duskAccount(), accounts: accounts(), cfg, name: duskName(), routeOf, submitter: proofSubmitterFor(duskAccount()), timing: timing() });
+    return transfersModel(state.activity, { account: duskAccount(), accounts: accounts(), cfg, name: duskName(), owner: listedDusk(), routeOf, submitter: proofSubmitterFor(duskAccount()), timing: timing() });
   }
 
   function headerVm() {
@@ -821,7 +822,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const route = routeOf(entry.routeId);
     if (!route) return receiptPage({ hash, missing: "This transfer's route isn't on this network's bridge." });
     return receiptPage({
-      ...receiptModel(entry, { cfg, gasPrice: duskGasPrice(), own: { account: duskAccount(), name: duskName() }, route, submitter: proofSubmitterFor(duskAccount()), timing: timing(), url: receiptUrl(entry.hash) }),
+      ...receiptModel(entry, { cfg, gasPrice: duskGasPrice(), own: { account: duskAccount(), name: duskName() }, owner: listedDusk(), route, submitter: proofSubmitterFor(duskAccount()), timing: timing(), url: receiptUrl(entry.hash) }),
       canAct: duskState().installed,
     });
   }
@@ -1060,10 +1061,11 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     await reviews.fill(
       review,
       async () => {
+        // At the price the page quoted: the review and the request say the same fee.
         const request =
           route.mode === "duskevm-deposit"
-            ? await depositRequest({ amountLux: lux, node: services.node, recipient: destination })
-            : await serviceTransferRequest({ amountLux: lux, destination, node: services.node });
+            ? await depositRequest({ amountLux: lux, gasPrice: duskGasPrice(), node: services.node, recipient: destination })
+            : await serviceTransferRequest({ amountLux: lux, destination, gasPrice: duskGasPrice(), node: services.node });
         const lines =
           route.mode === "duskevm-deposit"
             ? await duskCallLines({ ...request, chainId: cfg.dusk.chainId, from: duskAccount(), fromName: duskName(), note: "The DuskEVM bridge contract on Dusk." })
@@ -1073,8 +1075,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       ({ lines, request }) => {
         review.request = request;
         review.steps[0] = { ...review.steps[0], lines };
-        // The request carries the node's price now: the fee rows and the
-        // balance check follow it, so Confirm waits if it no longer fits.
+        // The fee rows and the balance check at the request's price, so
+        // Confirm waits if the balance no longer covers it.
         Object.assign(
           review,
           pricedReview(route, {
@@ -1083,7 +1085,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
             destination,
             duskAccount: duskAccount(),
             evm: state.evmState,
-            gasPrice: formReads.usePrice(BigInt(request.gas.price)),
+            gasPrice: BigInt(request.gas.price),
             reads: formReads.reads,
             timing: timing(),
           }),
@@ -1102,8 +1104,10 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     if (!entry || !route || !services.withdrawals) return;
     const view = transferView(entry, { cfg, route, timing: timing() });
     const label = kind === "prove" ? "Prove on Dusk" : "Claim on Dusk";
+    // The price the page quoted the step at: the review and the request use it too.
+    const gasPrice = duskGasPrice();
     // What this step costs at most: an estimate until the request is ready.
-    const stepMax = withdrawalStepMax({ gasPrice: duskGasPrice(), withdrawalGas: entry.withdrawalGas ? BigInt(entry.withdrawalGas) : 0n });
+    const stepMax = withdrawalStepMax({ gasPrice, withdrawalGas: entry.withdrawalGas ? BigInt(entry.withdrawalGas) : 0n });
     // A proof says when it can be claimed: by the Portal's wait until the request says the date.
     const lead = (maxLux, claim = null) =>
       actionLead(kind, entry, { account: duskAccount(), amountLux: view.amount, claim, maturity: view.time?.maturity ?? null, maxLux, name: duskName() });
@@ -1147,8 +1151,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         if (kind === "finalize" && proverMismatch(entry, submitter)) throw new Error(switchToProver(entry));
         const prepared =
           kind === "prove"
-            ? await services.withdrawals.prepareProve(entry.hash, { proofSubmitter: submitter })
-            : await services.withdrawals.prepareFinalize(entry.hash, { proofSubmitter: submitter });
+            ? await services.withdrawals.prepareProve(entry.hash, { gasPrice, proofSubmitter: submitter })
+            : await services.withdrawals.prepareFinalize(entry.hash, { gasPrice, proofSubmitter: submitter });
         const request = await services.portalRequest(prepared);
         // What the call carries, as Dusk Wallet reads it from the call.
         const details = prepared.withdrawal ? withdrawalDetails(prepared.withdrawal) : null;
@@ -1169,7 +1173,6 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         review.privacy = actionPrivacy(kind, privacyLine(route, cfg, { dusk: entry.destination, evm: entry.sender, name: duskPartyName(entry.destination) }), { account, name: duskName() });
         review.request = request;
         review.lead = lead(BigInt(request.gas.limit) * BigInt(request.gas.price), claim);
-        formReads.usePrice(BigInt(request.gas.price));
         review.steps[0] = { ...review.steps[0], lines };
       },
       (error) => {
