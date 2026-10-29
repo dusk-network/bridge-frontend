@@ -117,9 +117,17 @@ test("a withdrawal quotes its DuskEVM step and the two Dusk steps after it", () 
   assert.equal(buildQuote(routes["duskevm-withdrawal"], "312", unpriced).error, "That's more than you have on DuskEVM, with its network fee.");
   assert.ok(quote.maxLux > 311n * 10n ** 9n);
   // Nothing arrives without the two Dusk steps: it says when they can be
-  // taken, from what the chain said, and nothing until it has.
-  const read = { chain: { withdrawal: { finalitySeconds: 302_400, maturitySeconds: 604_800, outputSeconds: 1_700 } } };
-  const timed = rows(buildQuote(routes["duskevm-withdrawal"], "200", { cfg, gasPrice: 1n, timing: read }));
-  assert.equal(timed.when, "Claim 7 days after you prove. | You can prove about 30 minutes after sending.");
+  // taken, from what the chain said, and nothing until it has. Sent now and
+  // proved about an output later (1,700 s), it can be claimed 7 days after.
+  const read = { chain: { withdrawal: { finalitySeconds: 302_400, maturitySeconds: 604_800, outputSeconds: 1_700 } }, now: Date.UTC(2026, 9, 29, 11) };
+  const timed = rows(buildQuote(routes["duskevm-withdrawal"], "200", { cfg, gasPrice: 1n, locale: "en-GB", timeZone: "Europe/Amsterdam", timing: read }));
+  assert.equal(timed.when, "Claim from about 5 Nov, 12:28 CET | Claim 7 days after you prove. You can prove about 30 minutes after sending.");
   assert.equal(timed.arrives, undefined);
+  // A game's finality longer than the proof's maturity: the date waits for it, as the Portal does.
+  const slow = { ...read, chain: { withdrawal: { ...read.chain.withdrawal, finalitySeconds: 1_209_600 } } };
+  const later = rows(buildQuote(routes["duskevm-withdrawal"], "200", { cfg, gasPrice: 1n, locale: "en-GB", timeZone: "Europe/Amsterdam", timing: slow }));
+  assert.equal(later.when.split(" | ")[0], "Claim from about 12 Nov, 12:28 CET");
+  // Before outputs can be timed, no date: the wait alone.
+  const untimed = { ...read, chain: { withdrawal: { ...read.chain.withdrawal, outputSeconds: null } } };
+  assert.equal(rows(buildQuote(routes["duskevm-withdrawal"], "200", { cfg, gasPrice: 1n, timing: untimed })).when, "Claim 7 days after you prove.");
 });

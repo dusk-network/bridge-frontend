@@ -1025,11 +1025,12 @@ export function createWithdrawals(deps) {
 
   /**
    * The gas to prove or claim with: the withdrawal limit plus the gas the
-   * withdrawal asks for, at the node's price. Refused above the bound.
+   * withdrawal asks for, at `price`, the node's as the page quoted it, or
+   * else the node's now. Refused above the bound.
    */
-  async function withdrawalGas(withdrawalGas = 0n) {
+  async function withdrawalGas(withdrawalGas = 0n, price = null) {
     const limit = withdrawalGasLimit(withdrawalGas, deps.gasUpper);
-    return { limit: limit.toString(), price: (await deps.gasPrice()).toString() };
+    return { limit: limit.toString(), price: (price ?? (await deps.gasPrice())).toString() };
   }
 
   /**
@@ -1051,11 +1052,12 @@ export function createWithdrawals(deps) {
    * The proof call for a withdrawal, ready to review and send, with the
    * withdrawal it carries and when it can be claimed if proved now.
    * `proofSubmitter` is the account the review is for, read once when it
-   * opens; Dusk Wallet's current one otherwise. The proof is against a game
-   * that has already resolved where one covers the withdrawal, so its claim
-   * date is exact; otherwise against the newest that covers it.
+   * opens; Dusk Wallet's current one otherwise. `gasPrice` is the price its
+   * page quoted the step at. The proof is against a game that has already
+   * resolved where one covers the withdrawal, so its claim date is exact;
+   * otherwise against the newest that covers it.
    */
-  async function prepareProve(txHash, { proofSubmitter } = {}) {
+  async function prepareProve(txHash, { gasPrice = null, proofSubmitter } = {}) {
     const event = parseWithdrawalReceipt(await fetchL2Receipt(txHash));
     // A withdrawal whose claim couldn't be sent isn't proved either.
     withdrawalGasLimit(event.withdrawal.gasLimit, deps.gasUpper);
@@ -1090,13 +1092,16 @@ export function createWithdrawals(deps) {
       claim: await claimIfProvedNow(snapshot, proof, tip),
       fnName: "proveWithdrawalTransaction",
       // The claim's limit too: one "up to" fee for both steps.
-      gas: await withdrawalGas(event.withdrawal.gasLimit),
+      gas: await withdrawalGas(event.withdrawal.gasLimit, gasPrice),
       withdrawal: event.withdrawal,
     };
   }
 
-  /** The claim call for a withdrawal that is ready, to review and send, with the withdrawal it carries. */
-  async function prepareFinalize(txHash, { proofSubmitter } = {}) {
+  /**
+   * The claim call for a withdrawal that is ready, to review and send, with
+   * the withdrawal it carries, at the gas price its page quoted (`gasPrice`).
+   */
+  async function prepareFinalize(txHash, { gasPrice = null, proofSubmitter } = {}) {
     const status = await loadWithdrawalStatus(txHash, {
       proofSubmitter: proofSubmitter ?? deps.proofSubmitter(),
     });
@@ -1105,7 +1110,7 @@ export function createWithdrawals(deps) {
     return {
       args: withdrawalToDriverInput(status.withdrawal),
       fnName: "finalizeWithdrawalTransaction",
-      gas: await withdrawalGas(status.withdrawal.gasLimit),
+      gas: await withdrawalGas(status.withdrawal.gasLimit, gasPrice),
       withdrawal: status.withdrawal,
     };
   }

@@ -48,6 +48,18 @@ test("a .dusk name Dusk Domains can't hold says why at once, and isn't looked up
   for (const typed of ["bad_name.dusk", "-alice.dusk", "a.b.c.d.e.dusk", "21n5nc", ""]) assert.equal(nameToLookUp(typed), "", typed);
 });
 
+test("a name typed without .dusk is offered as the .dusk name it likely is, as the wallets offer it", () => {
+  assert.deepEqual(checkDuskRecipient("alice"), { error: NOT_DUSK_RECIPIENT, suggest: "alice.dusk" });
+  for (const [typed, name] of [[" Alice ", "alice.dusk"], ["alice.dusk.", "alice.dusk"], ["shop.alice", "shop.alice.dusk"]])
+    assert.equal(checkDuskRecipient(typed).suggest, name, typed);
+  // An account in the making, an EVM address, or anything else: no name, and nothing looked up.
+  for (const typed of ["21n5ncyuJkRr9", "0x7568", "not an account", "bad_name"]) {
+    assert.equal(checkDuskRecipient(typed).suggest, undefined, typed);
+    assert.equal(nameToLookUp(typed), "", typed);
+  }
+  assert.equal(nameToLookUp("alice"), "");
+});
+
 test("the bridge's .dusk name rule gives the Dusk Domains SDK's answers", () => {
   const names = [
     "alice.dusk", "a.dusk", "0.dusk", "wallet-both.dusk", "al--ice.dusk", "sub.alice.dusk", "a.b.c.d.dusk", "a.b.c.d.e.dusk",

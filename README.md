@@ -92,8 +92,10 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   offers an .ics file made in the browser ("Add to calendar").
 - **My transfers**: the connected accounts' transfers, read from the networks
   (below), plus any sent or looked up on this device, each with whom it pays
-  and its transaction's short hash. "Look up a transfer" finds a transfer's
-  route from its hash alone.
+  and its transaction's short hash. A withdrawal under way that pays another
+  Dusk account is listed apart, under Sent to someone else, with a quiet
+  Prove, until your account proves it. "Look up a transfer" finds a
+  transfer's route from its hash alone.
 - **Contracts**: every address and contract ID each route uses, in full,
   with copy buttons and explorer links.
 
@@ -154,7 +156,8 @@ height × 10, which the latest block converts to a date; the others count block
 time, a second later for their strict comparisons.
 
 - Before the proof: "Claim 7 days after you prove. You can prove about 30
-  minutes after sending.", with the chain's figures.
+  minutes after sending.", with the chain's figures. Before sending, the
+  review dates it too: "Claim from about 5 Nov, 12:28 CET".
 - After it: "Claim from 2 Nov, 04:20 CET" once the game has resolved, and
   "Claim from about …", the earliest it can be, before that. A game left
   unresolved more than an hour past its clock is late: "Waiting for DuskEVM
@@ -201,7 +204,8 @@ Dusk contract calls ask the wallet for their own limit at the node's price:
 claim that would need more than `VITE_GAS_LIMIT_UPPER` isn't sent. Transfers
 to the bridge account carry the wallet's public-transfer limit, 2.5M, at the
 node's price. The quote shows each limit as "up to" and the measured usual
-cost next to it.
+cost next to it. The node's price is the one the page last read: the quote,
+the review and the request all use it, so each step shows one fee.
 
 ## Configuration
 
@@ -229,8 +233,9 @@ The page writes times, IDs and fees as every Dusk app does
 (`@dusk-network/networks/format`): times in English words on the viewer's
 clock, with the zone ("Today, 14:05 CET", records in full: "Wed 28 Oct
 2026, 14:05 CET"); Dusk contract IDs without 0x and EVM addresses with their
-checksum; the most a fee can be rounded up, and the fee a transfer paid
-exact in its receipt's details.
+checksum, shortened as 6…6 for Dusk IDs, accounts and hashes and as 0x and
+4…4 for EVM addresses and transactions; the most a fee can be rounded up,
+and the fee a transfer paid exact in its receipt's details.
 
 The footer and About this page link the Terms of use and Privacy policy the
 network's file names, as the explorer does. A deployment can link its own

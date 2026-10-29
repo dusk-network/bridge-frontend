@@ -652,6 +652,9 @@ export function createTracking(deps) {
       withdrawalGas: current.withdrawal?.gasLimit === undefined ? entry.withdrawalGas : String(current.withdrawal.gasLimit),
       proofRejected: current.proofRejected ?? false,
       provenByOther: current.provenByOther ?? false,
+      // Whose proof the stage is: the account that proved here, Dusk
+      // Wallet's, or else the withdrawal's recipient's.
+      stageSubmitter: current.proofSubmitter ?? null,
       // The Portal's proof time, on the wall clock, its game, and when it can be claimed.
       proofGame: current.disputeGameProxy ?? null,
       provenAt: current.provenAt ? Number(current.provenAt) * 1_000 : null,

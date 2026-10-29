@@ -64,10 +64,14 @@ export function withdrawalGasLimit(
   return limit;
 }
 
-/** Gas for the wallet: the operation's limit at the node's current price. */
-export async function gasAtNodePrice(limit, node) {
+/**
+ * Gas for the wallet: the operation's limit at the node's price, as the page
+ * last read it and quoted it (`price`), or else as the node gives it now.
+ * One price for the quote, the review and the request: one fee everywhere.
+ */
+export async function gasAtNodePrice(limit, node, price = null) {
   return Object.freeze({
     limit: BigInt(limit).toString(),
-    price: (await node.gasPrice()).toString(),
+    price: (price ?? (await node.gasPrice())).toString(),
   });
 }

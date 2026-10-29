@@ -85,7 +85,7 @@ export function depositDisplay({ amountLux, recipient }) {
  * The deposit as Dusk Wallet receives it: the review shows this request, and
  * the same request is sent.
  */
-export async function depositRequest({ amountLux, node, recipient }) {
+export async function depositRequest({ amountLux, gasPrice = null, node, recipient }) {
   if (!config.duskEvm.enabled)
     throw new Error("DuskEVM deposits are not configured for this deployment.");
   const to = normalizeEvmAddress(recipient);
@@ -99,6 +99,6 @@ export async function depositRequest({ amountLux, node, recipient }) {
       to,
     }),
     fnName: DEPOSIT_FN_NAME,
-    gas: await gasAtNodePrice(DEPOSIT_GAS_LIMIT, node),
+    gas: await gasAtNodePrice(DEPOSIT_GAS_LIMIT, node, gasPrice),
   };
 }

@@ -87,7 +87,7 @@ const node = (overrides = {}) => ({
 
 test("a migration is pending until Messina pays it out on Dusk", async () => {
   const input = encodeFunctionData({
-    abi: parseAbi(["function migrate(uint256 amount, string mainnetDuskAddress)"]),
+    abi: parseAbi(["function migrate(uint256 amount, string targetAddress)"]),
     args: [3_000_000_000_000_000_000n, SENDER],
     functionName: "migrate",
   });
@@ -136,7 +136,7 @@ test("a migration is pending until Messina pays it out on Dusk", async () => {
 
 test("only the migrated amount counts as a payout, and only from the payout account when it's known", async () => {
   const input = encodeFunctionData({
-    abi: parseAbi(["function migrate(uint256 amount, string mainnetDuskAddress)"]),
+    abi: parseAbi(["function migrate(uint256 amount, string targetAddress)"]),
     args: [3_000_000_000_000_000_000n, SENDER],
     functionName: "migrate",
   });
@@ -469,6 +469,22 @@ test("a deposit waits while the adapter hasn't seen it, and fails with its Dusk 
 
   tx = duskTx({ callData: { ...call, contractId: "99".repeat(32) } });
   assert.match((await tracking.refresh(entry, ROUTES.deposit)).note, /isn't a DuskEVM deposit/u);
+});
+
+test("a withdrawal's check keeps whose proof its stage is: the account it was read for", async () => {
+  // Read for the withdrawal's recipient, with no wallet connected: its proof, not the user's.
+  const recipient = `0x${"3d".repeat(20)}`;
+  const tracking = createTracking({
+    config: cfg,
+    node: node(),
+    now: () => 1_793_100_000_000,
+    rpc: fakeRpc({}),
+    withdrawals: {
+      loadWithdrawalStatus: async () => ({ blockNumber: 50n, details: { amountWei: 10n ** 17n }, proofSubmitter: recipient, stage: "ready_to_finalize", withdrawal: { gasLimit: 519_542n } }),
+    },
+  });
+  const checked = await tracking.refresh({ hash: EVM_HASH, routeId: ROUTES.withdrawal.id }, ROUTES.withdrawal);
+  assert.deepEqual([checked.stage, checked.stageSubmitter], ["ready_to_finalize", recipient]);
 });
 
 test("a withdrawal follows its stages, and a sent proof waits for Dusk", async () => {

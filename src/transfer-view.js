@@ -4,7 +4,7 @@
 // and how long the route takes on this network; no balances, no network
 // requests.
 
-import { formatEvmAddress, shortAccount } from "@dusk-network/networks/format";
+import { formatContractId, formatEvmAddress, shortAccount } from "@dusk-network/networks/format";
 
 import { claimText } from "./claim-date.js";
 import {
@@ -17,7 +17,7 @@ import {
 } from "./format.js";
 import { networkName, tokenName } from "./names.js";
 import { aboutTime, lateAfterSeconds, routeTime } from "./route-times.js";
-import { STATUS_WORDS } from "./tracking.js";
+import { STATUS_WORDS, duskAccountEvmAddress } from "./tracking.js";
 import { WITHDRAWAL_GAS_REFUSAL } from "./gas.js";
 
 export const html = (value) =>
@@ -41,12 +41,17 @@ export function explorerTxUrl(cfg, network, hash) {
 }
 
 /**
- * As every Dusk app shortens them: "0xd63b…8DF4" for EVM addresses, with
- * their checksum's capitals; "rz2gFT…3VGXyt" for Dusk accounts and hashes.
+ * As every Dusk app shortens them (@dusk-network/networks/format): EVM
+ * addresses "0xd63b…8DF4", with their checksum's capitals, and EVM
+ * transactions "0x04a8…3213"; Dusk accounts, hashes and contract IDs
+ * "rz2gFT…3VGXyt".
  */
 export function short(value) {
-  const text = String(value ?? "");
-  return /^0x[0-9a-f]{40}$/iu.test(text) ? formatEvmAddress(text, { short: true }) : shortAccount(text);
+  const text = String(value ?? "").trim();
+  if (/^0x[0-9a-f]{40}$/iu.test(text)) return formatEvmAddress(text, { short: true });
+  if (/^0x[0-9a-f]{64}$/iu.test(text)) return `${text.slice(0, 6)}…${text.slice(-4)}`.toLowerCase();
+  if (/^[0-9a-f]{64}$/iu.test(text)) return formatContractId(text, { short: true });
+  return shortAccount(text);
 }
 
 /** The action a withdrawal's stage waits for, if the user can take it now. */
@@ -85,6 +90,48 @@ export function friendlyWalletError(error, wallet = "dusk") {
  */
 export const proverMismatch = (entry, submitter) =>
   Boolean(entry?.proveHash && entry.proofSubmitter && submitter && String(entry.proofSubmitter).toLowerCase() !== String(submitter).toLowerCase());
+
+/** The stages at which the Portal holds a proof for the account a check was read for. */
+const PROVED_STAGES = new Set(["proven_waiting", "ready_to_finalize", "finalize_submitted"]);
+
+let submitterFor = { account: null, submitter: null };
+/** The address the Portal knows a Dusk account's proofs by, in lower case: null for no account. */
+function submitterOf(account) {
+  if (submitterFor.account !== account) {
+    let submitter = null;
+    try {
+      submitter = duskAccountEvmAddress(account).toLowerCase();
+    } catch {}
+    submitterFor = { account, submitter };
+  }
+  return submitterFor.submitter;
+}
+
+/**
+ * Whether `owner` proved the withdrawal: with a proof or claim sent from this
+ * browser, or as a check read for `owner`'s own account says
+ * (`stageSubmitter`). A check read for another account, as the recipient's
+ * with no wallet connected, says nothing of `owner`'s proof.
+ */
+export function provedBy(entry, owner) {
+  if (!owner || !entry) return false;
+  if ((entry.proveHash || entry.pendingAction) && entry.proofAccount === owner) return true;
+  if (!PROVED_STAGES.has(entry.stage) || !entry.stageSubmitter) return false;
+  return String(entry.stageSubmitter).toLowerCase() === submitterOf(owner);
+}
+
+/**
+ * Whether a withdrawal is someone else's to finish: it pays a Dusk account
+ * other than `owner`, the one the page is for (Dusk Wallet's, or the
+ * followed one), and nobody, or another account, has proved it. Once `owner`
+ * has, only `owner` can claim with that proof. With no `owner`, none is.
+ */
+export const sentToSomeoneElse = (entry, route, owner) =>
+  route?.mode === "duskevm-withdrawal" &&
+  Boolean(owner) &&
+  Boolean(entry?.destination) &&
+  entry.destination !== owner &&
+  !provedBy(entry, owner);
 
 /** What to do when another account proved it. */
 export const switchToProver = (entry) =>
@@ -155,7 +202,7 @@ function withdrawalSteps(entry, cfg, { account, locale, name, now, time: usual, 
   });
   let prove;
   if (proved)
-    prove = step("prove", "Proven on Dusk", "done", {
+    prove = step("prove", "Proved on Dusk", "done", {
       at: entry.provenAt ?? entry.proveAt ?? null,
       atText: time(entry.provenAt ?? entry.proveAt),
       detail: entry.proveHash ? "By you" : "",
@@ -286,17 +333,24 @@ function titleFor(entry, route, cfg, amount) {
  * @param {string|null} [options.submitter] Dusk Wallet's account, as the Portal knows provers
  * @param {string} [options.account] the connected Dusk account
  * @param {string} [options.name] its .dusk name, where it has one
+ * @param {string} [options.owner] the Dusk account the page is for: the connected one, or the followed one
  * @param {object} [options.timing] what `routeTime` reads the route's time from
  */
-export function transferView(entry, { account = "", cfg, locale, name = "", now = Date.now(), route, submitter = null, timeZone, timing, year = false }) {
+export function transferView(entry, { account = "", cfg, locale, name = "", now = Date.now(), owner = account, route, submitter = null, timeZone, timing, year = false }) {
   const status = entry.status === "completed" || entry.status === "failed" ? entry.status : "pending";
   const amount = amountOf(entry);
   const withdrawal = route.mode === "duskevm-withdrawal";
+  // Someone else's DUSK: its steps are never the user's turn, and its action is quiet.
+  const forOther = status === "pending" && sentToSomeoneElse(entry, route, owner);
   // How long the route takes on this network, as every page says it.
   const time = routeTime(route, cfg, { ...timing, now });
   const options = { account, locale, name, now, time, timeZone, year };
   const steps = (withdrawal ? withdrawalSteps(entry, cfg, options) : sourceSteps({ ...entry, status }, route, cfg, options)).map(
-    (item) => ({ ...item, href: item.hash && item.network ? explorerTxUrl(cfg, item.network, item.hash) : null }),
+    (item) => ({
+      ...item,
+      href: item.hash && item.network ? explorerTxUrl(cfg, item.network, item.hash) : null,
+      state: forOther && item.state === "turn" ? "now" : item.state,
+    }),
   );
   const fromNetwork = route.from.id;
   const toNetwork = route.to.id;
@@ -345,6 +399,7 @@ export function transferView(entry, { account = "", cfg, locale, name = "", now 
               : ACTION_FAILURE[entry.stage],
           kind: actionKind,
           label: actionKind === "prove" ? "Prove on Dusk" : "Claim on Dusk",
+          quiet: forOther,
         }
       : null,
     amount,
@@ -383,8 +438,8 @@ function trackerWhen(item, entry, timeZone) {
 function trackerLabel(item, entry, now) {
   if (item.key === "sent") return "Sent";
   if (item.key === "prove") {
-    if (item.state === "done") return entry.proveHash ? "Proven by you" : "Proven";
-    if (entry.provenByOther) return "Proven by another";
+    if (item.state === "done") return entry.proveHash ? "Proved by you" : "Proved";
+    if (entry.provenByOther) return "Proved by another";
     return item.state === "turn" ? "Prove now" : "Prove";
   }
   if (item.state === "done") return "Claimed";
@@ -414,7 +469,7 @@ export function transferSubline(view, entry, route, cfg, { account = "", locale,
     // A rejected proof never matures: it's proved again, once there's a new output.
     if (stage === "proven_waiting" && entry.proofRejected) return REJECTED_PROOF;
     if (stage === "proven_waiting") {
-      if (!view.countdown) return view.time?.maturity ? `Claim ${afterTheProof(view.time)}` : "Proven";
+      if (!view.countdown) return view.time?.maturity ? `Claim ${afterTheProof(view.time)}` : "Proved";
       return view.countdown.overdue ? view.countdown.line : `${view.countdown.line} · ${view.countdown.left} left`;
     }
     if (!entry.sourceAt) return "Waiting for DuskEVM";

@@ -117,6 +117,20 @@ test("with the node, a Dusk → Sepolia transfer carries the gas the quote shows
   assert.equal(params.memo, getAddress(TYPED));
 });
 
+test("a deposit or transfer is priced at the gas price its page quoted, not at one read again", async () => {
+  const wallet = fakeWallet();
+  useDuskWallet(wallet);
+  const moved = { gasPrice: async () => 2n };
+
+  await submitDuskEvmDeposit({ amountLux: 100_000_000n, gasPrice: 1n, node: moved, recipient: TYPED });
+  await submitServiceTransfer({ amountLux: 2_000_000_000n, destination: TYPED, gasPrice: 1n, node: moved });
+
+  assert.deepEqual(wallet.sent.map(({ params }) => params.gas), [
+    { limit: "5000000", price: "1" },
+    { limit: "2500000", price: "1" },
+  ]);
+});
+
 test("a deposit or transfer reviewed for one Dusk account isn't sent as another", async () => {
   const wallet = fakeWallet();
   useDuskWallet(wallet);

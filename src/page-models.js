@@ -225,9 +225,12 @@ export function actionLead(kind, entry, { account = "", amountLux = null, claim 
       };
 }
 
-/** The receipt of one transfer. No balances: the link may be shared. */
-export function receiptModel(entry, { cfg, gasPrice = 1n, locale, now = Date.now(), own = null, route, submitter = null, timeZone, timing, url }) {
-  const view = transferView(entry, { account: own?.account ?? "", cfg, locale, name: own?.name ?? "", now, route, submitter, timeZone, timing, year: true });
+/**
+ * The receipt of one transfer. No balances: the link may be shared. `owner`
+ * is the Dusk account the page is for, Dusk Wallet's (`own`) or a followed one.
+ */
+export function receiptModel(entry, { cfg, gasPrice = 1n, locale, now = Date.now(), own = null, owner = own?.account ?? "", route, submitter = null, timeZone, timing, url }) {
+  const view = transferView(entry, { account: own?.account ?? "", cfg, locale, name: own?.name ?? "", now, owner, route, submitter, timeZone, timing, year: true });
   const from = networkName(cfg, route.from.id);
   const to = networkName(cfg, route.to.id);
   // Your own Dusk account by its .dusk name, others by their short code.
@@ -252,8 +255,8 @@ export function receiptModel(entry, { cfg, gasPrice = 1n, locale, now = Date.now
     details.push({ label: "You receive", value: formatDusk(view.amount - BigInt(cfg.service.feeLux) > 0n ? view.amount - BigInt(cfg.service.feeLux) : 0n) });
   }
   // The record: each fee as it was paid, to the last decimal.
-  if (entry.feeLux) details.push({ label: "Network fee paid", value: `${formatExactFee(BigInt(entry.feeLux))} DUSK on ${from}` });
-  if (entry.feeWei) details.push({ label: "Network fee paid", value: `${formatUnitsGrouped(BigInt(entry.feeWei), 18)} ${gasCoin(cfg, route.from.id)} on ${from}` });
+  if (entry.feeLux) details.push({ label: "Fee paid", value: `${formatExactFee(BigInt(entry.feeLux))} DUSK on ${from}` });
+  if (entry.feeWei) details.push({ label: "Fee paid", value: `${formatUnitsGrouped(BigInt(entry.feeWei), 18)} ${gasCoin(cfg, route.from.id)} on ${from}` });
   if (entry.proveFeeLux) details.push({ label: "Proof fee paid", value: `${formatExactFee(BigInt(entry.proveFeeLux))} DUSK on Dusk` });
   if (entry.claimFeeLux) details.push({ label: "Claim fee paid", value: `${formatExactFee(BigInt(entry.claimFeeLux))} DUSK on Dusk` });
   if (entry.sender) details.push({ html: addressHtml(cfg, sourceNetwork, entry.sender, `sender on ${from}`), label: `From, on ${from}` });
@@ -267,7 +270,7 @@ export function receiptModel(entry, { cfg, gasPrice = 1n, locale, now = Date.now
     details.push({
       html: proof
         ? txHtml(cfg, "dusk", proof, "proof transaction")
-        : `<span class="t2">${proven ? "Proven" : entry.provenByOther ? "Only by another account" : "Not proven yet"}</span>`,
+        : `<span class="t2">${proven ? "Proved" : entry.provenByOther ? "Only by another account" : "Not proved yet"}</span>`,
       label: "Proof on Dusk",
     });
     const claim = entry.claimHash ?? pendingClaim;
@@ -313,12 +316,17 @@ function txHtml(cfg, network, hash, label) {
 // My transfers
 // ---------------------------------------------------------------------------
 
-export function transfersModel(entries, { account = "", accounts, cfg, locale, name = "", now = Date.now(), routeOf, submitter = null, timeZone, timing }) {
+/**
+ * My transfers, in groups. `owner` is the Dusk account the list is for: Dusk
+ * Wallet's (`account`), or a followed one. A withdrawal that pays another
+ * account waits apart from what needs the user.
+ */
+export function transfersModel(entries, { account = "", accounts, cfg, locale, name = "", now = Date.now(), owner = account, routeOf, submitter = null, timeZone, timing }) {
   const shown = entries.filter((entry) => routeOf(entry.routeId) && shownFor(entry, accounts));
-  const groups = groupTransfers(shown, routeOf);
+  const groups = groupTransfers(shown, routeOf, owner);
   const row = (entry) => {
     const route = routeOf(entry.routeId);
-    const view = transferView(entry, { account, cfg, locale, name, now, route, submitter, timeZone, timing });
+    const view = transferView(entry, { account, cfg, locale, name, now, owner, route, submitter, timeZone, timing });
     return {
       action: view.action,
       amountText: view.amountText,

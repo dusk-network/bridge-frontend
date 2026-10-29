@@ -122,11 +122,15 @@ export function quoteRows(quote) {
     .join("");
 }
 
-/** Under the recipient: the account a typed name points to, the lookup, or the capitals' fix. */
+/**
+ * Under the recipient: the account a typed name points to, the lookup, the
+ * capitals' fix, or the .dusk name a bare name likely is.
+ */
 function recipientNote(to) {
   if (to.resolved) return `${html(to.resolved.name)} points to <code class="mono wrap">${html(to.resolved.address)}</code>`;
   if (to.looking) return `Looking up ${html(to.looking)}…`;
   if (to.fix) return `<button type="button" class="linkish" data-action="recipient-fix">If every character is right, fix the capitals</button>`;
+  if (to.suggest) return `<button type="button" class="linkish" data-action="recipient-suggest">Did you mean ${html(to.suggest)}?</button>`;
   return "";
 }
 
@@ -235,19 +239,24 @@ function walletHead(head) {
 
 export function walletLines(lines, cfgLinks) {
   const head = lines.find((line) => line.kind === "head");
+  // What everyone sees, under the window's head and before its fee, as the window says it.
+  const visible = lines.find((line) => line.kind === "visible");
   const row = (line) => {
     const text = `<span class="${line.mono ? "mono wrap" : "num"}"${line.full ? ` title="${html(line.full)}"` : ""}>${html(line.value)}</span>`;
+    // A contract by its network's name reads "DuskEVM bridge · 2257e5…a1b31d", the "·" kept with its ID.
     const value = line.address
       ? `${line.value ? `<span class="wl-name">${html(line.value)}</span>` : ""}${fullValue({ explorer: cfgLinks.explorer(line.network, line.address), label: line.label, value: line.address })}`
-      : line.suffix
-        ? `<span>${text}<span class="t2"> · ${html(line.suffix)}</span></span>`
-        : text;
+      : line.name
+        ? `<span class="wl-contract"><span class="wl-name">${html(line.name)}</span> <span class="wl-id">· ${text}</span></span>`
+        : line.suffix
+          ? `<span>${text}<span class="t2"> · ${html(line.suffix)}</span></span>`
+          : text;
     return `<div class="wl${line.gap ? " gap" : ""}"><dt>${html(line.label)}</dt><dd>${value}${line.note ? `<span class="wl-note">${html(line.note)}</span>` : ""}</dd></div>`;
   };
-  const shown = lines.filter((line) => line.kind !== "head" && !line.fold);
+  const shown = lines.filter((line) => !line.kind && !line.fold);
   // What the window folds under Details: the function, the hash, the site's words.
   const folded = lines.filter((line) => line.fold);
-  return `${head ? walletHead(head) : ""}<dl class="wls">${shown.map(row).join("")}</dl>${
+  return `${head ? walletHead(head) : ""}${visible ? `<p class="note wl-visible">${icon("eye")}<span>${html(visible.text)}</span></p>` : ""}<dl class="wls">${shown.map(row).join("")}</dl>${
     folded.length ? `<details class="wl-more"><summary>Details</summary><dl class="wls">${folded.map(row).join("")}</dl></details>` : ""
   }`;
 }
@@ -261,6 +270,10 @@ const actionLead = (lead) =>
   `<div class="flow group lead"><div><div class="k">${html(lead.label)}</div><div class="v num">${html(lead.amount)}<span class="u">DUSK</span></div><div class="w">${lead.chain ? chainMark(lead.chain, "xs") : ""}<span>${html(lead.line)}</span></div></div></div>`;
 
 export function reviewSheet(vm) {
+  // Each step's tag follows the review: done once confirmed, now while it's
+  // the one to confirm, and after the step before it until then.
+  const at = Math.max(0, vm.steps.findIndex((step) => step.current));
+  const tag = (index) => (index < at ? "Done" : index === at ? "Now" : `After step ${index}`);
   const checks = vm.checks.length
     ? `<ul class="ck" aria-label="Checked">${vm.checks
         .map((check) => `<li class="${check.ok ? "ok" : "bad"}">${icon(check.ok ? "check" : "info")}<span>${check.html}</span></li>`)
@@ -269,7 +282,7 @@ export function reviewSheet(vm) {
   const steps = vm.steps
     .map(
       (step, index) => `<section class="req${step.current ? "" : " wait"}" aria-labelledby="req-${index}">
-      <h3 id="req-${index}"><span class="no">${index + 1}</span>${html(step.title)}<span class="tag">${html(step.when)}</span></h3>
+      <h3 id="req-${index}"><span class="no">${index + 1}</span>${html(step.title)}<span class="tag">${html(tag(index))}</span></h3>
       ${step.what ? `<p>${step.what}</p>` : ""}
       ${step.custody ? `<p class="small t2">${html(step.custody)}</p>` : ""}
       <div class="wlh">${html(step.walletName)} will show</div>
@@ -336,7 +349,7 @@ export function receiptPage(vm) {
       ? `<div class="action-box">${actionNeedsWallet(view.action.kind)}<span class="small t2">Dusk Wallet is a browser extension for computers.</span></div>`
       : view.action.blocked
         ? `<div class="action-box"><p class="note">${icon("info")}<span>${html(view.action.blocked)}</span></p></div>`
-        : `<div class="action-box">${view.action.failure ? messageLine(view.action.failure, { live: false }) : ""}<button type="button" class="btn pri" data-action="withdrawal-${view.action.kind}" data-id="${html(vm.id)}">${html(view.action.label)}</button><span class="small t2">${html(vm.actionFee ?? "")}</span></div>`
+        : `<div class="action-box">${view.action.failure ? messageLine(view.action.failure, { live: false }) : ""}<button type="button" class="btn ${view.action.quiet ? "sec" : "pri"}" data-action="withdrawal-${view.action.kind}" data-id="${html(vm.id)}">${html(view.action.label)}</button><span class="small t2">${html(vm.actionFee ?? "")}</span></div>`
     : "";
   const details = vm.details
     .map((row) => `<div class="kv"><dt class="k">${html(row.label)}</dt><dd class="v">${row.html ?? `<span class="num">${html(row.value)}</span>`}</dd></div>`)
@@ -386,7 +399,8 @@ export function transferRow(row, { canAct = true } = {}) {
   // A claim waiting for the account that proved it: its receipt says which.
   else if (row.action.blocked) right = `<span class="tag">${icon("info")}Switch account to claim</span>`;
   else
-    right = `<button type="button" class="btn pri xs" data-action="withdrawal-${row.action.kind}" data-id="${html(row.id)}">${html(row.action.kind === "prove" ? "Prove" : "Claim")}<span class="sr-only"> ${html(row.amountText)} from ${html(row.title)}</span></button>`;
+    // Someone else's withdrawal is offered quietly.
+    right = `<button type="button" class="btn ${row.action.quiet ? "sec" : "pri"} xs" data-action="withdrawal-${row.action.kind}" data-id="${html(row.id)}">${html(row.action.kind === "prove" ? "Prove" : "Claim")}<span class="sr-only"> ${html(row.amountText)} from ${html(row.title)}</span></button>`;
   // Whom it pays and its transaction, so equal transfers are told apart.
   const to = row.to ? `To ${row.to.name ? html(row.to.name) : `<code class="mono">${html(row.to.address)}</code>`}` : "";
   const meta = [to, row.hash ? `<code class="mono">${html(row.hash)}</code>` : ""].filter(Boolean).join(" · ");
@@ -416,7 +430,7 @@ export function activityPanel(vm) {
       : "";
   const body = vm.empty
     ? `<div class="empty"><p>${html(vm.empty)}</p>${vm.emptyActions ?? ""}</div>`
-    : `${group("Needs you", vm.groups.needs)}${group("In progress", vm.groups.progress)}${group("Completed", vm.groups.done)}${group("Didn't go through", vm.groups.failed)}`;
+    : `${group("Needs you", vm.groups.needs)}${group("In progress", vm.groups.progress)}${group("Sent to someone else", vm.groups.other ?? [])}${group("Completed", vm.groups.done)}${group("Didn't go through", vm.groups.failed)}`;
   return `<div class="act">
     <div class="act-h"><p class="lede">${vm.lede}</p><a class="btn sec sm" href="#/lookup">${icon("search")}Look up</a></div>
     <p class="small t2 sync" role="status" aria-live="polite">${html(vm.syncText)}</p>
