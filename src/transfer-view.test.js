@@ -13,6 +13,7 @@ import {
   transferView,
 } from "./transfer-view.js";
 import { receiptModel } from "./page-models.js";
+import { duskAccountEvmAddress } from "./tracking.js";
 import { receiptPage, reviewSheet, transferRow } from "./views.js";
 
 const cfg = {
@@ -187,6 +188,10 @@ test("a withdrawal that pays someone else asks nothing of you: no turn of yours,
     const own = transferView({ ...entry, ...patch }, { ...options, cfg, route: withdrawal });
     assert.deepEqual([own.action.quiet, own.steps[1].state], [false, "turn"]);
   }
+  // Once you proved it, only you can claim with that proof: a Claim like any other.
+  const proved = { ...entry, provenByOther: false, stage: "ready_to_finalize", stageSubmitter: duskAccountEvmAddress(ACCOUNT) };
+  const claim = transferView(proved, { account: ACCOUNT, cfg, route: withdrawal });
+  assert.deepEqual([claim.action.kind, claim.action.quiet, claim.steps[2].state], ["finalize", false, "turn"]);
 });
 
 test("a waiting withdrawal counts down to its claim time, across a clock change", () => {

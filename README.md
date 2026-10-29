@@ -94,7 +94,8 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   (below), plus any sent or looked up on this device, each with whom it pays
   and its transaction's short hash. A withdrawal under way that pays another
   Dusk account is listed apart, under Sent to someone else, with a quiet
-  Prove. "Look up a transfer" finds a transfer's route from its hash alone.
+  Prove, until your account proves it. "Look up a transfer" finds a
+  transfer's route from its hash alone.
 - **Contracts**: every address and contract ID each route uses, in full,
   with copy buttons and explorer links.
 

@@ -22,6 +22,7 @@ import {
 } from "./discovery.js";
 import { FIRST_WINDOW, addCoverage, bridgeEntry, syncDuskHistory, topGap } from "./dusk-history.js";
 import { ETH_BRIDGE_INITIATED_TOPIC, syncWithdrawals } from "./l2-withdrawals.js";
+import { duskAccountEvmAddress } from "./tracking.js";
 
 const ACCOUNT = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
 const OTHER = MAINNET_BSC_BRIDGE_ACCOUNT;
@@ -326,6 +327,33 @@ test("transfers group into Needs you, In progress, Sent to someone else, Complet
   });
   // With no Dusk account to tell, every withdrawal is the user's.
   assert.deepEqual(ids(groupTransfers(entries, (id) => routes[id])).needs, ["f", "g", "a"]);
+});
+
+test("a withdrawal that pays someone else is the user's to finish once the user proved it", () => {
+  const routes = { w: { mode: "duskevm-withdrawal" } };
+  const own = duskAccountEvmAddress(ACCOUNT);
+  const pays = (id, patch) => ({ destination: OTHER, id, routeId: "w", sourceAt: id.charCodeAt(0), status: "pending", ...patch });
+  const groups = groupTransfers(
+    [
+      // Proved from here by the user, or as the check read for the user's own account says:
+      // only the user can claim with that proof.
+      pays("a", { proofAccount: ACCOUNT, proveHash: "ab".repeat(32), stage: "ready_to_finalize" }),
+      pays("b", { stage: "ready_to_finalize", stageSubmitter: own }),
+      // The user's proof on its way, or maturing: under way.
+      pays("c", { pendingAction: "prove", pendingHash: "cd".repeat(32), proofAccount: ACCOUNT, stage: "prove_submitted" }),
+      pays("d", { stage: "proven_waiting", stageSubmitter: own.toUpperCase().replace("0X", "0x") }),
+      // Proved by another account, as a check read for another one says, or sent from here as another: someone else's.
+      pays("e", { stage: "ready_to_finalize", stageSubmitter: duskAccountEvmAddress(OTHER) }),
+      pays("f", { proofAccount: OTHER, proveHash: "ef".repeat(32), stage: "ready_to_finalize" }),
+      pays("g", { provenByOther: true, stage: "ready_to_prove" }),
+    ],
+    (id) => routes[id],
+    ACCOUNT,
+  );
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(groups).map(([key, list]) => [key, list.map((entry) => entry.id)])),
+    { done: [], failed: [], needs: ["b", "a"], other: ["g", "f", "e"], progress: ["d", "c"] },
+  );
 });
 
 const migrateInput = (amountLux, account) =>

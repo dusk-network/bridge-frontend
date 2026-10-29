@@ -471,6 +471,22 @@ test("a deposit waits while the adapter hasn't seen it, and fails with its Dusk 
   assert.match((await tracking.refresh(entry, ROUTES.deposit)).note, /isn't a DuskEVM deposit/u);
 });
 
+test("a withdrawal's check keeps whose proof its stage is: the account it was read for", async () => {
+  // Read for the withdrawal's recipient, with no wallet connected: its proof, not the user's.
+  const recipient = `0x${"3d".repeat(20)}`;
+  const tracking = createTracking({
+    config: cfg,
+    node: node(),
+    now: () => 1_793_100_000_000,
+    rpc: fakeRpc({}),
+    withdrawals: {
+      loadWithdrawalStatus: async () => ({ blockNumber: 50n, details: { amountWei: 10n ** 17n }, proofSubmitter: recipient, stage: "ready_to_finalize", withdrawal: { gasLimit: 519_542n } }),
+    },
+  });
+  const checked = await tracking.refresh({ hash: EVM_HASH, routeId: ROUTES.withdrawal.id }, ROUTES.withdrawal);
+  assert.deepEqual([checked.stage, checked.stageSubmitter], ["ready_to_finalize", recipient]);
+});
+
 test("a withdrawal follows its stages, and a sent proof waits for Dusk", async () => {
   let status = { blockNumber: 50n, details: { amountWei: 10n ** 17n }, stage: "ready_to_prove", withdrawal: { gasLimit: 519_542n } };
   let error = null;

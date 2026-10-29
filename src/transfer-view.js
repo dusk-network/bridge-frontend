@@ -17,7 +17,7 @@ import {
 } from "./format.js";
 import { networkName, tokenName } from "./names.js";
 import { aboutTime, lateAfterSeconds, routeTime } from "./route-times.js";
-import { STATUS_WORDS } from "./tracking.js";
+import { STATUS_WORDS, duskAccountEvmAddress } from "./tracking.js";
 import { WITHDRAWAL_GAS_REFUSAL } from "./gas.js";
 
 export const html = (value) =>
@@ -91,12 +91,47 @@ export function friendlyWalletError(error, wallet = "dusk") {
 export const proverMismatch = (entry, submitter) =>
   Boolean(entry?.proveHash && entry.proofSubmitter && submitter && String(entry.proofSubmitter).toLowerCase() !== String(submitter).toLowerCase());
 
+/** The stages at which the Portal holds a proof for the account a check was read for. */
+const PROVED_STAGES = new Set(["proven_waiting", "ready_to_finalize", "finalize_submitted"]);
+
+let submitterFor = { account: null, submitter: null };
+/** The address the Portal knows a Dusk account's proofs by, in lower case: null for no account. */
+function submitterOf(account) {
+  if (submitterFor.account !== account) {
+    let submitter = null;
+    try {
+      submitter = duskAccountEvmAddress(account).toLowerCase();
+    } catch {}
+    submitterFor = { account, submitter };
+  }
+  return submitterFor.submitter;
+}
+
 /**
- * Whether a withdrawal pays a Dusk account other than `owner`, the one the
- * page is for: Dusk Wallet's, or the followed one. None known, none is.
+ * Whether `owner` proved the withdrawal: with a proof or claim sent from this
+ * browser, or as a check read for `owner`'s own account says
+ * (`stageSubmitter`). A check read for another account, as the recipient's
+ * with no wallet connected, says nothing of `owner`'s proof.
  */
-export const paysSomeoneElse = (entry, route, owner) =>
-  route?.mode === "duskevm-withdrawal" && Boolean(owner) && Boolean(entry?.destination) && entry.destination !== owner;
+export function provedBy(entry, owner) {
+  if (!owner || !entry) return false;
+  if ((entry.proveHash || entry.pendingAction) && entry.proofAccount === owner) return true;
+  if (!PROVED_STAGES.has(entry.stage) || !entry.stageSubmitter) return false;
+  return String(entry.stageSubmitter).toLowerCase() === submitterOf(owner);
+}
+
+/**
+ * Whether a withdrawal is someone else's to finish: it pays a Dusk account
+ * other than `owner`, the one the page is for (Dusk Wallet's, or the
+ * followed one), and nobody, or another account, has proved it. Once `owner`
+ * has, only `owner` can claim with that proof. With no `owner`, none is.
+ */
+export const sentToSomeoneElse = (entry, route, owner) =>
+  route?.mode === "duskevm-withdrawal" &&
+  Boolean(owner) &&
+  Boolean(entry?.destination) &&
+  entry.destination !== owner &&
+  !provedBy(entry, owner);
 
 /** What to do when another account proved it. */
 export const switchToProver = (entry) =>
@@ -306,7 +341,7 @@ export function transferView(entry, { account = "", cfg, locale, name = "", now 
   const amount = amountOf(entry);
   const withdrawal = route.mode === "duskevm-withdrawal";
   // Someone else's DUSK: its steps are never the user's turn, and its action is quiet.
-  const forOther = status === "pending" && paysSomeoneElse(entry, route, owner);
+  const forOther = status === "pending" && sentToSomeoneElse(entry, route, owner);
   // How long the route takes on this network, as every page says it.
   const time = routeTime(route, cfg, { ...timing, now });
   const options = { account, locale, name, now, time, timeZone, year };

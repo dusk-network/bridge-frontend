@@ -95,7 +95,9 @@ export const stepFeeText = (inputs) => `up to ${formatMaxFee(withdrawalStepMax(i
  * known. Nothing arrives from DuskEVM without the two steps on Dusk, so a
  * withdrawal says when they can be taken: sent now and proved about an
  * output later, "Claim from about 5 Nov, 12:28 CET", over "Claim 7 days after
- * you prove. You can prove about 30 minutes after sending."
+ * you prove. You can prove about 30 minutes after sending." The date waits
+ * for the longer of the proof's maturity and the game's finality (`wait`),
+ * as the Portal does.
  */
 function arrivesRow(route, cfg, { locale, timeZone, timing } = {}) {
   const time = routeTime(route, cfg, timing);
@@ -103,7 +105,7 @@ function arrivesRow(route, cfg, { locale, timeZone, timing } = {}) {
     if (!time?.maturity) return [];
     if (!time.prove) return [{ detail: "", key: "when", label: "When", value: claimAfterProving(time.maturity) }];
     const now = timing?.now ?? Date.now();
-    const at = now + (time.prove + time.maturity) * 1_000;
+    const at = now + (time.prove + (time.wait ?? time.maturity)) * 1_000;
     const when = (ms) => formatDateTime(ms, { locale, now, timeZone });
     return [{ detail: beforeProofText(time), key: "when", label: "When", value: claimText({ at, exact: false }, when) }];
   }
