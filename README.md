@@ -155,7 +155,8 @@ height × 10, which the latest block converts to a date; the others count block
 time, a second later for their strict comparisons.
 
 - Before the proof: "Claim 7 days after you prove. You can prove about 30
-  minutes after sending.", with the chain's figures.
+  minutes after sending.", with the chain's figures. Before sending, the
+  review dates it too: "Claim from about 5 Nov, 12:28 CET".
 - After it: "Claim from 2 Nov, 04:20 CET" once the game has resolved, and
   "Claim from about …", the earliest it can be, before that. A game left
   unresolved more than an hour past its clock is late: "Waiting for DuskEVM

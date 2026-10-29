@@ -51,6 +51,20 @@ export function duskNameProblem(name) {
   return `${name} isn't a valid .dusk name.`;
 }
 
+/**
+ * The .dusk name a name typed without its ending, or with a dot after it,
+ * likely means: "alice" or "alice.dusk." for alice.dusk, as the wallets offer
+ * it. Nothing is looked up. Null for anything else, as an address: one with
+ * a capital after its first letter, or an EVM address.
+ */
+export function asDuskName(input) {
+  const typed = String(input ?? "").trim().replace(/\.+$/u, "");
+  if (!typed || /[A-Z]/u.test(typed.slice(1)) || /^0x[0-9a-f]*$/iu.test(typed)) return null;
+  const labels = typed.toLowerCase().split(".");
+  const named = labels.at(-1) === "dusk" ? labels.slice(0, -1) : labels;
+  return named.length > 0 && named.length <= 4 && named.every((label) => NAME_LABEL.test(label)) ? `${named.join(".")}.dusk` : null;
+}
+
 /** The typed .dusk name to look up, in lower case, or "" for anything else. */
 export function nameToLookUp(value) {
   const name = String(value ?? "").trim().toLowerCase();
@@ -60,8 +74,10 @@ export function nameToLookUp(value) {
 /**
  * A Dusk recipient: `{ address }` for an account, `{ address, name }` for a
  * name whose lookup found its public account, `{ name, pending: true }` while
- * it's looked up, or `{ error }`. `lookups` maps lower-case names to what
- * their lookup gave: `{ account }`, `{ status }` or `{ failed: true }`.
+ * it's looked up, or `{ error }`, with the .dusk name it likely is
+ * (`suggest`) where it reads as one typed without its ending. `lookups` maps
+ * lower-case names to what their lookup gave: `{ account }`, `{ status }` or
+ * `{ failed: true }`.
  */
 export function checkDuskRecipient(input, lookups = {}) {
   const value = String(input ?? "").trim();
@@ -69,7 +85,8 @@ export function checkDuskRecipient(input, lookups = {}) {
     try {
       return { address: normalizeDuskAddress(value) };
     } catch {
-      return { error: NOT_DUSK_RECIPIENT };
+      const suggest = asDuskName(value);
+      return suggest ? { error: NOT_DUSK_RECIPIENT, suggest } : { error: NOT_DUSK_RECIPIENT };
     }
   }
   const name = value.toLowerCase();

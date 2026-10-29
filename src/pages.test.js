@@ -83,6 +83,11 @@ test("the card's route row gives each route its time and cost in one line", () =
   assert.equal(routeLine(from("ethereum"), mainnet), "~70 min · two wallet steps · fee in ETH");
   assert.equal(routeLine(from("bsc"), mainnet), "~1 hour · two wallet steps · fee in BNB");
 });
+test("a name typed without .dusk is offered as the .dusk name, under the recipient", () => {
+  const vm = cardVmFor({ to: { ...cardVmFor().to, editing: true, error: "That isn't a Dusk account or a .dusk name.", input: "alice", suggest: "alice.dusk" } });
+  assert.equal(cardRegions(vm)["recipient-note"], '<button type="button" class="linkish" data-action="recipient-suggest">Did you mean alice.dusk?</button>');
+});
+
 test("the review checks the facts first, then lists the wallet's lines with full addresses", async () => {
   const route = T.migration;
   const lux = 1_000_000_000_000n;

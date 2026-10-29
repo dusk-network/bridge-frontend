@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createReviewSession, sameSigner, sentActionPatch } from "./review-session.js";
+import { SIGNER_MOVED, createReviewSession, notSent, sameSigner, sentActionPatch } from "./review-session.js";
+import { WALLET_CANCELLED } from "./transfer-view.js";
 
 test("a request prepared for a closed review never fills the next one, even on the same route", async () => {
   const reviews = createReviewSession();
@@ -67,4 +68,19 @@ test("a sent proof records the account its review was for, not the one connected
     stage: "prove_submitted",
   });
   assert.equal(sentActionPatch({ kind: "finalize", signer: { account: "A" } }, "h", () => "x").stage, "finalize_submitted");
+});
+
+test("a request that wasn't sent says why on the review and in the page's live region alike", () => {
+  // Joost's deposit, rejected in the wallet: the live region says that, never
+  // an older transfer's arrival.
+  const said = [];
+  const announce = (text) => said.push(text);
+  const deposit = notSent({ busy: true }, { code: 4001, message: "User rejected the request." }, { announce });
+  assert.deepEqual([deposit.busy, deposit.error, deposit.stale], [false, WALLET_CANCELLED, undefined]);
+  // The wallet came back as another account: the review can't be confirmed.
+  const moved = notSent({ busy: true }, { code: "DUSK_ACCOUNT_CHANGED" }, { announce });
+  assert.deepEqual([moved.error, moved.stale], [SIGNER_MOVED.dusk, true]);
+  // Anything else in plain words, naming the wallet that refused.
+  notSent({}, { code: 4100 }, { announce, wallet: "evm" });
+  assert.deepEqual(said, [WALLET_CANCELLED, SIGNER_MOVED.dusk, "The EVM wallet is locked. Unlock it, reconnect, and try again."]);
 });

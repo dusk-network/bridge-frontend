@@ -122,11 +122,15 @@ export function quoteRows(quote) {
     .join("");
 }
 
-/** Under the recipient: the account a typed name points to, the lookup, or the capitals' fix. */
+/**
+ * Under the recipient: the account a typed name points to, the lookup, the
+ * capitals' fix, or the .dusk name a bare name likely is.
+ */
 function recipientNote(to) {
   if (to.resolved) return `${html(to.resolved.name)} points to <code class="mono wrap">${html(to.resolved.address)}</code>`;
   if (to.looking) return `Looking up ${html(to.looking)}…`;
   if (to.fix) return `<button type="button" class="linkish" data-action="recipient-fix">If every character is right, fix the capitals</button>`;
+  if (to.suggest) return `<button type="button" class="linkish" data-action="recipient-suggest">Did you mean ${html(to.suggest)}?</button>`;
   return "";
 }
 

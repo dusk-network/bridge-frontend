@@ -3,8 +3,8 @@
 // balances, prices and gas estimates come in, so it's the same before and
 // after the wallet opens.
 
-import { claimAfterProving, provingAfterSending } from "./claim-date.js";
-import { aboutFee, formatDusk, formatLux, formatMaxFee, formatTypicalFee, formatUnitsGrouped } from "./format.js";
+import { beforeProofText, claimAfterProving, claimText } from "./claim-date.js";
+import { aboutFee, formatDateTime, formatDusk, formatLux, formatMaxFee, formatTypicalFee, formatUnitsGrouped } from "./format.js";
 import {
   DEPOSIT_GAS_LIMIT,
   DEPOSIT_GAS_TYPICAL,
@@ -93,15 +93,20 @@ export const stepFeeText = (inputs) => `up to ${formatMaxFee(withdrawalStepMax(i
 /**
  * When it arrives, as a quote row: none where this network's time isn't
  * known. Nothing arrives from DuskEVM without the two steps on Dusk, so a
- * withdrawal says when they can be taken: "Claim 7 days after you prove. You
- * can prove about 30 minutes after sending."
+ * withdrawal says when they can be taken: sent now and proved about an
+ * output later, "Claim from about 5 Nov, 12:28 CET", over "Claim 7 days after
+ * you prove. You can prove about 30 minutes after sending."
  */
-function arrivesRow(route, cfg, timing) {
+function arrivesRow(route, cfg, { locale, timeZone, timing } = {}) {
   const time = routeTime(route, cfg, timing);
-  if (route.mode === "duskevm-withdrawal")
-    return time?.maturity
-      ? [{ detail: time.prove ? provingAfterSending(time.prove) : "", key: "when", label: "When", value: claimAfterProving(time.maturity) }]
-      : [];
+  if (route.mode === "duskevm-withdrawal") {
+    if (!time?.maturity) return [];
+    if (!time.prove) return [{ detail: "", key: "when", label: "When", value: claimAfterProving(time.maturity) }];
+    const now = timing?.now ?? Date.now();
+    const at = now + (time.prove + time.maturity) * 1_000;
+    const when = (ms) => formatDateTime(ms, { locale, now, timeZone });
+    return [{ detail: beforeProofText(time), key: "when", label: "When", value: claimText({ at, exact: false }, when) }];
+  }
   const value = routeTimeText(time);
   return value ? [{ key: "arrives", label: "Arrives", value }] : [];
 }
@@ -119,6 +124,8 @@ function arrivesRow(route, cfg, timing) {
  * @param {bigint} [ctx.allowanceWei] the migration contract's allowance
  * @param {bigint | null} [ctx.gasCoinBalance] ETH, BNB or DuskEVM DUSK for EVM gas, in wei
  * @param {object} [ctx.timing] what `routeTime` reads the route's time from
+ * @param {string} [ctx.locale] for tests: whose clock a date is written on; the viewer's otherwise
+ * @param {string} [ctx.timeZone] for tests; the viewer's own otherwise
  */
 export function buildQuote(route, amount, ctx) {
   const { cfg } = ctx;
@@ -158,7 +165,7 @@ export function buildQuote(route, amount, ctx) {
         strong: true,
         value: receive === null || receive <= 0n ? "—" : `${formatLux(receive)} ${routeUnits(route).receive} on ${to}`,
       },
-      ...arrivesRow(route, cfg, ctx.timing),
+      ...arrivesRow(route, cfg, ctx),
     );
     if (lux !== null) quote.leaves = `up to ${formatLux(lux + fee.maxLux)} DUSK`;
     return quote;
@@ -195,7 +202,7 @@ export function buildQuote(route, amount, ctx) {
         value: evmFee === null ? `paid in ${coin}` : aboutFee(evmFee, 18, coin),
       },
       { key: "receive", label: "You receive", strong: true, value: lux === null ? "—" : `${formatDusk(lux)} on ${to}` },
-      ...arrivesRow(route, cfg, ctx.timing),
+      ...arrivesRow(route, cfg, ctx),
     );
     return quote;
   }
@@ -234,7 +241,7 @@ export function buildQuote(route, amount, ctx) {
       value: stepFeeText({ gasPrice: ctx.gasPrice ?? 1n }),
     },
     { key: "receive", label: "You receive", strong: true, value: lux === null ? "—" : `${formatDusk(lux)} on ${to}` },
-    ...arrivesRow(route, cfg, ctx.timing),
+    ...arrivesRow(route, cfg, ctx),
   );
   return quote;
 }

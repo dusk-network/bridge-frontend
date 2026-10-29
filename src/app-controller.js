@@ -42,7 +42,7 @@ import { createLookupFlow } from "./lookup-flow.js";
 import { createReceiptLookups } from "./receipt-lookups.js";
 import { checkDuskRecipient, checkEvmRecipient, nameToLookUp, settledEvmRecipient } from "./recipient.js";
 import { readWatched, saveWatched, watchTarget } from "./watched-account.js";
-import { createReviewSession, sameSigner, sentActionPatch } from "./review-session.js";
+import { SIGNER_MOVED, createReviewSession, notSent, sameSigner, sentActionPatch } from "./review-session.js";
 import { createScheduler, takenByAnother } from "./tracking.js";
 import { actionErrorOf, friendlyWalletError, html, privacyLine, proverMismatch, short, switchToProver, transferView } from "./transfer-view.js";
 import {
@@ -496,6 +496,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       error: typed?.error ?? "",
       fix: typed?.fix ?? "",
       input: state.form.recipientInput,
+      // "alice" for alice.dusk, as the wallets offer it.
+      suggest: typed?.suggest ?? "",
       label: `Recipient on ${to}`,
       line,
       looking: typed?.pending ? typed.name : "",
@@ -893,10 +895,6 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   // A review is for the account it was opened with. When the wallet switches,
   // confirming would sign as another, so the review says so and can't be confirmed.
   const signerNow = (wallet) => (wallet === "evm" ? evmAccount() : duskAccount());
-  const SIGNER_MOVED = {
-    dusk: "Dusk Wallet switched to another account since this review opened. Close it and review again.",
-    evm: "Your EVM wallet switched to another account since this review opened. Close it and review again.",
-  };
   function signerMoved(review) {
     if (!review?.signer || sameSigner(review, signerNow(review.signer.wallet))) return false;
     review.stale = true;
@@ -1259,13 +1257,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       });
     } catch (error) {
       if (reviews.current === review) {
-        review.busy = false;
-        // A reconnect came back as another account: the review is stale.
-        if (error?.code === "DUSK_ACCOUNT_CHANGED") review.stale = true;
-        review.error =
-          error?.code === "DUSK_ACCOUNT_CHANGED"
-            ? SIGNER_MOVED.dusk
-            : friendlyWalletError(error, review.kind === "send" && route.signer === "evm" ? "evm" : "dusk");
+        // Why, on the review and in the live region: a cancel is heard as a cancel.
+        notSent(review, error, { announce, wallet: review.kind === "send" && route.signer === "evm" ? "evm" : "dusk" });
         if (review.entryId) {
           // Kept on the transfer: its receipt says so behind the sheet, grey when you cancelled.
           setActivity(updateActivity(review.entryId, { actionError: actionErrorOf(error) }));
@@ -1537,6 +1530,16 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         state.form.recipientInput = fix;
         renderMain();
         root.querySelector("#recipient")?.focus();
+        loadGasSoon();
+      },
+      // "Did you mean alice.dusk?": the name goes in the field and is looked up.
+      "recipient-suggest": () => {
+        const name = typedRecipient(formRoute())?.suggest;
+        if (!name) return;
+        state.form.recipientInput = name;
+        renderMain();
+        root.querySelector("#recipient")?.focus();
+        lookUpRecipientName();
         loadGasSoon();
       },
       "recipient-reset": () => {
