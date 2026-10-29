@@ -4,7 +4,7 @@
 // and how long the route takes on this network; no balances, no network
 // requests.
 
-import { formatEvmAddress, shortAccount } from "@dusk-network/networks/format";
+import { formatContractId, formatEvmAddress, shortAccount } from "@dusk-network/networks/format";
 
 import { claimText } from "./claim-date.js";
 import {
@@ -41,12 +41,17 @@ export function explorerTxUrl(cfg, network, hash) {
 }
 
 /**
- * As every Dusk app shortens them: "0xd63b…8DF4" for EVM addresses, with
- * their checksum's capitals; "rz2gFT…3VGXyt" for Dusk accounts and hashes.
+ * As every Dusk app shortens them (@dusk-network/networks/format): EVM
+ * addresses "0xd63b…8DF4", with their checksum's capitals, and EVM
+ * transactions "0x04a8…3213"; Dusk accounts, hashes and contract IDs
+ * "rz2gFT…3VGXyt".
  */
 export function short(value) {
-  const text = String(value ?? "");
-  return /^0x[0-9a-f]{40}$/iu.test(text) ? formatEvmAddress(text, { short: true }) : shortAccount(text);
+  const text = String(value ?? "").trim();
+  if (/^0x[0-9a-f]{40}$/iu.test(text)) return formatEvmAddress(text, { short: true });
+  if (/^0x[0-9a-f]{64}$/iu.test(text)) return `${text.slice(0, 6)}…${text.slice(-4)}`.toLowerCase();
+  if (/^[0-9a-f]{64}$/iu.test(text)) return formatContractId(text, { short: true });
+  return shortAccount(text);
 }
 
 /** The action a withdrawal's stage waits for, if the user can take it now. */
@@ -155,7 +160,7 @@ function withdrawalSteps(entry, cfg, { account, locale, name, now, time: usual, 
   });
   let prove;
   if (proved)
-    prove = step("prove", "Proven on Dusk", "done", {
+    prove = step("prove", "Proved on Dusk", "done", {
       at: entry.provenAt ?? entry.proveAt ?? null,
       atText: time(entry.provenAt ?? entry.proveAt),
       detail: entry.proveHash ? "By you" : "",
@@ -383,8 +388,8 @@ function trackerWhen(item, entry, timeZone) {
 function trackerLabel(item, entry, now) {
   if (item.key === "sent") return "Sent";
   if (item.key === "prove") {
-    if (item.state === "done") return entry.proveHash ? "Proven by you" : "Proven";
-    if (entry.provenByOther) return "Proven by another";
+    if (item.state === "done") return entry.proveHash ? "Proved by you" : "Proved";
+    if (entry.provenByOther) return "Proved by another";
     return item.state === "turn" ? "Prove now" : "Prove";
   }
   if (item.state === "done") return "Claimed";
@@ -414,7 +419,7 @@ export function transferSubline(view, entry, route, cfg, { account = "", locale,
     // A rejected proof never matures: it's proved again, once there's a new output.
     if (stage === "proven_waiting" && entry.proofRejected) return REJECTED_PROOF;
     if (stage === "proven_waiting") {
-      if (!view.countdown) return view.time?.maturity ? `Claim ${afterTheProof(view.time)}` : "Proven";
+      if (!view.countdown) return view.time?.maturity ? `Claim ${afterTheProof(view.time)}` : "Proved";
       return view.countdown.overdue ? view.countdown.line : `${view.countdown.line} · ${view.countdown.left} left`;
     }
     if (!entry.sourceAt) return "Waiting for DuskEVM";

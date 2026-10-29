@@ -50,6 +50,11 @@ test("short forms are the same everywhere: 0x and 4 + 4, or 6 + 6", () => {
   // An address kept in lower case reads with its checksum's capitals, as wallets write it.
   assert.equal(short(EVM.toLowerCase()), "0x3E5B…a11d");
   assert.equal(short(ACCOUNT), "21n5nc…fMMLNz");
+  // An EVM transaction is cut as an EVM address is.
+  assert.equal(short("0x04a8a8977dd251da49bd8997cf4d063ddc385f8d29b437b119bb3c79c11b3213"), "0x04a8…3213");
+  // Dusk hashes and contract IDs: 6 + 6, in lower case.
+  assert.equal(short(DUSK_HASH), "cecece…cecece");
+  assert.equal(short("14EEB3d4021aff09af2c515603a01f8d956a7f6411d11a1b1c0b0561a93fb1b9"), "14eeb3…3fb1b9");
   assert.equal(short("abc"), "abc");
 });
 
@@ -145,7 +150,7 @@ test("a withdrawal shows its three steps, their times and the next action", () =
   // Not "your withdrawal": it may pay another account.
   assert.equal(namedView.title, "Prove the withdrawal of 1,008 DUSK");
   assert.equal(other.action.kind, "prove");
-  assert.equal(other.tracker[1].label, "Proven by another");
+  assert.equal(other.tracker[1].label, "Proved by another");
 
   // Ready to claim with the proof this browser sent: only that account can.
   const proved = { hash: L2_HASH, id: "w", proofAccount: ACCOUNT, proofSubmitter: `0x${"2c".repeat(20)}`, proveHash: "ab".repeat(32), sourceAt: sentAt, stage: "ready_to_finalize", status: "pending" };
@@ -250,7 +255,7 @@ test("a rejected proof isn't shown as proven, and promises no claim", () => {
   assert.equal(transferSubline(view, rejected, withdrawal, cfg, { now: at + 86_400_000 }), "The proof was rejected. Prove again once DuskEVM reports a new output.");
 });
 
-test("a withdrawal's card dates each step: sent, proven, and from when it can be claimed", () => {
+test("a withdrawal's card dates each step: sent, proved, and from when it can be claimed", () => {
   const sentAt = Date.UTC(2026, 8, 24, 10, 0);
   const provenAt = Date.UTC(2026, 8, 25, 10, 0);
   // The claim date is the chain's: none is made up from the proof and a fixed wait.
@@ -267,7 +272,7 @@ test("a withdrawal's card dates each step: sent, proven, and from when it can be
   );
   assert.deepEqual(waiting.tracker.map(({ label, when }) => [label, when]), [
     ["Sent", "24 Sept"],
-    ["Proven", "25 Sept"],
+    ["Proved", "25 Sept"],
     ["Claim in 6 days 23 hours", "from about 2 Oct"],
   ]);
   const html = transferRow({ amountText: "1,008 DUSK", href: "#/t", id: "w", pair: ["dusk-evm", "dusk"], status: "pending", statusWord: "Pending", subline: "", title: "DuskEVM to Dusk", tracker: waiting.tracker });

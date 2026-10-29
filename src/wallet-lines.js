@@ -6,8 +6,8 @@
 // and its Details stay folded), group by group. A `head` line is the window's
 // title, amount and recipient; `gap` starts the window's next group.
 
-import { networkFor, networks, routes } from "@dusk-network/networks";
-import { formatContractId, formatEvmAddress } from "@dusk-network/networks/format";
+import { labelFor, networkFor, networks, routes } from "@dusk-network/networks";
+import { formatContractId, formatEvmAddress, shortAccount } from "@dusk-network/networks/format";
 
 import { decodeDepositArgs } from "./dusk-deposit.js";
 import { sha256Hex } from "./data-driver.js";
@@ -63,12 +63,6 @@ export async function argsSummary(bytes) {
 
 // ---- Dusk Wallet's forms ----------------------------------------------------
 
-/** "213qXN…V5JJ9Y": the first and last characters around "…", or all of a short value. */
-export const middle = (value, head, tail) => {
-  const text = String(value ?? "");
-  return text.length <= head + tail + 3 ? text : `${text.slice(0, head)}…${text.slice(-tail)}`;
-};
-
 /**
  * A maximum, fee or total, as Dusk Wallet writes it: exact to 4 decimals,
  * rounded up past them so it never reads lower than it can be, trailing
@@ -121,7 +115,7 @@ export function migrateLines({ amountLux, cfg, duskAccount, fee, network }) {
   return [
     chainLine(cfg, network),
     { address: chain.migrationContract, label: "Interacting with", network, value: "Dusk migration contract" },
-    { label: "Function", mono: true, value: "migrate" },
+    { label: "Method", mono: true, value: "migrate" },
     {
       label: "amount",
       mono: true,
@@ -145,7 +139,7 @@ export function withdrawLines({ amountLux, cfg, duskAccount, fee }) {
     chainLine(cfg, "dusk-evm"),
     { address: cfg.duskEvm.predeploys.l2StandardBridge, label: "Interacting with", network: "dusk-evm", value: "Bridge on DuskEVM" },
     { label: "Amount", value: formatDusk(amountLux) },
-    { label: "Function", mono: true, value: "bridgeETHTo" },
+    { label: "Method", mono: true, value: "bridgeETHTo" },
     {
       address: duskAccount,
       label: "Recipient on Dusk",
@@ -173,24 +167,29 @@ const feeLines = (gas, spentLux) => [
 const fromLine = (from, name = "") =>
   name
     ? { full: from, label: "From", suffix: "Public", value: name }
-    : { full: from, label: "From", mono: true, note: "Or your .dusk name, if you have one.", suffix: "Public", value: middle(from, 6, 6) };
+    : { full: from, label: "From", mono: true, note: "Or your .dusk name, if you have one.", suffix: "Public", value: shortAccount(from) };
 
-// Under Details, folded as the window folds them: the function, the call
+// Under Details, folded as the window folds them: the method, the call
 // data's size and hash, and the site's own words.
 const siteLine = (display) =>
   display === undefined || display === null
     ? []
     : [{ fold: true, label: "From the site, not checked by the wallet", mono: true, value: JSON.stringify(display) }];
 
-/** The call as a person checks it, the contract and what it sends; its function and hash under Details. */
-async function callRows({ contractId, depositLux, fnArgs, fnName, from, fromName, note, read }) {
-  // Without 0x, as the window writes a Dusk contract.
+/**
+ * The call as a person checks it, the contract and what it sends; its method
+ * and hash under Details. The contract reads as the window writes it: by the
+ * name its network gives it, then its ID without 0x, 6…6.
+ */
+async function callRows({ chainId, contractId, depositLux, fnArgs, fnName, from, fromName, note, read }) {
   const id = formatContractId(contractId);
+  const net = networkFor(chainId);
+  const name = net ? labelFor(net, id) : null;
   return [
     ...(from ? [fromLine(from, fromName)] : []),
-    { full: id, gap: !from, label: "Contract", mono: true, note, value: middle(id, 8, 8) },
+    { full: id, gap: !from, label: "Contract", mono: true, ...(name ? { name } : { note }), value: formatContractId(id, { short: true }) },
     ...(depositLux > 0n ? [{ label: "Deposit", value: `${formatLux(depositLux)} DUSK` }] : []),
-    { fold: true, label: "Function", mono: true, value: fnName },
+    { fold: true, label: "Method", mono: true, value: fnName },
     {
       fold: true,
       label: "Call data",
@@ -254,7 +253,7 @@ export function duskTransferLines({ amountLux, chainId, from, fromName = "", gas
   const service = walletServiceRoute(chainId, to);
   if (!service)
     return [
-      { amount: `${formatLux(amountLux)} DUSK`, kind: "head", title: "Pay", to: middle(to, 6, 6), toFull: to },
+      { amount: `${formatLux(amountLux)} DUSK`, kind: "head", title: "Pay", to: shortAccount(to), toFull: to },
       ...feeLines(gas, amountLux),
       { ...fromLine(from, fromName), gap: true },
       { address: to, label: "To", network: "dusk" },
@@ -278,7 +277,7 @@ export function duskTransferLines({ amountLux, chainId, from, fromName = "", gas
       sub: `${formatLux(sent)} DUSK sent · ${formatLux(service.feeLux)} DUSK bridge fee · ${arrives}`,
       tag: "Known bridge account",
       title: `Bridge to ${chain}`,
-      ...(recipientOk ? { to: middle(recipient, 6, 4), toFull: recipient, where: `on ${chain}` } : {}),
+      ...(recipientOk ? { to: formatEvmAddress(recipient, { short: true }), toFull: recipient, where: `on ${chain}` } : {}),
     },
     ...feeLines(gas, sent),
     { ...fromLine(from, fromName), gap: true },
@@ -298,7 +297,7 @@ export function duskTransferLines({ amountLux, chainId, from, fromName = "", gas
 export async function duskCallLines({ chainId, contractId, depositLux = 0n, display, fnArgs, fnName, from, fromName = "", gas, note, withdrawal }) {
   const deposit = BigInt(depositLux ?? 0n);
   const kind = bridgeCallKind({ chainId, contractId, fnName });
-  const call = { contractId, depositLux: deposit, fnArgs, fnName, fromName, note };
+  const call = { chainId, contractId, depositLux: deposit, fnArgs, fnName, fromName, note };
 
   const args = kind === "deposit" ? readDeposit(fnArgs) : null;
   if (args) {
@@ -309,7 +308,7 @@ export async function duskCallLines({ chainId, contractId, depositLux = 0n, disp
         kind: "head",
         tag: args.amountLux === deposit ? "Known DuskEVM bridge call" : "",
         title: "Bridge to DuskEVM",
-        to: middle(args.to, 6, 4),
+        to: formatEvmAddress(args.to, { short: true }),
         toFull: args.to,
         where: "on DuskEVM",
       },
@@ -339,7 +338,7 @@ export async function duskCallLines({ chainId, contractId, depositLux = 0n, disp
             : "Claiming pays this DUSK to the account above. You pay only the network fee.",
         tag: "Known DuskEVM bridge call",
         title: kind === "prove" ? "Prove a DuskEVM withdrawal" : "Claim a DuskEVM withdrawal",
-        to: middle(pays.account ?? pays.contractId, 6, 6),
+        to: pays.account ? shortAccount(pays.account) : formatContractId(pays.contractId, { short: true }),
         toFull: pays.account ?? pays.contractId,
         where: pays.account ? "on Dusk" : "on Dusk, a contract",
       },
@@ -354,7 +353,7 @@ export async function duskCallLines({ chainId, contractId, depositLux = 0n, disp
     ];
   }
 
-  // Any other call: "Contract call", with what it sends and its function.
+  // Any other call: "Contract call", with what it sends and its method.
   return [
     { amount: deposit > 0n ? `${formatLux(deposit)} DUSK` : "", kind: "head", title: "Contract call" },
     ...(await callRows({ ...call, from, read: false })),

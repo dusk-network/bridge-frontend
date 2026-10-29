@@ -252,8 +252,8 @@ export function receiptModel(entry, { cfg, gasPrice = 1n, locale, now = Date.now
     details.push({ label: "You receive", value: formatDusk(view.amount - BigInt(cfg.service.feeLux) > 0n ? view.amount - BigInt(cfg.service.feeLux) : 0n) });
   }
   // The record: each fee as it was paid, to the last decimal.
-  if (entry.feeLux) details.push({ label: "Network fee paid", value: `${formatExactFee(BigInt(entry.feeLux))} DUSK on ${from}` });
-  if (entry.feeWei) details.push({ label: "Network fee paid", value: `${formatUnitsGrouped(BigInt(entry.feeWei), 18)} ${gasCoin(cfg, route.from.id)} on ${from}` });
+  if (entry.feeLux) details.push({ label: "Fee paid", value: `${formatExactFee(BigInt(entry.feeLux))} DUSK on ${from}` });
+  if (entry.feeWei) details.push({ label: "Fee paid", value: `${formatUnitsGrouped(BigInt(entry.feeWei), 18)} ${gasCoin(cfg, route.from.id)} on ${from}` });
   if (entry.proveFeeLux) details.push({ label: "Proof fee paid", value: `${formatExactFee(BigInt(entry.proveFeeLux))} DUSK on Dusk` });
   if (entry.claimFeeLux) details.push({ label: "Claim fee paid", value: `${formatExactFee(BigInt(entry.claimFeeLux))} DUSK on Dusk` });
   if (entry.sender) details.push({ html: addressHtml(cfg, sourceNetwork, entry.sender, `sender on ${from}`), label: `From, on ${from}` });
@@ -267,7 +267,7 @@ export function receiptModel(entry, { cfg, gasPrice = 1n, locale, now = Date.now
     details.push({
       html: proof
         ? txHtml(cfg, "dusk", proof, "proof transaction")
-        : `<span class="t2">${proven ? "Proven" : entry.provenByOther ? "Only by another account" : "Not proven yet"}</span>`,
+        : `<span class="t2">${proven ? "Proved" : entry.provenByOther ? "Only by another account" : "Not proved yet"}</span>`,
       label: "Proof on Dusk",
     });
     const claim = entry.claimHash ?? pendingClaim;

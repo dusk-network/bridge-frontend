@@ -237,11 +237,14 @@ export function walletLines(lines, cfgLinks) {
   const head = lines.find((line) => line.kind === "head");
   const row = (line) => {
     const text = `<span class="${line.mono ? "mono wrap" : "num"}"${line.full ? ` title="${html(line.full)}"` : ""}>${html(line.value)}</span>`;
+    // A contract by its network's name reads "DuskEVM bridge · 2257e5…a1b31d", the "·" kept with its ID.
     const value = line.address
       ? `${line.value ? `<span class="wl-name">${html(line.value)}</span>` : ""}${fullValue({ explorer: cfgLinks.explorer(line.network, line.address), label: line.label, value: line.address })}`
-      : line.suffix
-        ? `<span>${text}<span class="t2"> · ${html(line.suffix)}</span></span>`
-        : text;
+      : line.name
+        ? `<span class="wl-contract"><span class="wl-name">${html(line.name)}</span> <span class="wl-id">· ${text}</span></span>`
+        : line.suffix
+          ? `<span>${text}<span class="t2"> · ${html(line.suffix)}</span></span>`
+          : text;
     return `<div class="wl${line.gap ? " gap" : ""}"><dt>${html(line.label)}</dt><dd>${value}${line.note ? `<span class="wl-note">${html(line.note)}</span>` : ""}</dd></div>`;
   };
   const shown = lines.filter((line) => line.kind !== "head" && !line.fold);

@@ -229,8 +229,9 @@ The page writes times, IDs and fees as every Dusk app does
 (`@dusk-network/networks/format`): times in English words on the viewer's
 clock, with the zone ("Today, 14:05 CET", records in full: "Wed 28 Oct
 2026, 14:05 CET"); Dusk contract IDs without 0x and EVM addresses with their
-checksum; the most a fee can be rounded up, and the fee a transfer paid
-exact in its receipt's details.
+checksum, shortened as 6…6 for Dusk IDs, accounts and hashes and as 0x and
+4…4 for EVM addresses and transactions; the most a fee can be rounded up,
+and the fee a transfer paid exact in its receipt's details.
 
 The footer and About this page link the Terms of use and Privacy policy the
 network's file names, as the explorer does. A deployment can link its own

@@ -12,7 +12,7 @@ import { activityPanel, cardPage, cardRegions, contractsSheet, footer, header, n
 import { encodeDepositArgs } from "./dusk-deposit.js";
 import { formatDateTime } from "./format.js";
 import { chainMark, pairMark } from "./icons.js";
-import { approveLines, duskCallLines, duskTransferLines, middle, migrateLines, walletFee } from "./wallet-lines.js";
+import { approveLines, duskCallLines, duskTransferLines, migrateLines, walletFee } from "./wallet-lines.js";
 
 const DUSKEVM = {
   VITE_DUSKEVM_DISPUTE_GAME_FACTORY_CONTRACT_ID: "3b7d562aa0e6b94ce29c5ce2a6f0587ad771afdace86abb0baf66f93e49548cd",
@@ -168,17 +168,18 @@ test("a deposit lists Dusk Wallet's bridge window: what it does, the fee and the
     "DuskEVM recipient", "Amount", "From",
     "Network fee", "Total",
     "Contract", "Deposit",
-    "Function", "Call data", "From the site, not checked by the wallet",
+    "Method", "Call data", "From the site, not checked by the wallet",
   ]);
   assert.deepEqual(groupsOf(lines), ["Network fee", "Contract"]);
-  assert.deepEqual(foldOf(lines), ["Function", "Call data", "From the site, not checked by the wallet"]);
+  assert.deepEqual(foldOf(lines), ["Method", "Call data", "From the site, not checked by the wallet"]);
   assert.equal(valueOf(lines, "DuskEVM recipient").address, SHOT);
   assert.equal(valueOf(lines, "Amount").value, "0.1 DUSK");
   assert.deepEqual([valueOf(lines, "From").value, valueOf(lines, "From").suffix], ["21n5nc…fMMLNz", "Public"]);
   assert.equal(valueOf(lines, "Network fee").value, "up to 0.005 DUSK");
   assert.equal(valueOf(lines, "Total").value, "up to 0.105 DUSK");
-  // A Dusk contract without 0x, as the window writes it (wallet#150).
-  assert.deepEqual([valueOf(lines, "Contract").value, valueOf(lines, "Contract").full], ["2257e5f8…eea1b31d", DUSKEVM.VITE_DUSKEVM_L1_STANDARD_BRIDGE_CONTRACT_ID]);
+  // The contract by its network's name, then its ID without 0x, 6…6, as the window writes it.
+  const contract = valueOf(lines, "Contract");
+  assert.deepEqual([contract.name, contract.value, contract.full, contract.note], ["DuskEVM bridge", "2257e5…a1b31d", DUSKEVM.VITE_DUSKEVM_L1_STANDARD_BRIDGE_CONTRACT_ID, undefined]);
   assert.equal(valueOf(lines, "Call data").value, "40 bytes · sha256=2f64b19f5ac0…731c7c2a");
   assert.equal(valueOf(lines, "Call data").note, "Older Dusk Wallet versions show the call as bytes; check the sha256.");
   assert.equal(valueOf(lines, "Deposit").value, "0.1 DUSK");
@@ -188,8 +189,10 @@ test("a deposit lists Dusk Wallet's bridge window: what it does, the fee and the
   assert.ok(view.includes(`<code class="mono">${SHOT}</code>`));
   assert.match(view, /<div class="wl gap"><dt>Network fee<\/dt>/u);
   assert.match(view, /<span class="mono wrap" title="21n5nc[^"]+">21n5nc…fMMLNz<\/span><span class="t2"> · Public<\/span>/u);
-  // The function, the hash and the site's words sit under Details, as in the window.
-  assert.match(view, /<\/dl><details class="wl-more"><summary>Details<\/summary><dl class="wls"><div class="wl"><dt>Function<\/dt>/u);
+  // Its "·" stays with the ID it belongs to.
+  assert.match(view, /<dt>Contract<\/dt><dd><span class="wl-contract"><span class="wl-name">DuskEVM bridge<\/span> <span class="wl-id">· <span class="mono wrap" title="2257e5f8[0-9a-f]{56}">2257e5…a1b31d<\/span><\/span><\/span><\/dd>/u);
+  // The method, the hash and the site's words sit under Details, as in the window.
+  assert.match(view, /<\/dl><details class="wl-more"><summary>Details<\/summary><dl class="wls"><div class="wl"><dt>Method<\/dt>/u);
   assert.ok(view.indexOf("sha256=") > view.indexOf("<summary>Details</summary>"));
   // With the .dusk name Dusk Wallet sent, From reads as the window does.
   const named = await duskCallLines({ ...shotDeposit, chainId: "dusk:2", from: ACCOUNT, fromName: "alice.dusk" });
@@ -200,9 +203,12 @@ test("a deposit lists Dusk Wallet's bridge window: what it does, the fee and the
   for (const other of [{ chainId: "dusk:1" }, { chainId: "dusk:2", contractId: "ab".repeat(32) }, { chainId: "dusk:2", fnArgs: Uint8Array.from([1, 2, 3]) }]) {
     const plain = await duskCallLines({ ...shotDeposit, ...other, from: ACCOUNT });
     assert.deepEqual(plain[0], { amount: "0.1 DUSK", kind: "head", title: "Contract call" });
-    assert.deepEqual(labelsOf(plain), ["From", "Contract", "Deposit", "Function", "Call data", "Network fee", "Total", "From the site, not checked by the wallet"]);
+    assert.deepEqual(labelsOf(plain), ["From", "Contract", "Deposit", "Method", "Call data", "Network fee", "Total", "From the site, not checked by the wallet"]);
     assert.equal(valueOf(plain, "Call data").note, "Dusk Wallet shows this call as bytes; check the sha256.");
   }
+  // A contract the network doesn't name: its ID alone, 6…6.
+  const unnamed = await duskCallLines({ ...shotDeposit, chainId: "dusk:2", contractId: "AB".repeat(32), from: ACCOUNT, note: "A contract." });
+  assert.deepEqual([valueOf(unnamed, "Contract").name, valueOf(unnamed, "Contract").value, valueOf(unnamed, "Contract").note], [undefined, "ababab…ababab", "A contract."]);
 });
 
 test("a proof or claim lists what the withdrawal pays, to whom, and who sent it", async () => {
@@ -238,7 +244,7 @@ test("a proof or claim lists what the withdrawal pays, to whom, and who sent it"
   assert.deepEqual(labelsOf(prove), [
     "Pays to", "Amount", "Sent from DuskEVM",
     "Network fee", "Total",
-    "Contract", "Function", "Call data",
+    "Contract", "Method", "Call data",
     "From the site, not checked by the wallet",
   ]);
   assert.equal(valueOf(prove, "Pays to").address, ACCOUNT);
@@ -248,7 +254,7 @@ test("a proof or claim lists what the withdrawal pays, to whom, and who sent it"
   // A maximum rounds up past 4 decimals, so it never reads lower than it can be.
   assert.equal(valueOf(prove, "Network fee").value, "up to 0.0506 DUSK");
   assert.equal(valueOf(prove, "Total").value, "up to 0.0506 DUSK");
-  assert.equal(valueOf(prove, "Contract").value, "14eeb3d4…a93fb1b9");
+  assert.deepEqual([valueOf(prove, "Contract").name, valueOf(prove, "Contract").value], ["DuskEVM bridge portal", "14eeb3…3fb1b9"]);
   assert.equal(valueOf(prove, "Call data").value, "3 bytes · sha256=039058c6f2c0…011cfb81");
 
   // A claim for a contract, and an amount finer than a Lux, read as the window reads them.
@@ -268,7 +274,7 @@ test("a proof or claim lists what the withdrawal pays, to whom, and who sent it"
   for (const unread of [undefined, { ...withdrawal, value: 1n }]) {
     const plain = await duskCallLines({ ...portal, withdrawal: unread });
     assert.deepEqual(plain[0], { amount: "", kind: "head", title: "Contract call" });
-    assert.deepEqual(labelsOf(plain), ["From", "Contract", "Function", "Call data", "Network fee", "Total", "From the site, not checked by the wallet"]);
+    assert.deepEqual(labelsOf(plain), ["From", "Contract", "Method", "Call data", "Network fee", "Total", "From the site, not checked by the wallet"]);
   }
 });
 
@@ -314,7 +320,7 @@ test("a transfer to the bridge's account lists Dusk Wallet's bridge window: wher
   }
   // An account the wallet doesn't know as the bridge's: its Pay window, the memo last.
   const pay = transfer(mainnet, { to: ACCOUNT });
-  assert.deepEqual(pay[0], { amount: "2 DUSK", kind: "head", title: "Pay", to: middle(ACCOUNT, 6, 6), toFull: ACCOUNT });
+  assert.deepEqual(pay[0], { amount: "2 DUSK", kind: "head", title: "Pay", to: "21n5nc…fMMLNz", toFull: ACCOUNT });
   assert.deepEqual(labelsOf(pay), ["Network fee", "Total", "From", "To", "Memo"]);
   assert.equal(valueOf(pay, "Memo").value, EVM);
 });
@@ -324,7 +330,6 @@ test("fees and totals read as Dusk Wallet writes them", () => {
   assert.deepEqual([0n, 49_999n, 50_000n, 2_500_000n, 5_000_000n, 105_000_000n, 1_000_010_000n, 12_345_678_912_345n].map(walletFee), [
     "0 DUSK", "0.00005 DUSK", "0.00005 DUSK", "0.0025 DUSK", "0.005 DUSK", "0.105 DUSK", "1.0001 DUSK", "12,345.679 DUSK",
   ]);
-  assert.equal(middle("short", 6, 6), "short");
 });
 
 test("a receipt is a record without balances, with both hashes and its own link", () => {
@@ -345,7 +350,7 @@ test("a receipt is a record without balances, with both hashes and its own link"
   const model = receiptModel(entry, { cfg: testnet, locale: "en-GB", route: T["duskevm-deposit"], timeZone: "Europe/Amsterdam", url });
   assert.equal(model.view.title, "25 DUSK arrived on DuskEVM");
   assert.equal(model.caption, "Arrived Mon 26 Oct 2026, 10:31 CET.");
-  assert.deepEqual(model.details.map((row) => row.label), ["Amount", "Network fee paid", "From, on Dusk", "To, on DuskEVM", "Dusk transaction", "DuskEVM transaction", "Sent"]);
+  assert.deepEqual(model.details.map((row) => row.label), ["Amount", "Fee paid", "From, on Dusk", "To, on DuskEVM", "Dusk transaction", "DuskEVM transaction", "Sent"]);
   // A record: the fee as paid, to the last decimal.
   assert.equal(model.details[1].value, "0.001986599 DUSK on Dusk");
   const html = receiptPage(model);
@@ -411,10 +416,11 @@ test("each transfer in My transfers says whom it pays and its transaction, so eq
   // The address with its checksum's capitals, as the wallet writes it.
   assert.deepEqual([done.to, done.hash], [{ address: "0x96BA…893e" }, "ac6b2f…16bc24"]);
   // Your own account by its .dusk name.
-  assert.deepEqual([model.groups.needs[0].to, model.groups.needs[0].hash], [{ name: "alice.dusk" }, "0x04a8…1b3213"]);
+  // An EVM transaction as an EVM address is cut: 0x and 4 + 4.
+  assert.deepEqual([model.groups.needs[0].to, model.groups.needs[0].hash], [{ name: "alice.dusk" }, "0x04a8…3213"]);
   const html = activityPanel({ empty: "", groups: model.groups, lede: "x", more: false, syncText: "" });
   assert.match(html, /<div class="t2">Arrived Yesterday, 06:52 CET<\/div><div class="t3">To <code class="mono">0x96BA…893e<\/code> · <code class="mono">ac6b2f…16bc24<\/code><\/div>/u);
-  assert.match(html, /<div class="t3">To alice\.dusk · <code class="mono">0x04a8…1b3213<\/code><\/div>/u);
+  assert.match(html, /<div class="t3">To alice\.dusk · <code class="mono">0x04a8…3213<\/code><\/div>/u);
 });
 
 test("the top bar names each wallet's account, in the form its wallet writes it, short enough for a phone", () => {
