@@ -274,6 +274,13 @@ test("the bridge's calls are read on the DuskEVM contracts the deployment sets, 
   );
 });
 
+test("a payout to BNB Smart Chain is looked for from the address the network's file names", () => {
+  assert.equal(withConfig({ VITE_BRIDGE_PROFILE: "mainnet" }).cfg.service.payoutAddress, networks.mainnet.routes.services[0].payoutAddress);
+  assert.match(networks.mainnet.routes.services[0].payoutAddress, /^0x[0-9a-fA-F]{40}$/u);
+  // Testnet's file names none: any sender's transfer of the amount counts there, as before.
+  assert.equal(withConfig({ VITE_BRIDGE_PROFILE: "testnet" }).cfg.service.payoutAddress, "");
+});
+
 test("DuskEVM's L1 RPC is the one the network's file names, unless a setting names another", () => {
   // Another RPC for DuskEVM, keyed: the adapter's L1 RPC stays the file's.
   const keyed = withConfig({ VITE_BRIDGE_PROFILE: "testnet", VITE_DUSKEVM_RPC_URL: "https://evm.example.org/rpc/?key=abc" }).cfg;

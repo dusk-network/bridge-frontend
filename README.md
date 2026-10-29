@@ -134,7 +134,8 @@ receipt link or a looked-up hash opens the same transfer on any device.
   is known (the mainnet defaults, `VITE_ETHEREUM_PAYOUT_ACCOUNT`,
   `VITE_BSC_PAYOUT_ACCOUNT`, or `VITE_MIGRATION_PAYOUT_ACCOUNT` for both).
 - **Dusk → BSC** completes when the bridge pays the memo address: an ERC-20
-  `Transfer` of the amount minus the fee, found with `eth_getLogs`.
+  `Transfer` of the amount minus the fee, found with `eth_getLogs`, from the
+  address the network's file says pays the route out, where it names one.
 - **Deposits** complete on their DuskEVM credit. Where the adapter's L1 RPC
   serves `duskevm_getTransactionHashByDuskHash`, the SDK follows the derived
   deposit transaction. Otherwise the bridge watches the L2 bridge's

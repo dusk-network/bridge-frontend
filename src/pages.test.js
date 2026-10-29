@@ -522,7 +522,9 @@ test("the Contracts sheet lists every address in full, per route, and names no o
   // Mainnet: BSC both ways, its account paying out migrations too; Ethereum one way, with its payer.
   const main = contractGroups(mainnet);
   assert.deepEqual(main.map((group) => group.title), ["Networks", "BNB Smart Chain ↔ Dusk", "Ethereum → Dusk", "Used to read Dusk"]);
-  assert.deepEqual(main[1].rows.map((row) => row.label), ["BEP20 DUSK", "Migration contract", "Bridge account on Dusk"]);
+  assert.deepEqual(main[1].rows.map((row) => row.label), ["BEP20 DUSK", "Migration contract", "Bridge account on Dusk", "Pays out from"]);
+  // The address the network's file says pays the route out, linked on BscScan.
+  assert.deepEqual([main[1].rows[3].value, main[1].rows[3].href], [mainnet.service.payoutAddress, `https://bscscan.com/address/${mainnet.service.payoutAddress}`]);
   assert.match(main[1].rows[2].note, /It also pays out what comes from BNB Smart Chain\.$/u);
   assert.deepEqual(main[2].rows.map((row) => [row.label, row.value]), [
     ["ERC20 DUSK", mainnet.evmNetworks.ethereum.tokenContract],

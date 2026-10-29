@@ -191,7 +191,8 @@ export function loadConfig() {
           delaySeconds: seconds("VITE_SERVICE_BRIDGE_DELAY_SECONDS", offered.typicalSeconds),
           feeLux: BigInt(positiveInteger("VITE_SERVICE_BRIDGE_FEE_LUX", Number(offered.feeLux))),
           network: serviceNetwork,
-          payoutAddress: value("VITE_SERVICE_BRIDGE_PAYOUT_ADDRESS"),
+          // The address the route pays out from, where the network's file knows it.
+          payoutAddress: offered.payoutAddress ?? "",
         })
       : null;
 
