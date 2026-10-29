@@ -1,6 +1,7 @@
+import { TRANSFER_GAS } from "@dusk-network/networks/gas";
 import { formatUnits } from "viem";
 import { config } from "./config.js";
-import { gasAtNodePrice, TRANSFER_GAS_LIMIT } from "./gas.js";
+import { gasAtNodePrice } from "./gas.js";
 import { normalizeEvmAddress } from "./validation.js";
 
 /**
@@ -21,7 +22,7 @@ export async function serviceTransferRequest({ amountLux, destination, gasPrice 
   const to = normalizeEvmAddress(destination);
   return {
     amountLux: amount,
-    ...(node ? { gas: await gasAtNodePrice(TRANSFER_GAS_LIMIT, node, gasPrice) } : {}),
+    ...(node ? { gas: await gasAtNodePrice(TRANSFER_GAS.limit, node, gasPrice) } : {}),
     memo: to,
     to: service.account,
   };

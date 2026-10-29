@@ -5,7 +5,6 @@ import {
   aboutFee,
   clockChangeBetween,
   clockChangeNote,
-  durationWords,
   formatDateTime,
   formatDusk,
   formatExactFee,
@@ -72,12 +71,4 @@ test("seven days across the October clock change say so", () => {
   assert.equal(clockChangeNote(change, { now: Date.UTC(2026, 9, 24), timeZone: AMS }), "clocks go back on 25 Oct");
   assert.equal(clockChangeBetween(proven, claim, "UTC"), null);
   assert.equal(clockChangeBetween(Date.UTC(2026, 2, 25), Date.UTC(2026, 3, 1), AMS).direction, "forward");
-});
-
-test("durations are whole words", () => {
-  assert.equal(durationWords(5 * 86_400 + 3 * 3_600 + 59), "5 days 3 hours");
-  assert.equal(durationWords(86_400), "1 day");
-  assert.equal(durationWords(3 * 3_600 + 12 * 60), "3 hours 12 minutes");
-  assert.equal(durationWords(61), "1 minute");
-  assert.equal(durationWords(20), "less than a minute");
 });

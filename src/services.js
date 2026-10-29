@@ -1,8 +1,10 @@
+import { evmAddressOf } from "@dusk-network/networks/duskevm";
+import { createMulticallFetch } from "@hdauven/dusk-multicall";
 import { createPublicClient, http } from "viem";
 
 import { config } from "./config.js";
 import { createChainTimes, readDepositLag } from "./chain-times.js";
-import { createContractReader, contractFacade } from "./contract-reader.js";
+import { MAX_BATCH, contractFacade } from "./contract-reader.js";
 import { createDriverLoader, driverJson } from "./data-driver.js";
 import { createDiscovery } from "./discovery.js";
 import { createDuskNames } from "./dusk-names.js";
@@ -10,7 +12,7 @@ import { createDuskNode } from "./dusk-node.js";
 import { getDuskWallet } from "./dusk-wallet.js";
 import { createEvmReads } from "./evm-reads.js";
 import { resolveTransfer } from "./resolve.js";
-import { createTracking, duskAccountEvmAddress } from "./tracking.js";
+import { createTracking } from "./tracking.js";
 import { GAME_HUB_DRIVER, GAME_REGISTRY_DRIVER, createWithdrawals, parseGameSearchDepth } from "./withdrawals.js";
 
 /** JSON-RPC over fetch, for the EVM chains and the DuskEVM adapter. */
@@ -63,23 +65,22 @@ export function createRpcBatch(urls, fetch = globalThis.fetch) {
   };
 }
 
-/** The address DuskEVM's Portal records for proofs sent from a Dusk account. */
+/** The address DuskEVM's Portal records for proofs sent from a Dusk account, in lower case. */
 export function proofSubmitterFor(account) {
-  return account ? duskAccountEvmAddress(account) : null;
+  return account ? evmAddressOf(account).toLowerCase() : null;
 }
 
 export function createServices(cfg = config, { fetchDriver } = {}) {
-  const node = createDuskNode({ url: cfg.dusk.nodeUrl });
+  // Contract reads made in one task go to the node as one Multicall for Dusk
+  // query, where the network has it.
+  const node = createDuskNode({
+    fetch: createMulticallFetch({ maxBatch: MAX_BATCH, multicallId: cfg.multicall.contractId || null, nodeUrl: cfg.dusk.nodeUrl }),
+    url: cfg.dusk.nodeUrl,
+  });
   const loadDriver = createDriverLoader(fetchDriver ? { fetch: fetchDriver } : {});
   const contract = (id, driver) => ({
     driver: () => loadDriver(driver.url, driver.sha256),
     id,
-  });
-  const reader = createContractReader({
-    multicall: cfg.multicall.contractId
-      ? contract(cfg.multicall.contractId, cfg.multicall.driver)
-      : null,
-    node,
   });
   const urls = {
     "dusk-evm": cfg.duskEvm.rpcUrl,
@@ -114,15 +115,16 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
     };
     const dgf = contract(cfg.duskEvm.disputeGameFactoryContractId, cfg.duskEvm.disputeGameFactoryDriver);
     withdrawals = createWithdrawals({
-      dgf: contractFacade(reader, dgf),
+      dgf: contractFacade(node, dgf),
       gameSearchDepth: parseGameSearchDepth(cfg.duskEvm.bridgeGameSearchDepth),
       gasPrice: () => node.gasPrice(),
       gasUpper: cfg.gasLimitUpper,
       // Each game's hub, read raw through the same Multicall batches.
-      hub: (id) => contractFacade(reader, { driver: async () => GAME_HUB_DRIVER, id }),
+      hub: (id) => contractFacade(node, { driver: async () => GAME_HUB_DRIVER, id }),
       l2Rpc: (method, params) => rpc("dusk-evm", method, params),
       latestBlock: () => node.latestBlock(),
-      portal: contractFacade(reader, portal),
+      network: cfg.network,
+      portal: contractFacade(node, portal),
       proofSubmitter: () => {
         try {
           return proofSubmitterFor(getDuskWallet().state.selectedProfile?.account);
@@ -132,7 +134,7 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
       },
       // Whether the Portal would take a proof against a game, read raw in the same batches.
       registry: cfg.duskEvm.anchorStateRegistryContractId
-        ? contractFacade(reader, { driver: async () => GAME_REGISTRY_DRIVER, id: cfg.duskEvm.anchorStateRegistryContractId })
+        ? contractFacade(node, { driver: async () => GAME_REGISTRY_DRIVER, id: cfg.duskEvm.anchorStateRegistryContractId })
         : null,
     });
   }
@@ -170,7 +172,6 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
     names: createDuskNames({ chainId: cfg.dusk.chainId, nodeUrl: cfg.dusk.nodeUrl }),
     node,
     portalRequest,
-    reader,
     resolve: (hash) => resolveTransfer(hash, { cfg, node, rpc }),
     rpc,
     rpcBatch,

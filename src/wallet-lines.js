@@ -6,14 +6,13 @@
 // and its Details stay folded), group by group. A `head` line is the window's
 // title, amount and recipient; `gap` starts the window's next group.
 
-import { labelFor, networkFor, networks, routes } from "@dusk-network/networks";
+import { labelFor, networkFor, routeForAccount } from "@dusk-network/networks";
+import { decodeBridgeCall } from "@dusk-network/networks/duskevm";
 import { formatContractId, formatEvmAddress, shortAccount } from "@dusk-network/networks/format";
 
-import { decodeDepositArgs } from "./dusk-deposit.js";
 import { sha256Hex } from "./data-driver.js";
 import { aboutFee, formatDusk, formatLux, formatMaxFee } from "./format.js";
 import { networkName, tokenName } from "./names.js";
-import { normalizeEvmAddress } from "./validation.js";
 
 const WEI_PER_LUX = 1_000_000_000n;
 
@@ -26,31 +25,9 @@ const WEI_PER_LUX = 1_000_000_000n;
  */
 function walletServiceRoute(chainId, account) {
   const net = networkFor(chainId);
-  const route = net ? routes(net).find((item) => item.kind === "service" && item.account === account) : null;
+  const route = net ? routeForAccount(net, account, "out") : null;
   return route ? { chain: route.chain.name, feeLux: route.feeLux, network: route.chain.id, running: route.running } : null;
 }
-
-/**
- * The DuskEVM bridge contracts whose calls Dusk Wallet reads, by network:
- * those its network's file lists, on networks with DuskEVM (Testnet only,
- * for now). Their windows say what the call does; any other call shows as
- * bytes.
- */
-export const DUSK_WALLET_BRIDGE_CONTRACTS = Object.freeze(
-  Object.fromEntries(
-    Object.values(networks)
-      .filter((net) => net.duskEvm)
-      .map(({ chainId, duskEvm: { contracts } }) => [
-        `dusk:${chainId}`,
-        Object.freeze({ bridge: contracts.l1_standard_bridge.contractId, portal: contracts.optimism_portal.contractId }),
-      ]),
-  ),
-);
-
-const PORTAL_CALLS = Object.freeze({
-  finalizeWithdrawalTransaction: "claim",
-  proveWithdrawalTransaction: "prove",
-});
 
 export const OLDER_WALLET_NOTE = "Older Dusk Wallet versions show the call as bytes; check the sha256.";
 
@@ -77,8 +54,6 @@ export function withdrawalAmount(wei) {
   const fraction = (value % 10n ** 18n).toString().padStart(18, "0").replace(/0+$/u, "");
   return `${value / 10n ** 18n}.${fraction} DUSK`;
 }
-
-const bare = (id) => String(id ?? "").replace(/^0x/iu, "").toLowerCase();
 
 // ---- EVM wallets ------------------------------------------------------------
 
@@ -200,43 +175,6 @@ async function callRows({ chainId, contractId, depositLux, fnArgs, fnName, from,
   ];
 }
 
-/**
- * What the call is to Dusk Wallet: a deposit to DuskEVM, a withdrawal's
- * proof or claim, or null when it shows the call as bytes.
- */
-export function bridgeCallKind({ chainId, contractId, fnName }) {
-  const known = DUSK_WALLET_BRIDGE_CONTRACTS[chainId];
-  if (!known) return null;
-  if (bare(contractId) === known.bridge && fnName === "depositETHToWithValue") return "deposit";
-  if (bare(contractId) === known.portal) return PORTAL_CALLS[fnName] ?? null;
-  return null;
-}
-
-/** A deposit's amount and DuskEVM recipient, or null when its arguments don't read as one. */
-function readDeposit(fnArgs) {
-  try {
-    return decodeDepositArgs(fnArgs);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * What a proof or claim pays and to whom, as Dusk Wallet reads it: a Dusk
- * account or a contract's 64-hex ID, an amount the same in the withdrawal and
- * its message, and the DuskEVM sender. Null when the window can't read it.
- */
-function readWithdrawal(withdrawal) {
-  const recipient = String(withdrawal?.recipient ?? "");
-  if (!recipient || withdrawal.amountWei === undefined || !withdrawal.from) return null;
-  if (withdrawal.value !== undefined && BigInt(withdrawal.value) !== BigInt(withdrawal.amountWei)) return null;
-  return {
-    amount: withdrawalAmount(withdrawal.amountWei),
-    pays: /^[0-9a-f]{64}$/u.test(recipient) ? { contractId: recipient } : { account: recipient },
-    sender: normalizeEvmAddress(withdrawal.from),
-  };
-}
-
 /** Whether Dusk Wallet reads `memo` as an EVM address: 0x and 40 hex digits, mixed case only with its checksum. */
 const walletReadsAddress = (memo) =>
   /^0x(?:[0-9a-f]{40}|[0-9A-F]{40})$/u.test(memo) || (/^0x[0-9a-fA-F]{40}$/u.test(memo) && formatEvmAddress(memo) === memo);
@@ -295,29 +233,29 @@ export function duskTransferLines({ amountLux, chainId, from, fromName = "", gas
 
 /**
  * A contract call, as Dusk Wallet's window for it shows it. Calls to the
- * DuskEVM bridge it knows lead with what they do, read from their arguments
- * (`withdrawal` is the withdrawal a proof or claim carries); any other call
- * shows as its bytes and their hash.
+ * DuskEVM bridge on its network lead with what they do, read from their
+ * arguments as the wallet reads them: a deposit, or the withdrawal a proof
+ * or claim is for. Any other call shows as its bytes and their hash.
  */
-export async function duskCallLines({ chainId, contractId, depositLux = 0n, display, fnArgs, fnName, from, fromName = "", gas, note, withdrawal }) {
+export async function duskCallLines({ chainId, contractId, depositLux = 0n, display, fnArgs, fnName, from, fromName = "", gas, note }) {
   const deposit = BigInt(depositLux ?? 0n);
-  const kind = bridgeCallKind({ chainId, contractId, fnName });
+  const net = networkFor(chainId);
+  const known = net ? decodeBridgeCall(net, { args: Uint8Array.from(fnArgs), contractId, fnName }) : null;
   const call = { chainId, contractId, depositLux: deposit, fnArgs, fnName, fromName, note };
 
-  const args = kind === "deposit" ? readDeposit(fnArgs) : null;
-  if (args) {
-    const amount = `${formatLux(args.amountLux)} DUSK`;
+  if (known?.kind === "deposit") {
+    const amount = `${formatLux(known.amountLux)} DUSK`;
     return [
       {
         amount,
         kind: "head",
-        tag: args.amountLux === deposit ? "Known DuskEVM bridge call" : "",
+        tag: known.amountLux === deposit ? "Known DuskEVM bridge call" : "",
         title: "Bridge to DuskEVM",
-        to: formatEvmAddress(args.to, { short: true }),
-        toFull: args.to,
+        to: formatEvmAddress(known.recipient, { short: true }),
+        toFull: known.recipient,
         where: "on DuskEVM",
       },
-      { address: args.to, label: "DuskEVM recipient", network: "dusk-evm" },
+      { address: known.recipient, label: "DuskEVM recipient", network: "dusk-evm" },
       { label: "Amount", value: amount },
       fromLine(from, fromName),
       ...feeLines(gas, deposit),
@@ -326,9 +264,10 @@ export async function duskCallLines({ chainId, contractId, depositLux = 0n, disp
     ];
   }
 
-  const read = kind === "prove" || kind === "claim" ? readWithdrawal(withdrawal) : null;
-  if (read) {
-    const { amount, pays, sender } = read;
+  if (known) {
+    const amount = withdrawalAmount(known.amountWei);
+    // A Dusk account (`account`) or a contract (`contractId`).
+    const pays = known.recipient;
     // What it costs leads: it moves none of the account's DUSK. Then the
     // withdrawal it's for and whom that pays.
     return [
@@ -338,11 +277,11 @@ export async function duskCallLines({ chainId, contractId, depositLux = 0n, disp
         lead: "Costs up to",
         prefix: `for a ${amount} withdrawal that pays`,
         sub:
-          kind === "prove"
+          known.kind === "prove"
             ? "Proving moves no DUSK. You claim it once the waiting period ends."
             : "Claiming pays this DUSK to the account above. You pay only the network fee.",
         tag: "Known DuskEVM bridge call",
-        title: kind === "prove" ? "Prove a DuskEVM withdrawal" : "Claim a DuskEVM withdrawal",
+        title: known.kind === "prove" ? "Prove a DuskEVM withdrawal" : "Claim a DuskEVM withdrawal",
         to: pays.account ? shortAccount(pays.account) : formatContractId(pays.contractId, { short: true }),
         toFull: pays.account ?? pays.contractId,
         where: pays.account ? "on Dusk" : "on Dusk, a contract",
@@ -351,7 +290,7 @@ export async function duskCallLines({ chainId, contractId, depositLux = 0n, disp
         ? { address: pays.account, label: "Pays to", network: "dusk" }
         : { label: "Pays to contract", mono: true, value: pays.contractId },
       { label: "Amount", value: amount },
-      { address: sender, label: "Sent from DuskEVM", network: "dusk-evm" },
+      { address: known.from, label: "Sent from DuskEVM", network: "dusk-evm" },
       ...feeLines(gas, deposit),
       ...(await callRows({ ...call, read: true })),
       ...siteLine(display),

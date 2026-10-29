@@ -3,9 +3,9 @@
 // 25 Oct 2026): rejected-proof naming and per-operation gas. Reads come from
 // the deployment's own Dusk node, batched through Multicall for Dusk: the
 // Portal, the dispute game factory, and each game's hub for when it was
-// created and resolved. The claim date comes from those, worked out as every
-// Dusk app does (@dusk-network/networks/duskevm). The wallet only signs and
-// sends.
+// created and resolved. The claim date comes from those, and what a
+// withdrawal pays from its message, as every Dusk app reads them
+// (@dusk-network/networks/duskevm). The wallet only signs and sends.
 
 import {
   parseMessagePassedReceipt,
@@ -19,32 +19,28 @@ import {
   claimReadiness,
   contractClock,
   contractNow,
+  decodeWithdrawal,
+  evmAddressOf,
   isCandidateGame,
   isEligibleGame,
   wallTime,
 } from "@dusk-network/networks/duskevm";
 import {
   bytesToHex,
-  decodeFunctionData,
   encodeAbiParameters,
   fromRlp,
   hexToBytes,
   keccak256,
-  parseAbi,
   toHex,
   toRlp,
 } from "viem";
 
 import { DUSKEVM_PREDEPLOYS } from "./config.js";
 import { MAX_BATCH } from "./contract-reader.js";
-import { withdrawalRecipientAccount } from "./dusk-recipient.js";
 import { withdrawalGasLimit } from "./gas.js";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
-// Every message from DuskEVM to Dusk passes the same contract. A withdrawal of
-// DUSK is the L2 bridge's own `finalizeBridgeETH`, sent through the L2
-// messenger (OP-stack predeploys, from DuskEVM's network file).
-const { l2CrossDomainMessenger, l2StandardBridge, l2ToL1MessagePasser } = DUSKEVM_PREDEPLOYS;
+const { l2ToL1MessagePasser } = DUSKEVM_PREDEPLOYS;
 
 /** Why a DuskEVM transaction isn't followed, proved or claimed as a withdrawal. */
 export const NOT_A_DUSK_WITHDRAWAL = "That DuskEVM transaction isn't a DUSK withdrawal.";
@@ -54,10 +50,6 @@ export const PROVED_BY_ANOTHER_ACCOUNT =
   "Another account proved this withdrawal. Your DUSK isn't affected, but only that account can claim with its proof: switch Dusk Wallet to it, or prove it again with this one.";
 const ZERO_HASH =
   "0x0000000000000000000000000000000000000000000000000000000000000000";
-const RELAY_ABI = parseAbi([
-  "function relayMessage(uint256 _nonce, address _sender, address _target, uint256 _value, uint256 _minGasLimit, bytes _message)",
-  "function finalizeBridgeETH(address _from, address _to, uint256 _amount, bytes _extraData)",
-]);
 /** The latest games read for how often outputs come: five gaps. */
 const OUTPUT_SAMPLE = 6n;
 /** Games searched for one already resolved, a page at a time, at most three pages. */
@@ -196,7 +188,8 @@ function outputRootProofToDriverInput(outputRootProof) {
   };
 }
 
-export function parseWithdrawalReceipt(receipt) {
+/** The withdrawal a DuskEVM receipt records, on `net`'s bridge route only. */
+export function parseWithdrawalReceipt(receipt, net) {
   if (!receipt) throw new Error("Withdrawal transaction was not found.");
   if (receipt.status === "0x0")
     throw new Error("Withdrawal transaction failed on DuskEVM.");
@@ -204,11 +197,7 @@ export function parseWithdrawalReceipt(receipt) {
     const parsed = parseMessagePassedReceipt(receipt);
     if (parsed.blockNumber === undefined)
       throw new Error("Withdrawal receipt is missing its L2 block number.");
-    if (
-      String(parsed.withdrawal.sender).toLowerCase() !== l2CrossDomainMessenger.toLowerCase() ||
-      !withdrawalDetails(parsed.withdrawal)
-    )
-      throw new Error(NOT_A_DUSK_WITHDRAWAL);
+    if (!withdrawalDetails(parsed.withdrawal, net)) throw new Error(NOT_A_DUSK_WITHDRAWAL);
     return parsed;
   } catch (error) {
     if (
@@ -223,35 +212,21 @@ export function parseWithdrawalReceipt(receipt) {
 }
 
 /**
- * What a native withdrawal moves and to whom: the amount and the Dusk
- * recipient key relayed to Dusk's L1 bridge (`finalizeBridgeETH`), or null
- * when it isn't the L2 bridge's own message moving the value it carries.
+ * What a native withdrawal moves and to whom, on `net`'s bridge route, as
+ * Dusk's L1 bridge pays it out (`decodeWithdrawal`): the amount, who sent it
+ * on DuskEVM, the Dusk account or contract it pays, and that account's
+ * address as the Portal keeps its proofs. Null for any other message.
  */
-export function withdrawalDetails(withdrawal) {
-  try {
-    const relay = decodeFunctionData({ abi: RELAY_ABI, data: withdrawal.data });
-    if (relay.functionName !== "relayMessage") return null;
-    const [, sender, , relayValue, , message] = relay.args;
-    if (String(sender).toLowerCase() !== l2StandardBridge.toLowerCase()) return null;
-    const inner = decodeFunctionData({ abi: RELAY_ABI, data: message });
-    if (inner.functionName !== "finalizeBridgeETH") return null;
-    const [from, , amountWei, extraData] = inner.args;
-    if (amountWei !== relayValue) return null;
-    if (withdrawal.value !== undefined && BigInt(withdrawal.value) !== amountWei) return null;
-    const recipientKey = hexToBytes(extraData).slice(3);
-    return Object.freeze({
-      amountWei,
-      // Who sent it on DuskEVM, and the Dusk account it pays.
-      from,
-      recipient: withdrawalRecipientAccount(extraData),
-      // The Dusk account's EVM-shaped address, as the Portal sees its proofs.
-      recipientSubmitter: recipientKey.length
-        ? `0x${keccak256(recipientKey).slice(-40)}`
-        : null,
-    });
-  } catch {
-    return null;
-  }
+export function withdrawalDetails(withdrawal, net) {
+  const facts = decodeWithdrawal(net, withdrawal);
+  if (!facts) return null;
+  const { account, contractId } = facts.recipient;
+  return Object.freeze({
+    amountWei: facts.amountWei,
+    from: facts.from,
+    recipient: account ?? contractId,
+    recipientSubmitter: account ? evmAddressOf(account).toLowerCase() : null,
+  });
 }
 
 export function withdrawalStorageKey(withdrawalHash) {
@@ -386,6 +361,7 @@ function finalizationNotReadyMessage(status) {
  * @param {() => string | null} deps.proofSubmitter the connected account's Portal address
  * @param {() => Promise<bigint>} deps.gasPrice the node's gas price
  * @param {bigint} deps.gasUpper the bridge's gas limit bound
+ * @param {object} deps.network the deployment's network, whose bridge route a withdrawal must take
  * @param {bigint} [deps.gameSearchDepth]
  */
 export function createWithdrawals(deps) {
@@ -946,8 +922,8 @@ export function createWithdrawals(deps) {
   async function loadWithdrawalStatus(txHash, { proofGame = null, proofSubmitter } = {}) {
     if (!isWithdrawalTxHash(txHash))
       throw new Error("Enter a valid DuskEVM withdrawal transaction hash.");
-    const event = parseWithdrawalReceipt(await fetchL2Receipt(txHash));
-    const details = withdrawalDetails(event.withdrawal);
+    const event = parseWithdrawalReceipt(await fetchL2Receipt(txHash), deps.network);
+    const details = withdrawalDetails(event.withdrawal, deps.network);
     const submitter =
       proofSubmitter ?? deps.proofSubmitter() ?? details?.recipientSubmitter ?? null;
     // With the proof's game known from the last check, the latest block is
@@ -1058,7 +1034,7 @@ export function createWithdrawals(deps) {
    * otherwise against the newest that covers it.
    */
   async function prepareProve(txHash, { gasPrice = null, proofSubmitter } = {}) {
-    const event = parseWithdrawalReceipt(await fetchL2Receipt(txHash));
+    const event = parseWithdrawalReceipt(await fetchL2Receipt(txHash), deps.network);
     // A withdrawal whose claim couldn't be sent isn't proved either.
     withdrawalGasLimit(event.withdrawal.gasLimit, deps.gasUpper);
     const submitter = proofSubmitter ?? deps.proofSubmitter();

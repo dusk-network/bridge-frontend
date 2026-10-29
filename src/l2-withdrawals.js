@@ -7,10 +7,10 @@
 // blocks count as covered: a block above can still be reorged away, with
 // the withdrawals in it, so those are read once final (within minutes).
 
+import { duskRecipientOf } from "@dusk-network/networks/duskevm";
 import { decodeAbiParameters, pad, toEventSelector, toHex } from "viem";
 
 import { addCoverage, topGap } from "./dusk-history.js";
-import { withdrawalRecipientAccount } from "./dusk-recipient.js";
 
 export const L2_WINDOW = 100_000;
 export const L2_RUN_REQUESTS = 8;
@@ -22,14 +22,15 @@ export const ETH_BRIDGE_INITIATED_TOPIC = toEventSelector(
 /** An empty scan state. */
 export const emptyScan = () => ({ covered: [], entries: {}, target: null, window: L2_WINDOW });
 
-/** The withdrawal a bridge log records, or null. */
+/** The withdrawal a bridge log records, with the Dusk account or contract it pays, or null. */
 export function withdrawalFromLog(log) {
   try {
     const [amount, extraData] = decodeAbiParameters([{ type: "uint256" }, { type: "bytes" }], log.data);
+    const recipient = duskRecipientOf(extraData);
     return {
       amountWei: amount.toString(),
       blockNumber: Number(BigInt(log.blockNumber)),
-      destination: withdrawalRecipientAccount(extraData),
+      destination: recipient?.account ?? recipient?.contractId ?? null,
       hash: String(log.transactionHash).toLowerCase(),
     };
   } catch {

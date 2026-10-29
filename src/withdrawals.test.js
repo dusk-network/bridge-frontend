@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { networks } from "@dusk-network/networks";
+import { decodeBase58 } from "@dusk-network/networks/account";
+import { evmAddressOf } from "@dusk-network/networks/duskevm";
 import { encodeDuskExternalAssetRecipient } from "@dusk/evm-sdk";
-import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, encodeFunctionData, keccak256, parseAbi, toHex, toRlp } from "viem";
+import { encodeAbiParameters, encodeEventTopics, encodeFunctionData, keccak256, parseAbi, toHex, toRlp } from "viem";
 
 import { WITHDRAWAL_GAS_REFUSAL, gasAtNodePrice, withdrawalGasLimit } from "./gas.js";
 import {
@@ -16,16 +20,17 @@ import {
   proofRequiresReplacement,
   withdrawalDetails,
 } from "./withdrawals.js";
-import { contractFacade, createContractReader } from "./contract-reader.js";
-import { DUSK_WALLET_BRIDGE_CONTRACTS, duskCallLines } from "./wallet-lines.js";
-import { decodeBase58 } from "./base58.js";
+import { contractFacade } from "./contract-reader.js";
+import { driverJson, loadDataDriver } from "./data-driver.js";
+import { batchingNode } from "./multicall.fixtures.js";
+import { duskCallLines } from "./wallet-lines.js";
 import { TIP, TX, messagePassedLog, u256 } from "./withdrawals.fixtures.js";
 
 const ACCOUNT = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
-const RELAY = parseAbi([
-  "function relayMessage(uint256 _nonce, address _sender, address _target, uint256 _value, uint256 _minGasLimit, bytes _message)",
-  "function finalizeBridgeETH(address _from, address _to, uint256 _amount, bytes _extraData)",
-]);
+const TESTNET = networks.testnet;
+// Whom the fixture's withdrawal pays, and who sent it on DuskEVM.
+const PAID = "213qXNRaEAXrgJTFxXsPMeFasiEtPVJwZ3x2wKgZog2kXtXE7ovGRFfn1spfKBU4AUitAS91nM5T7HSvwRiyYCHLRaTTnJQbZn1TKnDySEiKZxX8vyodtWorbMuybDV5JJ9Y";
+const WITHDRAWER = "0x75685f9D88749B583732B40d56fe007cD404b72D";
 const SUBMITTER = `0x${"2c".repeat(20)}`;
 // wallet-both.dusk's 1 DUSK withdrawal, the worked example, in the
 // contracts' time (testnet's: block height × 10): proved at block 4,687,744,
@@ -110,6 +115,7 @@ function setup({
       };
     },
     latestBlock: async () => tip,
+    network: TESTNET,
     portal,
     proofSubmitter: () => SUBMITTER,
     registry,
@@ -148,11 +154,10 @@ test("blacklisted or challenger-won proofs need replacing", () => {
 test("a withdrawal's amount and Dusk recipient come from its relayed call", async () => {
   const { withdrawals } = setup();
   const status = await withdrawals.loadWithdrawalStatus(TX);
-  const details = withdrawalDetails(status.withdrawal);
+  const details = withdrawalDetails(status.withdrawal, TESTNET);
 
-  assert.equal(details.amountWei, 10_000_000_000_000_000_000n);
-  assert.match(details.recipientSubmitter, /^0x[0-9a-f]{40}$/u);
-  assert.equal(details.from.toLowerCase(), "0xeb9ea22334e679cdbc669cf9ad2d713b559708b1");
+  assert.deepEqual(details, { amountWei: 1_008n * 10n ** 18n, from: WITHDRAWER, recipient: PAID, recipientSubmitter: evmAddressOf(PAID).toLowerCase() });
+  assert.deepEqual(status.details, details);
 });
 
 test("a proven withdrawal waits when the finalize preflight refuses", async () => {
@@ -261,15 +266,7 @@ test("a withdrawal's waits come from the Portal, and how often outputs come from
   assert.equal((await withdrawals.loadTiming()).outputSeconds, null);
 });
 
-test("a withdrawal's waits are two node queries through Multicall for Dusk", async () => {
-  const queries = [];
-  const node = {
-    async contractCall(_id, fnName, bytes) {
-      queries.push(fnName);
-      const calls = JSON.parse(new TextDecoder().decode(bytes));
-      return new TextEncoder().encode(JSON.stringify({ height: "1", results: calls.map((call) => ({ Ok: Buffer.from(call.fn_name).toString("hex") })) }));
-    },
-  };
+test("a withdrawal's waits are two node queries: the Portal's in one Multicall for Dusk query, then the games", async () => {
   const answers = {
     disputeGameFinalityDelaySeconds: u256(302_400),
     findLatestGames: [{ timestamp: 3_400 }, { timestamp: 1_700 }],
@@ -277,15 +274,14 @@ test("a withdrawal's waits are two node queries through Multicall for Dusk", asy
     proofMaturityDelaySeconds: u256(604_800),
     respectedGameType: 8,
   };
-  const driver = {
-    decodeOutputFn: (name, out) => (name === "aggregate" ? JSON.parse(new TextDecoder().decode(out)) : answers[new TextDecoder().decode(out)]),
-    encodeInputFn: (name, json) => new TextEncoder().encode(name === "aggregate" ? json : name),
-  };
+  // Each read's argument and reply are its function's name.
+  const driver = { decodeOutputFn: (_name, out) => answers[new TextDecoder().decode(out)], encodeInputFn: (name) => new TextEncoder().encode(name) };
   const contract = (id) => ({ driver: async () => driver, id });
-  const reader = createContractReader({ multicall: contract("93".repeat(32)), node });
-  const timing = createWithdrawals({ dgf: contractFacade(reader, contract("3b".repeat(32))), portal: contractFacade(reader, contract("14".repeat(32))) });
+  const { node, queries } = batchingNode(({ args }) => args);
+  const timing = createWithdrawals({ dgf: contractFacade(node, contract("3b".repeat(32))), portal: contractFacade(node, contract("14".repeat(32))) });
   assert.deepEqual(await timing.loadTiming(), { finalitySeconds: 302_400, maturitySeconds: 604_800, outputSeconds: 1_700 });
-  assert.deepEqual(queries, ["aggregate", "aggregate"]);
+  // The games' read is alone in its query, so it goes to the node as it is.
+  assert.deepEqual(queries, [["proofMaturityDelaySeconds", "disputeGameFinalityDelaySeconds", "respectedGameType", "gameCount"], ["findLatestGames"]]);
 });
 
 test("a finalized withdrawal isn't claimed again", async () => {
@@ -314,67 +310,33 @@ test("a claim sends the SDK-serialized withdrawal with its own gas on top", asyn
   assert.equal(args.sender.length, 20);
   assert.equal(args.target.length, 20);
 
-  // The claim carries its withdrawal, so the review lists what Dusk Wallet
-  // reads from the call. This one's extra data is in an older form that
-  // names no Dusk account, so the window shows a plain contract call.
-  const claimLines = (withdrawal) => {
-    const details = withdrawalDetails(withdrawal);
-    return duskCallLines({
-      chainId: "dusk:2",
-      contractId: DUSK_WALLET_BRIDGE_CONTRACTS["dusk:2"].portal,
-      fnArgs: [1],
-      fnName: prepared.fnName,
-      gas: prepared.gas,
-      withdrawal: details && { ...details, value: withdrawal.value },
-    });
-  };
-  assert.equal(withdrawalDetails(prepared.withdrawal).amountWei, 10n * 10n ** 18n);
-  assert.equal((await claimLines(prepared.withdrawal))[0].title, "Contract call");
-
-  // The same withdrawal paying a Dusk account as the bridge writes it now.
-  const relay = decodeFunctionData({ abi: RELAY, data: prepared.withdrawal.data });
-  const bridged = decodeFunctionData({ abi: RELAY, data: relay.args[5] });
-  const extraData = encodeDuskExternalAssetRecipient(decodeBase58(ACCOUNT));
-  const message = encodeFunctionData({ abi: RELAY, args: [...bridged.args.slice(0, 3), extraData], functionName: "finalizeBridgeETH" });
-  const lines = await claimLines({ ...prepared.withdrawal, data: encodeFunctionData({ abi: RELAY, args: [...relay.args.slice(0, 5), message], functionName: "relayMessage" }) });
-  // The window leads with what the claim costs, then the withdrawal it's for.
+  // The review lists what Dusk Wallet reads from the call, as the Portal's
+  // data driver encodes it: it leads with what the claim costs, then the
+  // withdrawal it's for.
+  const driver = await loadDataDriver(await readFile(new URL("../public/drivers/optimism_portal_dd_opt.wasm", import.meta.url)));
+  const claimLines = (fnArgs) =>
+    duskCallLines({ chainId: "dusk:2", contractId: TESTNET.duskEvm.contracts.optimism_portal.contractId, fnArgs, fnName, gas });
+  const lines = await claimLines(driver.encodeInputFn(fnName, driverJson(args)));
   assert.deepEqual(
     [lines[0].title, lines[0].lead, lines[0].amount, lines[0].prefix, lines[0].tag],
-    ["Claim a DuskEVM withdrawal", "Costs up to", "0.102 DUSK", "for a 10 DUSK withdrawal that pays", "Known DuskEVM bridge call"],
+    ["Claim a DuskEVM withdrawal", "Costs up to", "0.102 DUSK", "for a 1,008 DUSK withdrawal that pays", "Known DuskEVM bridge call"],
   );
   assert.deepEqual(lines.slice(1, 4).map((line) => [line.label, line.address ?? line.value]), [
-    ["Pays to", ACCOUNT],
-    ["Amount", "10 DUSK"],
-    ["Sent from DuskEVM", "0xEb9Ea22334e679cDbC669cF9AD2d713b559708B1"],
+    ["Pays to", PAID],
+    ["Amount", "1,008 DUSK"],
+    ["Sent from DuskEVM", WITHDRAWER],
   ]);
+  // A call the window can't read is a plain contract call.
+  assert.equal((await claimLines([1]))[0].title, "Contract call");
 });
 
 test("a status check reads the Portal and game factory in one node query", async () => {
-  const queries = [];
-  const node = {
-    async contractCall(id, fnName) {
-      queries.push(fnName);
-      // Each inner call answers with its function name; the test only counts.
-      return new TextEncoder().encode(
-        JSON.stringify({
-          height: "1",
-          results: Array.from({ length: 7 }, () => ({ Ok: "00" })),
-        }),
-      );
-    },
-  };
   const values = { finalizedWithdrawals: true, provenWithdrawals: [Array(20).fill(0), 0] };
-  const driver = {
-    decodeOutputFn: (name, bytes) =>
-      name === "aggregate" ? JSON.parse(new TextDecoder().decode(bytes)) : (values[name] ?? 0),
-    encodeInputFn: () => new Uint8Array(),
-  };
+  const driver = { decodeOutputFn: (name) => values[name] ?? 0, encodeInputFn: () => new Uint8Array() };
   const contract = (id) => ({ driver: async () => driver, id });
-  const reader = createContractReader({ multicall: contract("93".repeat(32)), node });
-  const portal = contractFacade(reader, contract("14".repeat(32)));
-  const dgf = contractFacade(reader, contract("3b".repeat(32)));
+  const { node, queries } = batchingNode(() => Uint8Array.of(0));
   const batched = createWithdrawals({
-    dgf,
+    dgf: contractFacade(node, contract("3b".repeat(32))),
     gasPrice: async () => 1n,
     gasUpper: 1_000_000_000n,
     l1Rpc: null,
@@ -386,14 +348,15 @@ test("a status check reads the Portal and game factory in one node query", async
       transactionHash: TX,
     }),
     latestTimestamp: async () => 0n,
-    portal,
+    network: TESTNET,
+    portal: contractFacade(node, contract("14".repeat(32))),
     proofSubmitter: () => SUBMITTER,
   });
 
   const status = await batched.loadWithdrawalStatus(TX);
 
   assert.equal(status.stage, "finalized");
-  assert.deepEqual(queries, ["aggregate"]);
+  assert.deepEqual(queries.map((names) => names.length), [7]);
 });
 
 // A MessagePassed event as the L2 message passer writes it, hash included.
@@ -405,18 +368,22 @@ const BRIDGE_ABI = parseAbi([
   "function finalizeBridgeETH(address _from, address _to, uint256 _amount, bytes _extraData)",
   "function finalizeBridgeERC20(address _localToken, address _remoteToken, address _from, address _to, uint256 _amount, bytes _extraData)",
 ]);
-const MESSENGER = "0x4200000000000000000000000000000000000007";
-const L2_BRIDGE = "0x4200000000000000000000000000000000000010";
-const L1_SIDE = "0xf44f202151ffb9742ad4391849c62be3fb441e72";
+// DuskEVM testnet's bridge route: its messenger and bridge, and Dusk's.
+const MESSENGER = TESTNET.duskEvm.predeploys.l2CrossDomainMessenger;
+const L2_BRIDGE = TESTNET.duskEvm.predeploys.l2StandardBridge;
+const L1_MESSENGER = TESTNET.duskEvm.contracts.l1_cross_domain_messenger.evmAddress;
+const L1_BRIDGE = TESTNET.duskEvm.contracts.l1_standard_bridge.evmAddress;
 const USER = "0xeb9ea22334e679cdbc669cf9ad2d713b559708b1";
 
-function passedLog({ amount = 10n ** 19n, message, relaySender = L2_BRIDGE, relayValue = amount, sender = MESSENGER, value = amount }) {
+/** A withdrawal built as DuskEVM's bridge writes one, paying ACCOUNT, with the parts a case changes. */
+function passedLog({ amount = 10n ** 19n, message, relaySender = L2_BRIDGE, relayValue = amount, sender = MESSENGER, target = L1_MESSENGER, value = amount }) {
+  const paid = encodeDuskExternalAssetRecipient(decodeBase58(ACCOUNT));
   const data = encodeFunctionData({
     abi: BRIDGE_ABI,
-    args: [7n, relaySender, L1_SIDE, relayValue, 200_000n, message ?? encodeFunctionData({ abi: BRIDGE_ABI, args: [USER, USER, amount, "0x00"], functionName: "finalizeBridgeETH" })],
+    args: [7n, relaySender, L1_BRIDGE, relayValue, 200_000n, message ?? encodeFunctionData({ abi: BRIDGE_ABI, args: [USER, USER, amount, paid], functionName: "finalizeBridgeETH" })],
     functionName: "relayMessage",
   });
-  const withdrawal = { data, gasLimit: 519_542n, nonce: 7n, sender, target: L1_SIDE, value };
+  const withdrawal = { data, gasLimit: 519_542n, nonce: 7n, sender, target, value };
   return {
     address: "0x4200000000000000000000000000000000000016",
     blockNumber: "0x3564",
@@ -425,7 +392,7 @@ function passedLog({ amount = 10n ** 19n, message, relaySender = L2_BRIDGE, rela
       [value, withdrawal.gasLimit, data, hashWithdrawal(withdrawal)],
     ),
     logIndex: "0x2",
-    topics: encodeEventTopics({ abi: MESSAGE_PASSED, args: { nonce: 7n, sender, target: L1_SIDE }, eventName: "MessagePassed" }),
+    topics: encodeEventTopics({ abi: MESSAGE_PASSED, args: { nonce: 7n, sender, target }, eventName: "MessagePassed" }),
     transactionHash: TX,
   };
 }
@@ -433,8 +400,8 @@ function passedLog({ amount = 10n ** 19n, message, relaySender = L2_BRIDGE, rela
 test("only the bridge's own DUSK withdrawals are followed, proved or claimed", async () => {
   const receipt = (log) => ({ blockNumber: "0x3564", logs: [log], status: "0x1", transactionHash: TX });
   // The fixture and one built the same way are withdrawals of DUSK.
-  assert.equal(parseWithdrawalReceipt(receipt(messagePassedLog)).withdrawal.value, 10n ** 19n);
-  assert.equal(parseWithdrawalReceipt(receipt(passedLog({}))).withdrawal.value, 10n ** 19n);
+  assert.equal(parseWithdrawalReceipt(receipt(messagePassedLog), TESTNET).withdrawal.value, 1_008n * 10n ** 18n);
+  assert.equal(parseWithdrawalReceipt(receipt(passedLog({})), TESTNET).withdrawal.value, 10n ** 19n);
 
   const others = {
     // A token withdrawal through the same bridge and messenger.
@@ -448,9 +415,11 @@ test("only the bridge's own DUSK withdrawals are followed, proved or claimed", a
     relayed: passedLog({ relaySender: USER }),
     // A message claiming more than it carries.
     inflated: passedLog({ value: 1n }),
+    // The bridge's call, sent somewhere other than Dusk's messenger.
+    elsewhere: passedLog({ target: USER }),
   };
   for (const [name, log] of Object.entries(others)) {
-    assert.throws(() => parseWithdrawalReceipt(receipt(log)), { message: NOT_A_DUSK_WITHDRAWAL }, name);
+    assert.throws(() => parseWithdrawalReceipt(receipt(log), TESTNET), { message: NOT_A_DUSK_WITHDRAWAL }, name);
     const { withdrawals } = setup({ logs: [log] });
     await assert.rejects(withdrawals.loadWithdrawalStatus(TX), { message: NOT_A_DUSK_WITHDRAWAL }, name);
     await assert.rejects(withdrawals.prepareProve(TX), { message: NOT_A_DUSK_WITHDRAWAL }, name);
@@ -512,8 +481,14 @@ const STORAGE = keccak256(toHex("message passer"));
 const rootOf = (l2) =>
   hashOutputRootProof({ latestBlockhash: blockOf(l2).hash, messagePasserStorageRoot: STORAGE, stateRoot: blockOf(l2).stateRoot, version: `0x${"00".repeat(32)}` });
 
+// The fixture's withdrawal was sent at this L2 block: games from 7 on cover
+// it when they start at OLDER, only the newest 73 when they start at FRESH.
+const SENT_AT = Number(BigInt(messagePassedLog.blockNumber));
+const OLDER = SENT_AT - 668;
+const FRESH = SENT_AT - 12_668;
+
 /**
- * A not yet proven withdrawal at L2 block 13,668, with games whose L2 blocks
+ * The fixture's withdrawal, not yet proven, with games whose L2 blocks
  * start at `firstL2`. Game i sits at factory index i × `stride`: other game
  * types take the indexes between. The registry the Portal asks calls the
  * `blacklisted` and `retired` games improper, and the `unrespected` ones not
@@ -575,24 +550,24 @@ function provingSetup({ blacklisted = [], firstL2, registry = true, retired = []
 
 test("a proof goes against a covering game that has already resolved, so its claim date is exact", async () => {
   // An older withdrawal: games from 7 on cover it, and those up to 29 have resolved.
-  const { proofsAt, withdrawals } = provingSetup({ firstL2: 13_000 });
+  const { proofsAt, withdrawals } = provingSetup({ firstL2: OLDER });
 
   const prepared = await withdrawals.prepareProve(TX);
 
   assert.deepEqual(prepared.args[1], u256(29));
-  assert.deepEqual(proofsAt, [13_000 + 29 * 100]);
+  assert.deepEqual(proofsAt, [OLDER + 29 * 100]);
   // Exactly the proof's maturity from now: Wed 4 Nov, 03:09:49 UTC.
   assert.deepEqual(prepared.claim, { at: Number(TIP.timestamp + 604_800n) * 1_000, exact: true, overdue: false });
 });
 
 test("without a resolved covering game, a proof goes against the newest, and its date is an estimate", async () => {
   // A fresh withdrawal: only the newest games cover it, none resolved yet.
-  const { proofsAt, withdrawals } = provingSetup({ firstL2: 1_000 });
+  const { proofsAt, withdrawals } = provingSetup({ firstL2: FRESH });
 
   const prepared = await withdrawals.prepareProve(TX);
 
   assert.deepEqual(prepared.args[1], u256(GAMES - 1));
-  assert.equal(proofsAt.at(-1), 1_000 + (GAMES - 1) * 100);
+  assert.equal(proofsAt.at(-1), FRESH + (GAMES - 1) * 100);
   // The newest game, created 10 minutes ago, can be final before the proof
   // matures 7 days from now: that date, as an estimate until it resolves.
   assert.deepEqual(prepared.claim, { at: Number(TIP.timestamp + 604_800n) * 1_000, exact: false, overdue: false });
@@ -601,7 +576,7 @@ test("without a resolved covering game, a proof goes against the newest, and its
 test("a proof or claim is priced at the gas price its page quoted, not at one read again", async () => {
   // The node's price has moved to 2 since the page read 1: the review asks
   // for what the page said, 51M at 1 LUX, as Sam's 0.051 DUSK a step.
-  const { withdrawals } = provingSetup({ firstL2: 13_000 });
+  const { withdrawals } = provingSetup({ firstL2: OLDER });
   assert.deepEqual((await withdrawals.prepareProve(TX, { gasPrice: 1n })).gas, { limit: "51000000", price: "1" });
   assert.deepEqual((await setup(CLAIMABLE).withdrawals.prepareFinalize(TX, { gasPrice: 1n })).gas, { limit: "51000000", price: "1" });
   // Without one, the node's.
@@ -609,9 +584,8 @@ test("a proof or claim is priced at the gas price its page quoted, not at one re
 });
 
 test("a waiting withdrawal's check is one Multicall query once its game is known", async () => {
-  const queries = [];
   const answers = {
-    checkWithdrawal: { Err: { Panic: "OptimismPortal2: invalid dispute game" } },
+    checkWithdrawal: { Panic: "OptimismPortal2: invalid dispute game" },
     createdAtForGame: 46_876_050,
     disputeGameBlacklist: false,
     disputeGameFinalityDelaySeconds: u256(302_400),
@@ -627,39 +601,23 @@ test("a waiting withdrawal's check is one Multicall query once its game is known
     gameContractId: Array(32).fill(0xd5),
     virtualGameHubId: Array(32).fill(0xd5),
   };
-  const node = {
-    async contractCall(_id, fnName, bytes) {
-      const calls = JSON.parse(new TextDecoder().decode(bytes));
-      queries.push(calls.map((call) => Buffer.from(call.fn_args, "hex").toString()));
-      return new TextEncoder().encode(
-        JSON.stringify({
-          height: "4704959",
-          results: calls.map((call) => {
-            const answer = answers[Buffer.from(call.fn_args, "hex").toString()];
-            return answer?.Err ? answer : { Ok: Buffer.from(call.fn_args, "hex").toString("hex") };
-          }),
-        }),
-      );
-    },
-  };
-  const driver = {
-    decodeOutputFn: (name, out) => (name === "aggregate" ? JSON.parse(new TextDecoder().decode(out)) : answers[new TextDecoder().decode(out)]),
-    encodeInputFn: (name, json) => new TextEncoder().encode(name === "aggregate" ? json : name),
-  };
+  // Each read's argument and reply are its function's name; a call that panics answers with its message.
+  const driver = { decodeOutputFn: (_name, out) => answers[new TextDecoder().decode(out)], encodeInputFn: (name) => new TextEncoder().encode(name) };
   const contract = (id) => ({ driver: async () => driver, id });
-  const reader = createContractReader({ multicall: contract("93".repeat(32)), node });
+  const { node, queries } = batchingNode(({ args, fnName }) => (answers[fnName]?.Panic ? answers[fnName] : args));
   let tips = 0;
   const withdrawals = createWithdrawals({
-    dgf: contractFacade(reader, contract("3b".repeat(32))),
+    dgf: contractFacade(node, contract("3b".repeat(32))),
     gasPrice: async () => 1n,
     gasUpper: 1_000_000_000n,
-    hub: (id) => contractFacade(reader, contract(id)),
+    hub: (id) => contractFacade(node, contract(id)),
     l2Rpc: async () => ({ blockHash: messagePassedLog.blockHash, blockNumber: messagePassedLog.blockNumber, logs: [messagePassedLog], status: "0x1", transactionHash: TX }),
     latestBlock: async () => {
       tips += 1;
       return TIP;
     },
-    portal: contractFacade(reader, contract("14".repeat(32))),
+    network: TESTNET,
+    portal: contractFacade(node, contract("14".repeat(32))),
     proofSubmitter: () => SUBMITTER,
   });
 
@@ -681,7 +639,7 @@ test("a waiting withdrawal's check is one Multicall query once its game is known
 });
 
 test("a blacklisted resolved game is passed over for the next resolved one", async () => {
-  const { withdrawals } = provingSetup({ blacklisted: [29], firstL2: 13_000 });
+  const { withdrawals } = provingSetup({ blacklisted: [29], firstL2: OLDER });
   const prepared = await withdrawals.prepareProve(TX);
   assert.deepEqual(prepared.args[1], u256(28));
   assert.equal(prepared.claim.exact, true);
@@ -689,7 +647,7 @@ test("a blacklisted resolved game is passed over for the next resolved one", asy
 
 test("the search for a resolved game counts the factory's index, which other game types share", async () => {
   // Three games of other types between each of the Portal's type.
-  const { withdrawals } = provingSetup({ firstL2: 13_000, stride: 4 });
+  const { withdrawals } = provingSetup({ firstL2: OLDER, stride: 4 });
   const prepared = await withdrawals.prepareProve(TX);
   assert.deepEqual(prepared.args[1], u256(29 * 4));
   assert.equal(prepared.claim.exact, true);
@@ -735,7 +693,7 @@ test("a resolved game the Portal wouldn't take is passed over, and with none it 
   assert.throws(() => GAME_REGISTRY_DRIVER.decodeOutputFn("isGameProper", Uint8Array.of()), RangeError);
   assert.deepEqual(GAME_REGISTRY_DRIVER.encodeInputFn("isGameProper", JSON.stringify(Array(20).fill(0x6f))), Uint8Array.from(Array(20).fill(0x6f)));
   // Game 29 retired after it resolved, and 28 of a type no longer respected: the next resolved one.
-  const passedOver = provingSetup({ firstL2: 13_000, retired: [29], unrespected: [28] });
+  const passedOver = provingSetup({ firstL2: OLDER, retired: [29], unrespected: [28] });
   const prepared = await passedOver.withdrawals.prepareProve(TX);
   assert.deepEqual(prepared.args[1], u256(27));
   assert.equal(prepared.claim.exact, true);
@@ -745,12 +703,12 @@ test("a resolved game the Portal wouldn't take is passed over, and with none it 
   // Three reads a candidate, as many as one Multicall query holds (64): 21 of the 23 covering games.
   assert.deepEqual(asked(passedOver.registry.call.isGameProper), Array.from({ length: 21 }, (_, k) => 29 - k));
   // Every resolved covering game retired: the newest covering game, as before.
-  const allRetired = provingSetup({ firstL2: 13_000, retired: Array.from({ length: 30 }, (_, i) => i) });
+  const allRetired = provingSetup({ firstL2: OLDER, retired: Array.from({ length: 30 }, (_, i) => i) });
   const newest = await allRetired.withdrawals.prepareProve(TX);
   assert.deepEqual(newest.args[1], u256(GAMES - 1));
   assert.equal(newest.claim.exact, false);
   // Without the registry, nothing says the Portal would take a resolved game: the newest too.
-  const unknown = await provingSetup({ firstL2: 13_000, registry: false }).withdrawals.prepareProve(TX);
+  const unknown = await provingSetup({ firstL2: OLDER, registry: false }).withdrawals.prepareProve(TX);
   assert.deepEqual(unknown.args[1], u256(GAMES - 1));
 });
 
@@ -772,14 +730,14 @@ test("a game created at or before the respected game type last changed is passed
   assert.deepEqual(GAME_REGISTRY_DRIVER.encodeInputFn("respectedGameTypeUpdatedAt", "null"), new Uint8Array(0));
   assert.equal(GAME_REGISTRY_DRIVER.decodeOutputFn("respectedGameTypeUpdatedAt", Uint8Array.of(0x10, 0x27, 0, 0, 0, 0, 0, 0)), 10_000n);
   // Changed just after game 28 was created: 29, the newest resolved, is the one.
-  const after28 = provingSetup({ firstL2: 13_000, updatedAt: createdAtOf(28) });
+  const after28 = provingSetup({ firstL2: OLDER, updatedAt: createdAtOf(28) });
   const proved = await after28.withdrawals.prepareProve(TX);
   assert.deepEqual(proved.args[1], u256(29));
   assert.equal(proved.claim.exact, true);
   // Read once, with the hub and the newest games.
   assert.equal(after28.registry.call.respectedGameTypeUpdatedAt.calls.length, 1);
   // Changed when game 29 was created: every resolved game is retired, so the newest covering game, as with none.
-  const at29 = provingSetup({ firstL2: 13_000, updatedAt: createdAtOf(29) });
+  const at29 = provingSetup({ firstL2: OLDER, updatedAt: createdAtOf(29) });
   const newest = await at29.withdrawals.prepareProve(TX);
   assert.deepEqual(newest.args[1], u256(GAMES - 1));
   assert.equal(newest.claim.exact, false);

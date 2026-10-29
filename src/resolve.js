@@ -3,8 +3,9 @@
 // most: the Dusk node for a Dusk hash, then DuskEVM and the migration chains
 // for an EVM hash, in the order the hash's form suggests.
 
+import { BRIDGE_FUNCTIONS } from "@dusk-network/networks/duskevm";
+
 import { canonicalHash } from "./permalink.js";
-import { DEPOSIT_FN_NAME } from "./dusk-deposit.js";
 import { networkName } from "./names.js";
 import { parseWithdrawalReceipt } from "./withdrawals.js";
 
@@ -44,7 +45,7 @@ export async function resolveTransfer(input, { cfg, node, rpc }) {
     const call = tx.callData;
     if (call && cfg.duskEvm.enabled) {
       const contract = lower(call.contractId).replace(/^0x/u, "");
-      if (contract === cfg.duskEvm.l1StandardBridgeContractId && call.fnName === DEPOSIT_FN_NAME)
+      if (contract === cfg.duskEvm.l1StandardBridgeContractId && call.fnName === BRIDGE_FUNCTIONS.deposit)
         return { hash: bare, routeId: "dusk-to-dusk-evm" };
       if (contract === cfg.duskEvm.optimismPortalContractId)
         return {
@@ -70,7 +71,7 @@ export async function resolveTransfer(input, { cfg, node, rpc }) {
           // Every message to Dusk passes the same contract: only the bridge's
           // own DUSK withdrawals are opened as one.
           try {
-            parseWithdrawalReceipt(receipt);
+            parseWithdrawalReceipt(receipt, cfg.network);
             return { hash, routeId: "dusk-evm-to-dusk" };
           } catch {
             return { message: `That ${networkName(cfg, "dusk-evm")} transaction isn't a withdrawal of DUSK.` };

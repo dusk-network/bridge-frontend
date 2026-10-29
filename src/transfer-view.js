@@ -4,20 +4,19 @@
 // and how long the route takes on this network; no balances, no network
 // requests.
 
-import { formatContractId, formatEvmAddress, shortAccount } from "@dusk-network/networks/format";
+import { claimText, evmAddressOf } from "@dusk-network/networks/duskevm";
+import { aboutTime, durationWords, formatContractId, formatEvmAddress, shortAccount } from "@dusk-network/networks/format";
 
-import { claimText } from "./claim-date.js";
 import {
   clockChangeBetween,
   clockChangeNote,
-  durationWords,
   formatDateTime,
   formatDusk,
   formatShortDay,
 } from "./format.js";
 import { networkName, tokenName } from "./names.js";
-import { aboutTime, lateAfterSeconds, routeTime } from "./route-times.js";
-import { STATUS_WORDS, duskAccountEvmAddress } from "./tracking.js";
+import { lateAfterSeconds, routeTime } from "./route-times.js";
+import { STATUS_WORDS } from "./tracking.js";
 import { WITHDRAWAL_GAS_REFUSAL } from "./gas.js";
 
 export const html = (value) =>
@@ -100,7 +99,7 @@ function submitterOf(account) {
   if (submitterFor.account !== account) {
     let submitter = null;
     try {
-      submitter = duskAccountEvmAddress(account).toLowerCase();
+      submitter = evmAddressOf(account).toLowerCase();
     } catch {}
     submitterFor = { account, submitter };
   }

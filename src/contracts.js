@@ -6,7 +6,6 @@
 import { formatContractId } from "@dusk-network/networks/format";
 
 import { buildRoutes } from "./bridge-routes.js";
-import { NAME_FILE_HOSTS } from "./dusk-names.js";
 import { bridgeTasks, networkNames, notRunning, tokenName } from "./names.js";
 
 const trim = (url) => String(url ?? "").replace(/\/+$/u, "");
@@ -135,7 +134,8 @@ export function serversLine(cfg) {
     const host = hostOf(cfg.evmNetworks[id]?.rpcUrl);
     if (host) parts.push(`${host} (${names[id]})`);
   }
-  const nameHost = NAME_FILE_HOSTS[cfg.dusk.chainId];
+  // Dusk Domains' site, which serves the name reader's lens driver.
+  const nameHost = hostOf(cfg.network.duskDomains?.site);
   if (nameHost) parts.push(`${nameHost} (for .dusk names)`);
   const list = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0];
   return `This page reads from ${list}.`;

@@ -4,6 +4,8 @@
 // Chain state comes from the deployment's own node and RPCs; the wallets
 // are asked only for accounts, signatures and sends.
 
+import { toDuskName } from "@duskdomains/sdk/names";
+
 import { entryId, readActivity, recordActivity, saveActivity, updateActivity, useActivityNetwork } from "./activity.js";
 import { bridgeRoutes, getBridgeRoute } from "./bridge-routes.js";
 import { cardRoute, choosePair, entryRoutes, flipRoute, followsWallets, fromChoices, handedOverRecipient, primaryButton, routeBetween, toChoices } from "./bridge-card.js";
@@ -40,7 +42,7 @@ import { serviceTransferRequest } from "./service-transfer.js";
 import { createServices, proofSubmitterFor } from "./services.js";
 import { createLookupFlow } from "./lookup-flow.js";
 import { createReceiptLookups } from "./receipt-lookups.js";
-import { checkDuskRecipient, checkEvmRecipient, nameToLookUp, settledEvmRecipient } from "./recipient.js";
+import { checkDuskRecipient, checkEvmRecipient, settledEvmRecipient } from "./recipient.js";
 import { readWatched, saveWatched, watchTarget } from "./watched-account.js";
 import { SIGNER_MOVED, createReviewSession, notSent, sameSigner, sentActionPatch } from "./review-session.js";
 import { createScheduler, takenByAnother } from "./tracking.js";
@@ -60,7 +62,6 @@ import {
   unavailablePage,
 } from "./views.js";
 import { approveLines, duskCallLines, duskTransferLines, migrateLines, withdrawLines } from "./wallet-lines.js";
-import { withdrawalDetails } from "./withdrawals.js";
 
 const WEI_PER_LUX = 1_000_000_000n;
 // Per visit: about two months of a sparse Dusk history, and about 25 days of
@@ -392,7 +393,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     clearTimeout(nameTimer);
     const form = state.form;
     const route = formRoute();
-    const name = nameToLookUp(form?.recipientInput);
+    // The typed .dusk name, as Dusk Domains spells it, where it can be one.
+    const name = toDuskName(form?.recipientInput ?? "");
     if (!route || route.to.kind !== "dusk" || !name || !services.names) return;
     const known = form.lookups[name];
     // An answer is used for a minute; a failed lookup is tried again.
@@ -1148,14 +1150,12 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
             : await services.withdrawals.prepareFinalize(entry.hash, { gasPrice, proofSubmitter: submitter });
         const request = await services.portalRequest(prepared);
         // What the call carries, as Dusk Wallet reads it from the call.
-        const details = prepared.withdrawal ? withdrawalDetails(prepared.withdrawal) : null;
         const lines = await duskCallLines({
           ...request,
           chainId: cfg.dusk.chainId,
           from: account,
           fromName: account === duskAccount() ? duskName() : "",
           note: "The DuskEVM withdrawal portal on Dusk.",
-          withdrawal: details && { ...details, value: prepared.withdrawal.value },
         });
         return { account, claim: prepared.claim ?? null, lines, request };
       },

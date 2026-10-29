@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { networks } from "@dusk-network/networks";
+import { decodeBase58 } from "@dusk-network/networks/account";
+import { duskEvmContracts } from "@dusk-network/networks/duskevm";
 
 import { buildRoutes } from "./bridge-routes.js";
-import { decodeBase58 } from "./base58.js";
 import { loadConfig } from "./config.js";
 
 // The accounts the networks' files name: the Dusk → BSC bridge account, which
@@ -262,6 +263,15 @@ test("a profile takes everything from its network's file: testnet runs DuskEVM w
   assert.equal(cfg.evmNetworks.ethereum.migrationContract, networks.testnet.routes.migrations[0].contract);
   assert.deepEqual([cfg.service.account, cfg.service.feeLux], [TESTNET_REGGIO_BRIDGE_ACCOUNT, 1_000_000_000n]);
   assert.equal(cfg.dusk.explorerUrl, networks.testnet.apps.explorer);
+});
+
+test("the bridge's calls are read on the DuskEVM contracts the deployment sets, and the file's otherwise", () => {
+  assert.equal(withConfig({ VITE_BRIDGE_PROFILE: "testnet" }).cfg.network, networks.testnet);
+  const set = withConfig({ VITE_BRIDGE_PROFILE: "testnet", ...TESTNET_DUSKEVM }).cfg;
+  assert.deepEqual(
+    [duskEvmContracts(set.network).bridge, duskEvmContracts(set.network).portal, duskEvmContracts(set.network).messenger],
+    ["11".repeat(32), "22".repeat(32), networks.testnet.duskEvm.contracts.l1_cross_domain_messenger.contractId],
+  );
 });
 
 test("DuskEVM's L1 RPC is the one the network's file names, unless a setting names another", () => {

@@ -4,8 +4,9 @@ import test from "node:test";
 import { encodeDuskExternalAssetRecipient } from "@dusk/evm-sdk";
 import { encodeAbiParameters, encodeFunctionData, pad, parseAbi } from "viem";
 
-import { decodeBase58 } from "./base58.js";
 import { networks } from "@dusk-network/networks";
+import { decodeBase58 } from "@dusk-network/networks/account";
+import { evmAddressOf } from "@dusk-network/networks/duskevm";
 
 // Two accounts the networks' files name: the BSC and the Sepolia bridge accounts.
 const MAINNET_BSC_BRIDGE_ACCOUNT = networks.mainnet.routes.services[0].account;
@@ -22,7 +23,6 @@ import {
 } from "./discovery.js";
 import { FIRST_WINDOW, addCoverage, bridgeEntry, syncDuskHistory, topGap } from "./dusk-history.js";
 import { ETH_BRIDGE_INITIATED_TOPIC, syncWithdrawals } from "./l2-withdrawals.js";
-import { duskAccountEvmAddress } from "./tracking.js";
 
 const ACCOUNT = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
 const OTHER = MAINNET_BSC_BRIDGE_ACCOUNT;
@@ -37,6 +37,7 @@ const cfg = {
   duskEvm: { enabled: true, l1StandardBridgeContractId: BRIDGE, predeploys: { l2StandardBridge: "0x4200000000000000000000000000000000000010" } },
   evmNetworks: { ethereum: { migrationContract: MIGRATOR } },
   migrations: ["ethereum"],
+  network: networks.testnet,
   profile: "testnet",
   service: { account: TESTNET_REGGIO_BRIDGE_ACCOUNT, feeLux: 1_000_000_000n, network: "ethereum" },
 };
@@ -331,7 +332,7 @@ test("transfers group into Needs you, In progress, Sent to someone else, Complet
 
 test("a withdrawal that pays someone else is the user's to finish once the user proved it", () => {
   const routes = { w: { mode: "duskevm-withdrawal" } };
-  const own = duskAccountEvmAddress(ACCOUNT);
+  const own = evmAddressOf(ACCOUNT).toLowerCase();
   const pays = (id, patch) => ({ destination: OTHER, id, routeId: "w", sourceAt: id.charCodeAt(0), status: "pending", ...patch });
   const groups = groupTransfers(
     [
@@ -343,7 +344,7 @@ test("a withdrawal that pays someone else is the user's to finish once the user 
       pays("c", { pendingAction: "prove", pendingHash: "cd".repeat(32), proofAccount: ACCOUNT, stage: "prove_submitted" }),
       pays("d", { stage: "proven_waiting", stageSubmitter: own.toUpperCase().replace("0X", "0x") }),
       // Proved by another account, as a check read for another one says, or sent from here as another: someone else's.
-      pays("e", { stage: "ready_to_finalize", stageSubmitter: duskAccountEvmAddress(OTHER) }),
+      pays("e", { stage: "ready_to_finalize", stageSubmitter: evmAddressOf(OTHER).toLowerCase() }),
       pays("f", { proofAccount: OTHER, proveHash: "ef".repeat(32), stage: "ready_to_finalize" }),
       pays("g", { provenByOther: true, stage: "ready_to_prove" }),
     ],

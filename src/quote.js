@@ -3,16 +3,10 @@
 // balances, prices and gas estimates come in, so it's the same before and
 // after the wallet opens.
 
-import { beforeProofText, claimAfterProving, claimText } from "./claim-date.js";
+import { beforeProofText, claimAfterProving, claimText } from "@dusk-network/networks/duskevm";
+import { DEPOSIT_GAS, TRANSFER_GAS, WITHDRAWAL_GAS, withdrawalGasLimit as withdrawalStepGas } from "@dusk-network/networks/gas";
+
 import { aboutFee, formatDateTime, formatDusk, formatLux, formatMaxFee, formatTypicalFee, formatUnitsGrouped } from "./format.js";
-import {
-  DEPOSIT_GAS_LIMIT,
-  DEPOSIT_GAS_TYPICAL,
-  TRANSFER_GAS_LIMIT,
-  TRANSFER_GAS_TYPICAL,
-  WITHDRAWAL_STEP_GAS_TYPICAL,
-  withdrawalStepGas,
-} from "./gas.js";
 import { gasCoin, networkName, routeUnits, tokenName } from "./names.js";
 import { routeTime, routeTimeText } from "./route-times.js";
 
@@ -67,11 +61,11 @@ const feeText = ({ maxLux, typicalLux }) => ({
  */
 export function routeDuskFees(route, { gasPrice = 1n, withdrawalGas = 0n } = {}) {
   if (route.mode === "duskevm-deposit")
-    return { send: duskFee(DEPOSIT_GAS_LIMIT, DEPOSIT_GAS_TYPICAL, gasPrice) };
+    return { send: duskFee(DEPOSIT_GAS.limit, DEPOSIT_GAS.typical, gasPrice) };
   if (route.mode === "service-transfer")
-    return { send: duskFee(TRANSFER_GAS_LIMIT, TRANSFER_GAS_TYPICAL, gasPrice) };
+    return { send: duskFee(TRANSFER_GAS.limit, TRANSFER_GAS.typical, gasPrice) };
   if (route.mode === "duskevm-withdrawal") {
-    const step = duskFee(withdrawalStepGas(withdrawalGas), WITHDRAWAL_STEP_GAS_TYPICAL, gasPrice);
+    const step = duskFee(withdrawalStepGas(withdrawalGas), WITHDRAWAL_GAS.typical, gasPrice);
     return { claim: step, prove: step };
   }
   return {};

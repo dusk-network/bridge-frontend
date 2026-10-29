@@ -1,7 +1,7 @@
-// Amounts, fees, dates and durations as the page writes them: grouped digits,
-// DUSK as the unit, durations in whole words, and dates and Dusk fees as
-// every Dusk app writes them (@dusk-network/networks): English words on the
-// viewer's clock, fees rounded up where they're the most a step can cost.
+// Amounts, fees and dates as the page writes them: grouped digits, DUSK as
+// the unit, and dates and Dusk fees as every Dusk app writes them
+// (@dusk-network/networks): English words on the viewer's clock, fees rounded
+// up where they're the most a step can cost.
 
 import { formatDusk as formatShared, formatTime } from "@dusk-network/networks/format";
 
@@ -136,22 +136,4 @@ export function clockChangeNote(change, { now = Date.now(), timeZone } = {}) {
       ? change.direction === "back" ? "went back" : "went forward"
       : change.direction === "back" ? "go back" : "go forward";
   return `clocks ${verb} on ${formatShortDay(change.at, { timeZone })}`;
-}
-
-// ---------------------------------------------------------------------------
-// Durations
-// ---------------------------------------------------------------------------
-
-const unit = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
-
-/** "5 days 3 hours", "3 hours 12 minutes", "12 minutes": no abbreviations. */
-export function durationWords(seconds) {
-  const total = Math.max(0, Math.floor(Number(seconds) / 60));
-  if (total < 1) return "less than a minute";
-  const days = Math.floor(total / 1_440);
-  const hours = Math.floor((total % 1_440) / 60);
-  const minutes = total % 60;
-  if (days) return hours ? `${unit(days, "day")} ${unit(hours, "hour")}` : unit(days, "day");
-  if (hours) return minutes ? `${unit(hours, "hour")} ${unit(minutes, "minute")}` : unit(hours, "hour");
-  return unit(minutes, "minute");
 }
