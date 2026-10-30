@@ -406,6 +406,43 @@ test("what an earlier version kept carries on, and a testnet reset starts it ove
   assert.deepEqual([inMemory.entries.map((entry) => entry.hash), inMemory.errors], [[h(2)], []]);
 });
 
+// Mainnet, with one account paying out both chains' migrations, as a deployment can set it.
+const sharedPayer = {
+  ...cfg,
+  network: { ...networks.mainnet, routes: { ...networks.mainnet.routes, migrations: networks.mainnet.routes.migrations.map((route) => ({ ...route, payoutAccount: OTHER })) } },
+};
+
+test("a migration found by its payout is of what the payout paid, and on the route its payer pays out", async () => {
+  const tip = 1_000_000;
+  const memo = `0x${"ab".repeat(32)}`;
+  // The payout refunded its unspent gas to the account too.
+  const refunded = payout(3, tip - 80, memo);
+  refunded.events[0].data.refund_info = [ACCOUNT, "500"];
+  const node = archiveNode([refunded], { details: { [h(3)]: sent(1_792_980_200) }, finalized: tip });
+  const found = await createDiscovery({ archive: node.archive, cfg, storage: memoryStorage() }).discover({ dusk: ACCOUNT, duskRequests: 6 });
+
+  assert.deepEqual(found.entries.map((entry) => [entry.routeId, entry.amountLux, entry.status]), [["ethereum-to-dusk", "1000000000000", "completed"]]);
+
+  // Paid by an account that pays out both chains' migrations: which one, its transfer doesn't say.
+  const storage = memoryStorage();
+  const shared = await createDiscovery({ archive: archiveNode([refunded], { details: node.details, finalized: tip }).archive, cfg: sharedPayer, storage }).discover({ dusk: ACCOUNT, duskRequests: 6 });
+  assert.deepEqual([shared.entries, JSON.parse(storage.getItem(stateKey(sharedPayer, "dusk", ACCOUNT))).entries], [[], {}]);
+  // Nor, unverified, as an earlier version kept it.
+  const kept = { amountLux: "5", blockHeight: 1, hash: h(6), kind: "payout", payer: OTHER, sourceHash: memo };
+  assert.equal(entryFromHistory(kept, ACCOUNT, cfg).routeId, "ethereum-to-dusk");
+  assert.equal(entryFromHistory(kept, ACCOUNT, sharedPayer), null);
+});
+
+test("an amount already known stays when another read gives another, as a payout's gas refund would", () => {
+  const memo = `0x${"ab".repeat(32)}`;
+  const tracked = { amountLux: "1000000000000", hash: memo, id: `ethereum-to-dusk:${memo}`, routeId: "ethereum-to-dusk", status: "completed" };
+  const merged = mergeTransfer(tracked, { amountLux: "1000000000500", destinationHash: h(3), hash: memo, id: tracked.id, routeId: "ethereum-to-dusk", status: "completed" });
+
+  assert.deepEqual([merged.amountLux, merged.destinationHash], ["1000000000000", h(3)]);
+  // Until one is known, a read gives it.
+  assert.equal(mergeTransfer({ ...tracked, amountLux: undefined }, { amountLux: "7", id: tracked.id }).amountLux, "7");
+});
+
 test("a migration first found by its payout is checked once a visit, until its start is filled in", () => {
   const known = new Set(["old", "seen"]);
   const tracked = new Set(["old"]);

@@ -245,6 +245,40 @@ test("a migration is pending until Messina pays it out on Dusk", async () => {
   assert.equal((await tracking.refresh(entry, ROUTES.migration)).status, "failed");
 });
 
+test("a migration is paid out by its own route's payout account, also where that account pays out both chains", async () => {
+  const input = encodeFunctionData({
+    abi: parseAbi(["function migrate(uint256 amount, string targetAddress)"]),
+    args: [3_000_000_000_000_000_000n, SENDER],
+    functionName: "migrate",
+  });
+  // Mainnet, with one account paying out both chains' migrations, as VITE_MIGRATION_PAYOUT_ACCOUNT sets it.
+  const shared = {
+    ...payingCfg,
+    network: { ...networks.mainnet, routes: { ...networks.mainnet.routes, migrations: networks.mainnet.routes.migrations.map((route) => ({ ...route, payoutAccount: PAYER })) } },
+  };
+  const memos = {
+    [EVM_HASH]: [
+      {
+        block_height: 4_000,
+        events: [{ data: { memo: hex(EVM_HASH), receiver: SENDER, sender: PAYER, value: "3000000000" }, reverted: false, target: TRANSFER_CONTRACT, topic: "moonlight" }],
+        origin: "ef".repeat(32),
+      },
+    ],
+  };
+  const tracking = createTracking({
+    archive: archive({ memos, txs: { ["ef".repeat(32)]: { blockTimestamp: 1_792_990_000, err: null } } }),
+    config: shared,
+    node: node(),
+    rpc: fakeRpc({
+      eth_getTransactionByHash: () => ({ input }),
+      eth_getTransactionReceipt: () => ({ blockNumber: toHex(100n), status: "0x1" }),
+    }),
+  });
+
+  const paid = await tracking.refresh({ hash: EVM_HASH, routeId: ROUTES.migration.id }, ROUTES.migration);
+  assert.deepEqual([paid.status, paid.destinationHash], ["completed", "ef".repeat(32)]);
+});
+
 test("two equal deposits don't both arrive on one credit", async () => {
   const txs = { [DUSK_HASH]: depositTx(1_792_980_100), ["ef".repeat(32)]: depositTx(1_792_980_200) };
   const tracking = createTracking({
@@ -265,6 +299,25 @@ test("two equal deposits don't both arrive on one credit", async () => {
   // A completion racing another check is refused if its credit was taken.
   assert.equal(takenByAnother(second, { destinationHash: evmTx("34").toUpperCase(), status: "completed" }, others), true);
   assert.equal(takenByAnother(second, { destinationHash: evmTx("35"), status: "completed" }, others), false);
+});
+
+test("an equal deposit sent just before, which the sender's history doesn't list yet, keeps its credit", async () => {
+  const txs = { [DUSK_HASH]: depositTx(1_792_980_100), ["ef".repeat(32)]: depositTx(1_792_980_200) };
+  const tracking = createTracking({
+    // The archive hasn't listed either deposit in the sender's history yet.
+    archive: archive(),
+    config: cfg,
+    fetch: fakeChain(() => [credit(evmTx("34"), 1_900n)]),
+    node: node({ transaction: async (hash) => txs[hash] }),
+    rpc: fakeRpc(NO_ADAPTER),
+  });
+  const kept = (hash, sourceAt) => ({ amountLux: "100000000", destination: RECIPIENT, hash, routeId: ROUTES.deposit.id, sender: SENDER, sourceAt, status: "pending" });
+  const first = { ...kept(DUSK_HASH, 1_792_980_100_000), id: "first" };
+  const second = { ...kept("ef".repeat(32), 1_792_980_200_000), id: "second" };
+
+  // Checked first, the later one waits: the one credit is the earlier one's.
+  assert.equal((await tracking.refresh(second, ROUTES.deposit, { others: [first, second] })).status, "pending");
+  assert.equal((await tracking.refresh(first, ROUTES.deposit, { others: [first, second] })).destinationHash, evmTx("34"));
 });
 
 test("a Dusk → BNB Smart Chain transfer completes when the bridge pays the memo address", async () => {
@@ -315,6 +368,38 @@ test("a Dusk → BNB Smart Chain transfer completes when the bridge pays the mem
   assert.match((await tracking.refresh(entry, ROUTES.service)).note, /didn't exceed the bridge fee/u);
   tx = duskTx({ error: "Panic" });
   assert.equal((await tracking.refresh(entry, ROUTES.service)).status, "failed");
+});
+
+test("an equal transfer out sent just before, which the bridge account's history doesn't list yet, keeps its payout", async () => {
+  const payout = {
+    address: BSC_TOKEN,
+    blockNumber: toHex(1_600n),
+    data: toHex(10n ** 18n, { size: 32 }),
+    topics: [toEventSelector("Transfer(address,address,uint256)"), pad(BSC_SERVICE.payoutAddress.toLowerCase()), pad(RECIPIENT.toLowerCase())],
+    transactionHash: evmTx("02"),
+  };
+  // 2 DUSK each to the bridge account, naming RECIPIENT, as the archive has them.
+  const sent = (seconds) => ({
+    blockHeight: 4_000,
+    blockTimestamp: seconds,
+    err: null,
+    tx: { json: JSON.stringify({ receiver: BSC_SERVICE.account, sender: SENDER, type: "moonlight", value: 2_000_000_000 }), memo: hex(RECIPIENT) },
+  });
+  const later = "ef".repeat(32);
+  const txs = { [DUSK_HASH]: sent(1_792_980_100), [later]: sent(1_792_980_200) };
+  const tracking = createTracking({
+    archive: archive({ txs }),
+    config: bscCfg,
+    fetch: fakeChain(() => [payout]),
+    node: node({ transaction: async (hash) => duskTx({ blockTimestamp: BigInt(txs[hash].blockTimestamp), json: { receiver: BSC_SERVICE.account, sender: SENDER, value: 2_000_000_000 } }) }),
+    rpc: fakeRpc({}),
+  });
+  const kept = (hash, sourceAt) => ({ amountLux: "2000000000", destination: RECIPIENT, hash, routeId: ROUTES.service.id, sender: SENDER, sourceAt, status: "pending" });
+  const first = { ...kept(DUSK_HASH, 1_792_980_100_000), id: "first" };
+  const second = { ...kept(later, 1_792_980_200_000), id: "second" };
+
+  assert.equal((await tracking.refresh(second, ROUTES.service, { others: [first, second] })).status, "pending");
+  assert.equal((await tracking.refresh(first, ROUTES.service, { others: [first, second] })).destinationHash, evmTx("02"));
 });
 
 test("a deposit is followed to its DuskEVM credit through the bridge event when the adapter can't map hashes", async () => {

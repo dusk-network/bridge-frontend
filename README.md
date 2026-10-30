@@ -118,7 +118,9 @@ account so the next visit asks only for what is new.
   visit carries on. A node on another chain (a reset testnet) starts it over.
   It gives the account's deposits into DuskEVM, its transfers to the bridge
   account, and migration payouts (transfers from a migration's payout
-  account whose memo is the migration's transaction hash).
+  account whose memo is the migration's transaction hash, of what they
+  paid; an account set to pay out both chains doesn't say which a payout is
+  for, so its payouts aren't listed).
 - **The EVM address**: DuskEVM's L2 bridge event `ETHBridgeInitiated` filtered
   by sender, 100,000 blocks (the RPC's limit) per request from the newest
   down. Each withdrawal's Dusk recipient is decoded from its `extraData`.
@@ -147,7 +149,8 @@ Which payout or credit is a transfer's comes from
   the amount. DuskEVM testnet takes the second path today.
 - A payout or credit belongs to one transfer: two equal transfers to the same
   address each need their own, and take them in the order they were sent,
-  those sent from another device too. Where that order can't be told, the
+  those sent from another device too, and those this browser follows that
+  the archive doesn't list yet. Where that order can't be told, the
   transfer stays in progress.
 - **Withdrawals** show their three steps, sent, proved and claimed, with
   times, the claim date, and the next action. Readiness is read from the

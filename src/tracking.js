@@ -92,6 +92,8 @@ export const takenByAnother = (entry, patch, others = []) =>
   Boolean(patch.destinationHash) &&
   takenDestinations(entry, others).has(String(patch.destinationHash).toLowerCase());
 
+const sameAddress = (a, b) => String(a ?? "").toLowerCase() === String(b ?? "").toLowerCase();
+
 const isMethodMissing = (error) =>
   error?.code === -32601 || /method not found|does not exist/iu.test(error?.message ?? "");
 
@@ -122,6 +124,10 @@ export function createTracking(deps) {
   // The head this browser read before sending a transfer: its payout can't
   // come before it. An older check kept where its search stopped there instead.
   const sentFrom = (entry) => (entry.scanBasis === undefined ? entry.scanFrom : null);
+  // Equal transfers this browser follows that haven't ended: the archive may
+  // not list them yet, and the earlier ones are paid first.
+  const waitingAlike = (entry, others, alike) =>
+    others.filter((other) => other.id !== entry.id && other.routeId === entry.routeId && other.status === "pending" && other.sourceAt && alike(other));
   /** A Dusk call's deposit to DuskEVM, read from its arguments, or null for any other call. */
   const depositOf = (call) => {
     const read = call ? decodeBridgeCall(config.network, { args: call.data, contractId: call.contractId, fnName: call.fnName }) : null;
@@ -200,11 +206,12 @@ export function createTracking(deps) {
       return failed(NO_PAYOUT["no-address"], patch);
     }
     // The DUSK token's transfer from the route's payout address to the memo's.
+    const peers = waitingAlike(entry, others, (other) => sameAddress(other.destination, recipient) && String(other.amountLux) === patch.amountLux);
     const { arrivals } = await serviceArrivals({
       ...searchOn(network, config.evmNetworks[network].rpcUrl),
       archive,
       taken: takenDestinations(entry, others),
-      transfers: [{ fee: service.feeLux, hash: entry.hash, notBefore: sentFrom(entry), route: route.id, scan: entry.scan }],
+      transfers: [entry, ...peers].map((item) => ({ fee: service.feeLux, hash: item.hash, notBefore: sentFrom(item), route: route.id, scan: item.scan })),
     });
     const [arrival] = arrivals.values();
     return outcome(arrival, patch, `Waiting for the payout on ${name(network)}.`);
@@ -271,22 +278,24 @@ export function createTracking(deps) {
       return completed({ ...patch, destinationAt: viaAdapter.at, destinationHash: viaAdapter.hash });
     if (viaAdapter === null) return pending(`Waiting for ${name("dusk-evm")}.`, patch);
     // The L2 bridge's credit from the sender's DuskEVM address, with the
-    // sender's equal deposits just before this one paid first.
+    // sender's equal deposits just before this one paid first: those its
+    // history lists, and those this browser follows, at their own blocks.
+    const peers = waitingAlike(entry, others, (other) => sameAddress(other.destination, args.recipient) && String(other.amountLux) === patch.amountLux && other.sender === patch.sender);
+    const peerTxs = await Promise.all(peers.map((other) => node.transaction(other.hash).catch(() => null)));
+    const deposit = (item, itemTx) => ({
+      amount: args.amountLux,
+      at: itemTx.blockTimestamp ? Number(itemTx.blockTimestamp) * 1_000 : null,
+      hash: item.hash,
+      height: Number(itemTx.blockHeight),
+      notBefore: sentFrom(item),
+      scan: item.scan,
+      sender: patch.sender ?? null,
+      to: args.recipient,
+    });
     const { arrivals } = await depositArrivals({
       ...searchOn("dusk-evm", config.duskEvm.rpcUrl),
       archive,
-      deposits: [
-        {
-          amount: args.amountLux,
-          at: sourceAt,
-          hash: entry.hash,
-          height: Number(tx.blockHeight),
-          notBefore: sentFrom(entry),
-          scan: entry.scan,
-          sender: patch.sender ?? null,
-          to: args.recipient,
-        },
-      ],
+      deposits: [deposit(entry, tx), ...peers.flatMap((other, i) => (peerTxs[i] && !peerTxs[i].error ? [deposit(other, peerTxs[i])] : []))],
       taken: takenDestinations(entry, others),
       via: "rpc",
     });

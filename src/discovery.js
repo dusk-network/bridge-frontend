@@ -9,7 +9,7 @@
 
 import { migrationPayoutOf } from "@dusk-network/app-core/bridge";
 import { StaleHistoryError, createHistory } from "@dusk-network/app-core/history";
-import { routeForAccount } from "@dusk-network/networks";
+import { routes } from "@dusk-network/networks";
 
 import { syncWithdrawals } from "./l2-withdrawals.js";
 import { entryId } from "./activity.js";
@@ -69,9 +69,11 @@ function recordOf(entry, cfg) {
     return { ...base, destination: null, kind: "deposit" };
   if (entry.direction === "out" && entry.kind === "transfer" && cfg.service && entry.counterparty === cfg.service.account)
     return { ...base, amountLux: entry.value, destination: entry.memo.trim() || null, kind: "service" };
-  // A transfer from a migration's payout account, with its hash as the memo.
+  // A transfer from a migration's payout account, with its hash as the memo,
+  // of what it paid. One from an account that pays out both chains doesn't
+  // say which it is for: left out.
   const payout = migrationPayoutOf(entry, cfg.network);
-  if (payout) return { ...base, amountLux: entry.value, kind: "payout", routeId: payout.route, sourceHash: payout.hash };
+  if (payout?.route) return { ...base, amountLux: payout.amount.toString(), kind: "payout", routeId: payout.route, sourceHash: payout.hash };
   return null;
 }
 
@@ -142,8 +144,11 @@ function historyStore(key, cfg, storage) {
 export function mergeTransfer(existing, update) {
   if (!existing) return { status: "pending", ...update, parties: [...new Set((update.parties ?? []).filter(Boolean).map(partyKey))] };
   const merged = { ...existing };
+  // An amount once known stays: the account's history reads what its balance
+  // moved, a gas refund paid with the transfer included.
+  const known = existing.amountLux !== undefined && existing.amountLux !== null;
   for (const [key, value] of Object.entries(update))
-    if (value !== undefined && value !== null && key !== "parties") merged[key] = value;
+    if (value !== undefined && value !== null && key !== "parties" && !(key === "amountLux" && known)) merged[key] = value;
   if (TERMINAL.has(existing.status) && !TERMINAL.has(update.status)) {
     merged.status = existing.status;
     merged.note = existing.note;
@@ -224,8 +229,9 @@ export function entryFromHistory(record, account, cfg) {
       sender: account,
       sourceAt: record.sourceAt ?? undefined,
     };
-  // A payout an earlier version kept unverified: its payout account names its route.
-  const routeId = record.routeId ?? (record.rejected ? null : routeForAccount(cfg.network, record.payer, "in")?.id);
+  // A payout an earlier version kept unverified: the one route its payout account pays out.
+  const paid = record.routeId || record.rejected ? [] : routes(cfg.network).filter((route) => route.kind === "migration" && route.payoutAccount && route.payoutAccount === record.payer);
+  const routeId = record.routeId ?? (paid.length === 1 ? paid[0].id : null);
   if (record.kind === "payout" && routeId)
     return {
       amountLux: record.amountLux,
