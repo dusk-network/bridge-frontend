@@ -1105,8 +1105,16 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     // What this step costs at most: an estimate until the request is ready.
     const stepMax = withdrawalStepMax({ gasPrice, withdrawalGas: entry.withdrawalGas ? BigInt(entry.withdrawalGas) : 0n });
     // A proof says when it can be claimed: by the Portal's wait until the request says the date.
-    const lead = (maxLux, claim = null) =>
-      actionLead(kind, entry, { account: duskAccount(), amountLux: view.amount, claim, maturity: view.time?.maturity ?? null, maxLux, name: duskName() });
+    // Once it's ready, what it pays and to whom are its call's own, as Dusk Wallet reads them.
+    const lead = (maxLux, claim = null, decoded = null) =>
+      actionLead(kind, decoded ? { ...entry, destination: decoded.recipient.account ?? decoded.recipient.contractId } : entry, {
+        account: duskAccount(),
+        amountLux: decoded ? decoded.amountWei / WEI_PER_LUX : view.amount,
+        claim,
+        maturity: view.time?.maturity ?? null,
+        maxLux,
+        name: duskName(),
+      });
     const review = reviews.start({
       amountLux: entry.amountLux,
       checks: [],
@@ -1144,11 +1152,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         const submitter = proofSubmitterFor(account);
         // Only the account that proved can claim with its proof.
         if (kind === "finalize" && proverMismatch(entry, submitter)) throw new Error(switchToProver(entry));
-        const prepared =
-          kind === "prove"
-            ? await services.withdrawals.prepareProve(entry.hash, { gasPrice, proofSubmitter: submitter })
-            : await services.withdrawals.prepareFinalize(entry.hash, { gasPrice, proofSubmitter: submitter });
-        const request = await services.portalRequest(prepared);
+        // The package's checked call, as it is, at the price the page quoted.
+        const { claim, decoded, request } = await services.withdrawals.request(kind, entry.hash, { price: gasPrice, submitter });
         // What the call carries, as Dusk Wallet reads it from the call.
         const lines = await duskCallLines({
           ...request,
@@ -1157,15 +1162,15 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
           fromName: account === duskAccount() ? duskName() : "",
           note: "The DuskEVM withdrawal portal on Dusk.",
         });
-        return { account, claim: prepared.claim ?? null, lines, request };
+        return { account, claim, decoded, lines, request };
       },
-      ({ account, claim, lines, request }) => {
+      ({ account, claim, decoded, lines, request }) => {
         // Prepared for the account Dusk Wallet had then: only it can confirm,
         // and it's the one the proof or claim makes public.
         review.signer = { account, wallet: "dusk" };
         review.privacy = actionPrivacy(kind, privacyLine(route, cfg, { dusk: entry.destination, evm: entry.sender, name: duskPartyName(entry.destination) }), { account, name: duskName() });
         review.request = request;
-        review.lead = lead(BigInt(request.gas.limit) * BigInt(request.gas.price), claim);
+        review.lead = lead(BigInt(request.gas.limit) * BigInt(request.gas.price), claim, decoded);
         review.steps[0] = { ...review.steps[0], lines };
       },
       (error) => {

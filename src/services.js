@@ -5,8 +5,7 @@ import { createPublicClient, http } from "viem";
 
 import { config } from "./config.js";
 import { createChainTimes, readDepositLag } from "./chain-times.js";
-import { MAX_BATCH, contractFacade } from "./contract-reader.js";
-import { createDriverLoader, driverJson } from "./data-driver.js";
+import { createDriverLoader } from "./data-driver.js";
 import { createDiscovery } from "./discovery.js";
 import { createDuskNames } from "./dusk-names.js";
 import { createDuskNode } from "./dusk-node.js";
@@ -14,7 +13,11 @@ import { getDuskWallet } from "./dusk-wallet.js";
 import { createEvmReads } from "./evm-reads.js";
 import { resolveTransfer } from "./resolve.js";
 import { createTracking } from "./tracking.js";
-import { GAME_HUB_DRIVER, GAME_REGISTRY_DRIVER, createWithdrawals, parseGameSearchDepth } from "./withdrawals.js";
+import { createPageWithdrawals } from "./withdrawals.js";
+
+// Multicall for Dusk takes at most 256 calls and 64 KiB in or out per query;
+// bridge screens make far fewer reads, so a smaller batch leaves headroom.
+export const MAX_BATCH = 64;
 
 /** JSON-RPC over fetch, for the EVM chains and the DuskEVM adapter. */
 export function createRpc(urls, fetch = globalThis.fetch) {
@@ -73,18 +76,12 @@ export function proofSubmitterFor(account) {
 
 export function createServices(cfg = config, { fetchDriver } = {}) {
   // Contract reads made in one task go to the node as one Multicall for Dusk
-  // query, where the network has it.
-  const node = createDuskNode({
-    fetch: createMulticallFetch({ maxBatch: MAX_BATCH, multicallId: cfg.multicall.contractId || null, nodeUrl: cfg.dusk.nodeUrl }),
-    url: cfg.dusk.nodeUrl,
-  });
+  // query, where the network has it: this page's and the withdrawals'.
+  const reads = createMulticallFetch({ maxBatch: MAX_BATCH, multicallId: cfg.multicall.contractId || null, nodeUrl: cfg.dusk.nodeUrl });
+  const node = createDuskNode({ fetch: reads, url: cfg.dusk.nodeUrl });
   // The same node's archive, for account histories.
   const archive = createArchive({ url: cfg.dusk.nodeUrl });
   const loadDriver = createDriverLoader(fetchDriver ? { fetch: fetchDriver } : {});
-  const contract = (id, driver) => ({
-    driver: () => loadDriver(driver.url, driver.sha256),
-    id,
-  });
   const urls = {
     "dusk-evm": cfg.duskEvm.rpcUrl,
     // The adapter's L1 view, asked only which DuskEVM deposit a Dusk
@@ -99,48 +96,24 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
   const rpc = createRpc(urls);
   const rpcBatch = createRpcBatch(urls);
 
-  let withdrawals = null;
-  let portalRequest = null;
-  if (cfg.duskEvm.enabled) {
-    const portal = contract(cfg.duskEvm.optimismPortalContractId, cfg.duskEvm.optimismPortalDriver);
-    /** A proof or claim as Dusk Wallet receives it, with its arguments encoded. */
-    portalRequest = async ({ args, fnName, gas }) => {
-      const driver = await portal.driver();
-      return {
-        contractId: portal.id,
-        display: {
-          label: fnName === "proveWithdrawalTransaction" ? "Prove a DuskEVM withdrawal" : "Claim a DuskEVM withdrawal",
+  // DuskEVM withdrawals, with the drivers the network's file pins.
+  const driver = ({ sha256, url }) => () => loadDriver(url, sha256);
+  const withdrawals = cfg.duskEvm.enabled
+    ? createPageWithdrawals(cfg, {
+        connected: () => {
+          try {
+            return proofSubmitterFor(getDuskWallet().state.selectedProfile?.account);
+          } catch {
+            return null;
+          }
         },
-        fnArgs: driver.encodeInputFn(fnName, driverJson(args)),
-        fnName,
-        gas,
-      };
-    };
-    const dgf = contract(cfg.duskEvm.disputeGameFactoryContractId, cfg.duskEvm.disputeGameFactoryDriver);
-    withdrawals = createWithdrawals({
-      dgf: contractFacade(node, dgf),
-      gameSearchDepth: parseGameSearchDepth(cfg.duskEvm.bridgeGameSearchDepth),
-      gasPrice: () => node.gasPrice(),
-      gasUpper: cfg.gasLimitUpper,
-      // Each game's hub, read raw through the same Multicall batches.
-      hub: (id) => contractFacade(node, { driver: async () => GAME_HUB_DRIVER, id }),
-      l2Rpc: (method, params) => rpc("dusk-evm", method, params),
-      latestBlock: () => node.latestBlock(),
-      network: cfg.network,
-      portal: contractFacade(node, portal),
-      proofSubmitter: () => {
-        try {
-          return proofSubmitterFor(getDuskWallet().state.selectedProfile?.account);
-        } catch {
-          return null;
-        }
-      },
-      // Whether the Portal would take a proof against a game, read raw in the same batches.
-      registry: cfg.duskEvm.anchorStateRegistryContractId
-        ? contractFacade(node, { driver: async () => GAME_REGISTRY_DRIVER, id: cfg.duskEvm.anchorStateRegistryContractId })
-        : null,
-    });
-  }
+        drivers: { disputeGameFactory: driver(cfg.duskEvm.disputeGameFactoryDriver), optimismPortal: driver(cfg.duskEvm.optimismPortalDriver) },
+        fetch: reads,
+        maxBatch: MAX_BATCH,
+        node,
+        rpc,
+      })
+    : null;
 
   const clients = new Map();
   const tracking = createTracking({
@@ -164,7 +137,7 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
         key: `dusk-bridge:times:v1:${cfg.profile}:${cfg.duskEvm.optimismPortalContractId}`,
         read: {
           deposit: () => readDepositLag({ l1Block: cfg.duskEvm.predeploys.l1Block, node, rpcBatch }),
-          withdrawal: () => withdrawals.loadTiming(),
+          withdrawal: () => withdrawals.timing(),
         },
       })
     : null;
@@ -175,7 +148,6 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
     // The connected account's verified .dusk name, where Dusk Wallet sends none.
     names: createDuskNames({ chainId: cfg.dusk.chainId, nodeUrl: cfg.dusk.nodeUrl }),
     node,
-    portalRequest,
     resolve: (hash) => resolveTransfer(hash, { cfg, node, rpc }),
     rpc,
     rpcBatch,

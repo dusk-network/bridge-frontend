@@ -146,17 +146,25 @@ function duskEvmConfig(net) {
 }
 
 /**
- * The network's file with this deployment's DuskEVM bridge and Portal in
- * place of its own where they differ, so the bridge's calls and withdrawals
- * are read on the contracts this page sends them to.
+ * The network's file with this deployment's DuskEVM bridge, Portal, dispute
+ * game factory and anchor state registry in place of its own where they
+ * differ, so the bridge's calls and withdrawals are read on the contracts
+ * this page sends them to. A registry left out (`none`) is left out here too.
  */
 function withDuskEvmContracts(net, duskEvm) {
   const contracts = net.duskEvm?.contracts ?? {};
-  const own = { l1_standard_bridge: duskEvm.l1StandardBridgeContractId, optimism_portal: duskEvm.optimismPortalContractId };
+  const own = {
+    anchor_state_registry: duskEvm.anchorStateRegistryContractId,
+    dispute_game_factory: duskEvm.disputeGameFactoryContractId,
+    l1_standard_bridge: duskEvm.l1StandardBridgeContractId,
+    optimism_portal: duskEvm.optimismPortalContractId,
+  };
   const set = Object.entries(own).filter(([name, id]) => isContractId(id) && id !== contracts[name]?.contractId);
-  if (!net.duskEvm || !set.length) return net;
+  const dropRegistry = !duskEvm.anchorStateRegistryContractId && Object.hasOwn(contracts, "anchor_state_registry");
+  if (!net.duskEvm || (!set.length && !dropRegistry)) return net;
+  const { anchor_state_registry: _registry, ...kept } = contracts;
   const replaced = Object.fromEntries(set.map(([name, contractId]) => [name, { contractId, evmAddress: evmAddressOf(contractId) }]));
-  return { ...net, duskEvm: { ...net.duskEvm, contracts: { ...contracts, ...replaced } } };
+  return { ...net, duskEvm: { ...net.duskEvm, contracts: { ...(dropRegistry ? kept : contracts), ...replaced } } };
 }
 
 /**

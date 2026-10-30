@@ -1,10 +1,4 @@
-import {
-  DEFAULT_WITHDRAWAL_MIN_GAS_LIMIT,
-  encodeDuskExternalAssetRecipient,
-  prepareNativeWithdrawal,
-} from "@dusk/evm-sdk";
-
-import { decodeBase58 } from "@dusk-network/networks/account";
+import { withdrawalCall } from "@dusk-network/app-core/duskevm-withdrawals";
 
 import { duskToLux } from "./amount.js";
 import { config } from "./config.js";
@@ -32,15 +26,6 @@ export const duskEvmNetwork = () => ({
   rpcUrl: config.duskEvm.rpcUrl,
 });
 
-export function prepareWithdrawalCall({ account, amountWei, duskAccount }) {
-  return prepareNativeWithdrawal({
-    amountWei: BigInt(amountWei),
-    extraData: encodeDuskExternalAssetRecipient(decodeBase58(duskAccount)),
-    minGasLimit: DEFAULT_WITHDRAWAL_MIN_GAS_LIMIT,
-    recipient: account,
-  });
-}
-
 /**
  * Sends the DuskEVM step and returns its hash once the wallet has sent it;
  * the tracker follows it from there. The Dusk recipient is the one given, or
@@ -52,16 +37,8 @@ export async function submitDuskEvmWithdrawal({ amount, duskAccount }) {
   const network = duskEvmNetwork();
   await ensureEvmChain(network);
   const { account, walletClient } = getEvmClients(network);
-  const operation = prepareWithdrawalCall({
-    account,
-    amountWei,
-    duskAccount: recipient,
-  });
-  const hash = await walletClient.sendTransaction({
-    account,
-    data: operation.l2Transaction.data,
-    to: operation.l2Transaction.to,
-    value: operation.l2Transaction.value,
-  });
+  // DuskEVM's bridge's bridgeETHTo, paying the Dusk account in its extra data.
+  const { data, to, value } = withdrawalCall(config.network, { amountWei, sender: account, to: recipient });
+  const hash = await walletClient.sendTransaction({ account, data, to, value });
   return { amountWei, duskAccount: recipient, hash };
 }

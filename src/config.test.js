@@ -275,6 +275,12 @@ test("the bridge's calls are read on the DuskEVM contracts the deployment sets, 
     [duskEvmContracts(set.network).bridge, duskEvmContracts(set.network).portal, duskEvmContracts(set.network).messenger],
     ["11".repeat(32), "22".repeat(32), networks.testnet.duskEvm.contracts.l1_cross_domain_messenger.contractId],
   );
+  // Withdrawals are read on its factory and registry too, and on none where it leaves the registry out.
+  const read = (extra) => duskEvmContracts(withConfig({ VITE_BRIDGE_PROFILE: "testnet", ...extra }).cfg.network);
+  assert.deepEqual(
+    [read(TESTNET_DUSKEVM).disputeGameFactory, read({ VITE_DUSKEVM_ANCHOR_STATE_REGISTRY_CONTRACT_ID: "44".repeat(32) }).anchorStateRegistry, read({ VITE_DUSKEVM_ANCHOR_STATE_REGISTRY_CONTRACT_ID: "none" }).anchorStateRegistry],
+    ["33".repeat(32), "44".repeat(32), null],
+  );
 });
 
 test("a payout to BNB Smart Chain is looked for from the address the network's file names", () => {
