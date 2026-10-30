@@ -83,10 +83,18 @@ function duskTx(overrides = {}) {
 }
 
 const node = (overrides = {}) => ({
-  query: async () => ({ h: { json: null } }),
   transaction: async () => null,
   transfersByMemo: async () => [],
   ...overrides,
+});
+
+/** The archive, answering `list` as the sender's history for any range, 50 a page; `queries` hears each request. */
+const archive = (list = [], queries = []) => ({
+  query: async (text) => {
+    queries.push(text);
+    const page = Number(/pageCount: (\d+)/u.exec(text)?.[1] ?? 1);
+    return { out: { json: list.slice((page - 1) * 50, page * 50) } };
+  },
 });
 
 test("a migration is pending until Messina pays it out on Dusk", async () => {
@@ -229,7 +237,7 @@ test("two equal deposits don't both arrive on one credit", async () => {
     },
     "dusk-evm:eth_getLogs": () => [credit("0x34")],
   });
-  const tracking = createTracking({ config: cfg, node: node({ transaction: async (hash) => txs[hash] }), rpc });
+  const tracking = createTracking({ archive: archive(), config: cfg, node: node({ transaction: async (hash) => txs[hash] }), rpc });
   const first = { hash: DUSK_HASH, id: "first", routeId: ROUTES.deposit.id };
   const second = { hash: "ef".repeat(32), id: "second", routeId: ROUTES.deposit.id };
 
@@ -315,7 +323,12 @@ test("a deposit on a device that only knows it leaves the earlier equal deposit'
   const earlier = "ef".repeat(32);
   const txs = { [DUSK_HASH]: deposit(1_792_980_200, 5_000), [earlier]: deposit(1_792_980_100, 4_990) };
   const intoBridge = { data: { receiver: BRIDGE, sender: SENDER, value: 100_000_000 }, target: `01${"0".repeat(62)}`, topic: "deposit" };
-  let history = [listed(earlier, intoBridge), listed(DUSK_HASH, intoBridge)];
+  // The earlier one paid its unspent gas to another account: its sender paid more than the bridge took.
+  const refund = { data: { receiver: null, refund_info: [TESTNET_REGGIO_BRIDGE_ACCOUNT, "500"], sender: SENDER, value: "0" }, reverted: false, target: `01${"0".repeat(62)}`, topic: "moonlight" };
+  const paidMore = { ...listed(earlier, intoBridge), events: [...listed(earlier, intoBridge).events, refund] };
+  // Two pages of the sender's history: the two deposits, and deposits of another amount.
+  const another = { ...intoBridge, data: { ...intoBridge.data, value: 5 } };
+  let history = [paidMore, listed(DUSK_HASH, intoBridge), ...Array.from({ length: 58 }, (_, index) => listed(index.toString(16).padStart(64, "f"), another))];
   const queries = [];
   const credit = (hash, block) => ({
     blockNumber: toHex(block),
@@ -334,14 +347,9 @@ test("a deposit on a device that only knows it leaves the earlier equal deposit'
   });
   const make = () =>
     createTracking({
+      archive: archive(history, queries),
       config: cfg,
-      node: node({
-        query: async (selection) => {
-          queries.push(selection);
-          return { h: { json: history } };
-        },
-        transaction: async (hash) => txs[hash] ?? null,
-      }),
+      node: node({ transaction: async (hash) => txs[hash] ?? null }),
       rpc,
     });
   const entry = { hash: DUSK_HASH, id: "this", routeId: ROUTES.deposit.id };
@@ -349,12 +357,12 @@ test("a deposit on a device that only knows it leaves the earlier equal deposit'
   // The sender's history, a few hours up to this deposit, says which came first.
   const tracking = make();
   assert.equal((await tracking.refresh(entry, ROUTES.deposit, { others: [entry] })).status, "pending");
-  assert.match(queries[0], new RegExp(`^h: moonlightHistory\\(sender: "${SENDER}", fromBlock: 2840, toBlock: 5000, maxCount: 50\\)`, "u"));
+  assert.match(queries[0], new RegExp(`moonlightHistory\\(sender: "${SENDER}", fromBlock: 2840, toBlock: 5000, maxCount: 50\\)`, "u"));
   credits = [credit("0x34", 1_900n), credit("0x35", 1_950n)];
   assert.equal((await tracking.refresh(entry, ROUTES.deposit, { others: [entry] })).destinationHash, "0x35");
 
   // A history too long to read to the end leaves the order unclear: it waits.
-  history = Array.from({ length: 50 }, (_, index) => listed(index.toString(16).padStart(64, "0"), intoBridge));
+  history = Array.from({ length: 201 }, (_, index) => listed(index.toString(16).padStart(64, "0"), intoBridge));
   const unclear = await make().refresh(entry, ROUTES.deposit, { others: [entry] });
   assert.equal(unclear.status, "pending");
   assert.match(unclear.note, /can't be told apart/u);
@@ -435,7 +443,7 @@ test("a deposit is followed to its DuskEVM credit through the bridge event when 
         : [];
     },
   });
-  const tracking = createTracking({ config: cfg, node: node({ transaction: async () => depositTx }), rpc });
+  const tracking = createTracking({ archive: archive(), config: cfg, node: node({ transaction: async () => depositTx }), rpc });
   const entry = { hash: DUSK_HASH, routeId: ROUTES.deposit.id };
 
   const waiting = await tracking.refresh(entry, ROUTES.deposit);
@@ -672,7 +680,7 @@ test("a credit from before the deposit was sent here isn't taken as its credit",
         .filter((log) => BigInt(log.blockNumber) >= BigInt(filter.fromBlock) && BigInt(log.blockNumber) <= BigInt(filter.toBlock))
         .map((log) => ({ ...log, topics: filter.topics })),
   });
-  const tracking = createTracking({ config: cfg, node: node({ transaction: async () => depositTx }), rpc });
+  const tracking = createTracking({ archive: archive(), config: cfg, node: node({ transaction: async () => depositTx }), rpc });
   const entry = { hash: DUSK_HASH, id: "sent", routeId: ROUTES.deposit.id, scanFrom: "1700" };
   assert.equal((await tracking.refresh(entry, ROUTES.deposit, { others: [entry] })).destinationHash, "0x02");
 });

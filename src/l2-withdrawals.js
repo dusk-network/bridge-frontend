@@ -7,10 +7,9 @@
 // blocks count as covered: a block above can still be reorged away, with
 // the withdrawals in it, so those are read once final (within minutes).
 
+import { addCoverage, topGap } from "@dusk-network/app-core/history";
 import { duskRecipientOf } from "@dusk-network/networks/duskevm";
 import { decodeAbiParameters, pad, toEventSelector, toHex } from "viem";
-
-import { addCoverage, topGap } from "./dusk-history.js";
 
 export const L2_WINDOW = 100_000;
 export const L2_RUN_REQUESTS = 8;

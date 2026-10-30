@@ -2,6 +2,7 @@
 // rebuilt from the route and the source transaction hash; stored fields only
 // save work (where a search left off) or remember what this browser sent.
 
+import { historyRange } from "@dusk-network/app-core/history";
 import { BRIDGE_FUNCTIONS, decodeBridgeCall, evmAddressOf } from "@dusk-network/networks/duskevm";
 import { observeDepositStatus } from "@dusk/evm-sdk";
 import {
@@ -87,9 +88,7 @@ const DEPOSIT_ORDER_HORIZON_MS = 2 * 3_600_000;
 // A deposit's equal deposits are read from its sender's history, three
 // horizons back at about one Dusk block per 10 seconds, a page at a time.
 const DUSK_BLOCK_MS = 10_000;
-const HISTORY_PAGE = 50;
 const HISTORY_PAGES = 4;
-const TRANSFER_CONTRACT = `01${"0".repeat(62)}`;
 const DUSK_HASH = /^[0-9a-f]{64}$/u;
 
 const lower = (value) => String(value ?? "").toLowerCase();
@@ -125,6 +124,7 @@ const isMethodMissing = (error) =>
 
 /**
  * @param {object} deps
+ * @param {object} deps.archive the Dusk node's archive (@dusk-network/app-core/history)
  * @param {object} deps.config the deployment config
  * @param {object} deps.node the Dusk node client
  * @param {(network: string, method: string, params: unknown[]) => Promise<any>} deps.rpc
@@ -134,7 +134,7 @@ const isMethodMissing = (error) =>
  * @param {() => number} [deps.now]
  */
 export function createTracking(deps) {
-  const { config, node, rpc } = deps;
+  const { archive, config, node, rpc } = deps;
   const now = deps.now ?? Date.now;
   const name = (id) => networkName(config, id);
   let adapterLookup = "unknown";
@@ -198,39 +198,16 @@ export function createTracking(deps) {
     if (alikeRead.has(key)) return alikeRead.get(key);
     const top = Number(height);
     const bottom = Math.max(0, top - Math.ceil((3 * DEPOSIT_ORDER_HORIZON_MS) / DUSK_BLOCK_MS));
-    const items = [];
-    let complete = false;
-    for (let page = 1; page <= HISTORY_PAGES && !complete; page += 1) {
-      const args = [`sender: ${JSON.stringify(sender)}`, `fromBlock: ${bottom}`, `toBlock: ${top}`, `maxCount: ${HISTORY_PAGE}`];
-      if (page > 1) args.push(`pageCount: ${page}`);
-      const data = await node.query(`h: moonlightHistory(${args.join(", ")}) { json }`);
-      const list = Array.isArray(data?.h?.json) ? data.h.json : [];
-      items.push(...list);
-      complete = list.length < HISTORY_PAGE;
-    }
+    const { complete, entries } = await historyRange(archive, { account: sender, direction: "out", from: bottom, pages: HISTORY_PAGES, to: top });
+    // The sender's deposits: what each paid the bridge is its call's, read below.
     const bridge = lower(config.duskEvm.l1StandardBridgeContractId);
-    const candidates = [
-      ...new Set(
-        items
-          .filter((item) =>
-            (item?.events ?? []).some(
-              (event) =>
-                lower(event?.target) === TRANSFER_CONTRACT &&
-                event.topic === "deposit" &&
-                !event.reverted &&
-                lower(event.data?.receiver) === bridge &&
-                String(event.data?.value ?? "") === String(amountLux),
-            ),
-          )
-          .map((item) => lower(item.origin)),
-      ),
-    ].filter((hash) => DUSK_HASH.test(hash) && hash !== lower(entry.hash));
+    const candidates = entries.filter((item) => item.counterparty === bridge && item.hash !== lower(entry.hash)).map((item) => item.hash);
     const alike = (await sentTimes(candidates)).filter(({ tx }) => {
       const deposit = depositOf(tx.callData);
       return Boolean(deposit) && sameAddress(deposit.recipient, recipient) && deposit.amountLux === BigInt(amountLux);
     });
     const result = { alike, complete, reach: bottom === 0 ? Infinity : top - bottom };
-    if (complete && items.some((item) => lower(item?.origin) === lower(entry.hash))) alikeRead.set(key, result);
+    if (complete && entries.some((item) => item.hash === lower(entry.hash))) alikeRead.set(key, result);
     return result;
   }
 
