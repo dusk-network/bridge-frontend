@@ -4,9 +4,10 @@ import test from "node:test";
 import { encodeDuskExternalAssetRecipient } from "@dusk/evm-sdk";
 import { encodeAbiParameters, encodeFunctionData, pad, parseAbi } from "viem";
 
+import { createArchive } from "@dusk-network/app-core/history";
 import { networks } from "@dusk-network/networks";
 import { decodeBase58 } from "@dusk-network/networks/account";
-import { evmAddressOf } from "@dusk-network/networks/duskevm";
+import { encodeDepositArgs, evmAddressOf } from "@dusk-network/networks/duskevm";
 
 // Two accounts the networks' files name: the BSC and the Sepolia bridge accounts.
 const MAINNET_BSC_BRIDGE_ACCOUNT = networks.mainnet.routes.services[0].account;
@@ -19,9 +20,9 @@ import {
   mergeTransfer,
   mergeTransfers,
   shownFor,
+  stateKey,
   verifyPayouts,
 } from "./discovery.js";
-import { FIRST_WINDOW, addCoverage, bridgeEntry, syncDuskHistory, topGap } from "./dusk-history.js";
 import { ETH_BRIDGE_INITIATED_TOPIC, syncWithdrawals } from "./l2-withdrawals.js";
 
 const ACCOUNT = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
@@ -66,140 +67,6 @@ const plain = (n, height) => ({
   block_height: height,
   events: [{ data: { memo: hex("rent"), receiver: OTHER, sender: ACCOUNT, value: "5" }, reverted: false, target: TRANSFER, topic: "moonlight" }],
   origin: h(n),
-});
-
-test("the archive's entries are read as the bridge transfers they are", () => {
-  assert.deepEqual(bridgeEntry(ACCOUNT, deposit(1, 10), cfg), {
-    amountLux: "100000000",
-    blockHeight: 10,
-    destination: EVM,
-    hash: h(1),
-    kind: "deposit",
-  });
-  assert.deepEqual(bridgeEntry(ACCOUNT, service(2, 11), cfg), {
-    amountLux: "50000000000",
-    blockHeight: 11,
-    destination: "0xeE1b68ED496712cda857ada41d326d357049E51C",
-    hash: h(2),
-    kind: "service",
-  });
-  const memo = `0x${"ab".repeat(32)}`;
-  assert.deepEqual(bridgeEntry(ACCOUNT, payout(3, 12, memo), cfg), {
-    amountLux: "1000000000000",
-    blockHeight: 12,
-    hash: h(3),
-    kind: "payout",
-    payer: OTHER,
-    sourceHash: memo,
-  });
-  assert.equal(bridgeEntry(ACCOUNT, plain(4, 13), cfg), null);
-  // A reverted deposit moved nothing.
-  const reverted = deposit(5, 14);
-  reverted.events[0].reverted = true;
-  assert.equal(bridgeEntry(ACCOUNT, reverted, cfg), null);
-  // Without DuskEVM configured, a deposit is nobody's business here.
-  assert.equal(bridgeEntry(ACCOUNT, deposit(1, 10), { ...cfg, duskEvm: { enabled: false } }), null);
-});
-
-function archive(entries, finalized) {
-  const calls = [];
-  const query = async (selection) => {
-    calls.push(selection);
-    const data = {};
-    if (selection.includes("lastBlockPair")) data.pair = { json: { last_finalized_block: [finalized, "x"] } };
-    for (const [alias, direction] of [["out", "sender"], ["in", "receiver"]]) {
-      const match = new RegExp(`${alias}: moonlightHistory\\(${direction}: "[^"]+", fromBlock: (\\d+)(?:, toBlock: (\\d+))?`, "u").exec(selection);
-      if (!match) continue;
-      const [from, to] = [Number(match[1]), match[2] === undefined ? Infinity : Number(match[2])];
-      const list = entries.filter((entry) => {
-        const ours = entry.events.some((event) => event.data?.[direction === "sender" ? "sender" : "receiver"] === ACCOUNT);
-        return ours && entry.block_height >= from && entry.block_height <= to;
-      });
-      data[alias] = list.length ? { json: list.slice(0, 50) } : null;
-    }
-    return data;
-  };
-  return { calls, query };
-}
-
-test("the history sync reads the newest blocks first, widens, and carries on later", async () => {
-  const tip = 4_687_950;
-  const entries = [deposit(1, tip - 100), service(2, tip - 20_000), plain(3, tip - 30_000), deposit(4, 1_000)];
-  const node = archive(entries, tip);
-  const first = await syncDuskHistory({ account: ACCOUNT, cfg, maxRequests: 3, query: node.query });
-  assert.equal(first.requests, 3);
-  // The head, then a day, then eight days: both recent transfers, not yet the old one.
-  assert.deepEqual(first.found.map((entry) => entry.hash), [h(1), h(2)]);
-  assert.deepEqual(first.state.covered, [[tip - 10 - FIRST_WINDOW * 9 + 1, tip - 10]]);
-  assert.match(node.calls[1], /out: moonlightHistory\(sender: "[^"]+", fromBlock: \d+, toBlock: \d+, maxCount: 50\) \{ json \} in: moonlightHistory\(receiver:/u);
-
-  // A later visit reads what's new above, then carries on down, finding each transfer once.
-  entries.push(service(5, tip + 50));
-  const node2 = archive(entries, tip + 100);
-  const second = await syncDuskHistory({ account: ACCOUNT, cfg, maxRequests: 6, query: node2.query, state: first.state });
-  assert.deepEqual(second.found.map((entry) => entry.hash).sort(), [h(4), h(5)]);
-  assert.match(node2.calls[0], /lastBlockPair/u);
-  assert.equal(topGap(second.state.covered, second.state.target), null);
-  assert.equal(Object.keys(second.state.entries).length, 4);
-});
-
-test("a block with more than a page of the account's entries is read to its last page, across runs", async () => {
-  const tip = 4_687_950;
-  const crowd = 4_687_000;
-  // 120 deposits in one block, one above it: pages of 50, in order.
-  const entries = [...Array.from({ length: 120 }, (_, n) => deposit(100 + n, crowd)), deposit(1, crowd + 300)];
-  const calls = [];
-  const query = async (selection) => {
-    calls.push(selection);
-    const data = {};
-    if (selection.includes("lastBlockPair")) data.pair = { json: { last_finalized_block: [tip, "x"] } };
-    for (const [alias, direction] of [["out", "sender"], ["in", "receiver"]]) {
-      const match = new RegExp(`${alias}: moonlightHistory\\(${direction}: "[^"]+", fromBlock: (\\d+)(?:, toBlock: (\\d+))?, maxCount: 50(?:, pageCount: (\\d+))?`, "u").exec(selection);
-      if (!match) continue;
-      const [from, to, page] = [Number(match[1]), match[2] === undefined ? Infinity : Number(match[2]), Number(match[3] ?? 1)];
-      const list = entries.filter((entry) => {
-        const ours = entry.events.some((event) => event.data?.[direction] === ACCOUNT);
-        return ours && entry.block_height >= from && entry.block_height <= to;
-      });
-      const pageOf = list.slice((page - 1) * 50, page * 50);
-      data[alias] = pageOf.length ? { json: pageOf } : null;
-    }
-    return data;
-  };
-
-  let state;
-  const found = new Set();
-  for (let run = 0; run < 12 && !(state && topGap(state.covered, state.target) === null); run += 1) {
-    ({ state } = await syncDuskHistory({ account: ACCOUNT, cfg, maxRequests: 2, query, state }).then((result) => {
-      for (const entry of result.found) found.add(entry.hash);
-      return result;
-    }));
-    // The block counts as read only once its last page is.
-    const blockCovered = state.covered.some(([lo, hi]) => lo <= crowd && crowd <= hi);
-    if (state.crowded) assert.equal(blockCovered, false);
-    if (blockCovered) assert.equal(found.size, 121);
-  }
-  assert.equal(found.size, 121);
-  assert.equal(state.crowded, null);
-  assert.ok(calls.some((selection) => /fromBlock: 4687000, toBlock: 4687000, maxCount: 50, pageCount: 3\)/u.test(selection)));
-
-  // A gap of that one block: its first page fills, then the rest, page by page.
-  let lone = { covered: [[crowd + 1, tip - 10], [0, crowd - 1]], crowded: null, entries: {}, target: tip - 10, window: 1 };
-  const loneFound = new Set();
-  for (let run = 0; run < 6 && topGap(lone.covered, lone.target) !== null; run += 1) {
-    const result = await syncDuskHistory({ account: ACCOUNT, cfg, maxRequests: 2, query, state: lone });
-    for (const entry of result.found) loneFound.add(entry.hash);
-    lone = result.state;
-  }
-  assert.equal(loneFound.size, 120);
-});
-
-test("coverage joins touching ranges and names the highest gap", () => {
-  assert.deepEqual(addCoverage([[50, 60]], 61, 80), [[50, 80]]);
-  assert.deepEqual(addCoverage([[50, 60]], 10, 20), [[50, 60], [10, 20]]);
-  assert.deepEqual(topGap([[50, 100]], 120), [101, 120]);
-  assert.deepEqual(topGap([[50, 100], [0, 20]], 100), [21, 49]);
-  assert.equal(topGap([[0, 100]], 100), null);
 });
 
 const withdrawalLog = (n, block, recipient = ACCOUNT, amount = 2n * 10n ** 18n) => ({
@@ -424,32 +291,182 @@ test("a payout a chain couldn't be asked about stays open for the next visit", a
   assert.deepEqual(records.map((record) => record.rejected), [undefined, true]);
 });
 
-test("discovery keeps each account's progress per network and asks again only for what's new", async () => {
-  const storage = new Map();
-  const store = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) };
+// The details the archive gives a transaction sent at `seconds`, with its call.
+const sent = (seconds, callData = null) => ({ blockTimestamp: seconds, err: null, gasSpent: 1, tx: { callData, gasLimit: 1, gasPrice: 1 } });
+// The deposits' call, naming EVM as the DuskEVM address.
+const DEPOSIT_CALL = {
+  contractId: BRIDGE,
+  data: Buffer.from(encodeDepositArgs({ amountLux: 100_000_000n, minGasLimit: 200_000, to: EVM })).toString("hex"),
+  fnName: "depositETHToWithValue",
+};
+
+/** localStorage, in memory, holding `items`. */
+function memoryStorage(items = new Map()) {
+  items = new Map(items);
+  return Object.assign(items, { getItem: (key) => items.get(key) ?? null, setItem: (key, value) => void items.set(key, String(value)) });
+}
+
+/**
+ * A Dusk archive node as @dusk-network/app-core/history asks it: the
+ * account's `entries` up to the last finalized block, 50 a page, and each
+ * transaction's `details`. `calls` keeps each request; `before` hears each
+ * one first, and answers it instead when it gives a response.
+ */
+function archiveNode(entries, { details = {}, finalized }) {
+  const node = { before: null, calls: [], details, entries, finalized, genesis: "aa".repeat(32) };
+  const fetch = async (_url, { body }) => {
+    node.calls.push(body);
+    const instead = node.before?.(body);
+    if (instead) return instead;
+    const data = {};
+    if (body.includes("lastBlockPair")) data.pair = { json: { last_finalized_block: [node.finalized, "x"] } };
+    if (body.includes("genesis:")) data.genesis = { header: { hash: node.genesis } };
+    const fields = /(\w+): moonlightHistory\((sender|receiver): "[^"]+", fromBlock: (\d+)(?:, toBlock: (\d+))?, maxCount: 50(?:, pageCount: (\d+))?\)/gu;
+    for (const [, alias, direction, from, to, page = 1] of body.matchAll(fields)) {
+      const list = node.entries.filter(
+        (entry) =>
+          entry.block_height >= Number(from) &&
+          entry.block_height <= Math.min(Number(to ?? Infinity), node.finalized) &&
+          entry.events.some((event) => event.data?.[direction] === ACCOUNT),
+      );
+      data[alias] = { json: list.slice((Number(page) - 1) * 50, Number(page) * 50) };
+    }
+    for (const [, alias, hash] of body.matchAll(/(t\d+): tx\(hash: "(\w+)"\)/gu)) data[alias] = node.details[hash] ?? null;
+    return new Response(JSON.stringify({ data }));
+  };
+  node.archive = createArchive({ fetch, url: "https://node.test" });
+  return node;
+}
+
+test("a Dusk account's transfers are its deposits, its transfers to the bridge account and its migrations' payouts", async () => {
   const tip = 1_000_000;
-  const node = archive([deposit(1, tip - 50)], tip);
-  let details = 0;
-  const discovery = createDiscovery({
-    cfg,
-    node: {
-      query: node.query,
-      transaction: async () => {
-        details += 1;
-        return { blockTimestamp: 1_761_471_064n, callData: null };
-      },
-    },
-    rpc: async () => assert.fail("no EVM address given"),
-    rpcBatch: async () => [],
-    storage: store,
+  const memo = `0x${"ab".repeat(32)}`;
+  // A deposit that paid its unspent gas to another account: the account paid more than the bridge took.
+  const refunded = deposit(1, tip - 100);
+  refunded.events[2].data.refund_info = [OTHER, "500"];
+  // A reverted deposit moved nothing.
+  const reverted = deposit(5, tip - 60);
+  reverted.events[0].reverted = true;
+  const node = archiveNode([refunded, service(2, tip - 90), payout(3, tip - 80, memo), plain(4, tip - 70), reverted], {
+    details: { [h(1)]: sent(1_792_980_000, DEPOSIT_CALL), [h(2)]: sent(1_792_980_100), [h(3)]: sent(1_792_980_200) },
+    finalized: tip,
   });
-  const first = await discovery.discover({ dusk: ACCOUNT, duskRequests: 3 });
-  assert.deepEqual(first.entries.map((entry) => [entry.routeId, entry.hash, entry.sourceAt]), [["dusk-to-dusk-evm", h(1), 1_761_471_064_000]]);
+  const rpcBatch = async (_network, calls) =>
+    calls.map(() => ({ from: "0xD63B00000000000000000000000000000000DF40", input: migrateInput("1000000000000", ACCOUNT), to: MIGRATOR.toLowerCase() }));
+  const storage = memoryStorage();
+  const found = await createDiscovery({ archive: node.archive, cfg, rpcBatch, storage }).discover({ dusk: ACCOUNT, duskRequests: 6 });
+  const route = (id) => found.entries.find((entry) => entry.routeId === id);
+  assert.equal(found.entries.length, 3);
+  // A deposit's DuskEVM address is the one its call names.
+  const toDuskEvm = route("dusk-to-dusk-evm");
+  assert.deepEqual([toDuskEvm.hash, toDuskEvm.amountLux, toDuskEvm.destination.toLowerCase(), toDuskEvm.sourceAt], [h(1), "100000000", EVM, 1_792_980_000_000]);
+  const toBridge = route("dusk-to-ethereum");
+  assert.deepEqual([toBridge.hash, toBridge.amountLux, toBridge.destination, toBridge.sourceAt], [h(2), "50000000000", "0xeE1b68ED496712cda857ada41d326d357049E51C", 1_792_980_100_000]);
+  const migrated = route("ethereum-to-dusk");
+  assert.deepEqual([migrated.hash, migrated.destinationHash, migrated.destinationAt, migrated.status], [memo, h(3), 1_792_980_200_000, "completed"]);
+  // Of the account's history, only the bridge's transfers are kept.
+  assert.deepEqual(Object.keys(JSON.parse(storage.getItem(stateKey(cfg, "dusk", ACCOUNT))).entries).sort(), [h(1), h(2), h(3)]);
+  const hashes = (list) => list.map((entry) => entry.hash).sort();
+  // The next visit lists them as verified, without asking the chain again.
+  const next = await createDiscovery({ archive: node.archive, cfg, rpcBatch: async () => assert.fail("asked again"), storage }).discover({ dusk: ACCOUNT, duskRequests: 6 });
+  assert.deepEqual(hashes(next.entries), hashes(found.entries));
+  // Storage that refuses them: the visit still lists them.
+  const full = Object.assign(memoryStorage(), { setItem: () => assert.fail("QuotaExceededError") });
+  const unkept = await createDiscovery({ archive: archiveNode(node.entries, { details: node.details, finalized: tip }).archive, cfg, rpcBatch, storage: full }).discover({ dusk: ACCOUNT, duskRequests: 6 });
+  assert.deepEqual(hashes(unkept.entries), hashes(found.entries));
+
+  // Without DuskEVM configured, a deposit is nobody's business here.
+  const without = archiveNode(node.entries, { details: node.details, finalized: tip });
+  const off = await createDiscovery({ archive: without.archive, cfg: { ...cfg, duskEvm: { ...cfg.duskEvm, enabled: false } }, rpcBatch, storage: memoryStorage() }).discover({ dusk: ACCOUNT, duskRequests: 6 });
+  assert.deepEqual(off.entries.map((entry) => entry.routeId).sort(), ["dusk-to-ethereum", "ethereum-to-dusk"]);
+});
+
+test("discovery keeps each account's progress per network and asks again only for what's new", async () => {
+  const tip = 1_000_000;
+  const node = archiveNode([deposit(1, tip - 50)], { details: { [h(1)]: sent(1_761_471_064, DEPOSIT_CALL) }, finalized: tip });
+  const storage = memoryStorage();
+  const discovery = createDiscovery({ archive: node.archive, cfg, rpc: async () => assert.fail("no EVM address given"), rpcBatch: async () => [], storage });
+  const busy = (what) => (body) => (body.includes(what) ? new Response("busy", { status: 500 }) : null);
+  // The second window's request fails: the visit says so, and keeps what it read before.
+  let windows = 0;
+  node.before = (body) => (body.includes("moonlightHistory") && ++windows === 2 ? busy("moonlightHistory")(body) : null);
+  assert.equal((await discovery.discover({ dusk: ACCOUNT, duskRequests: 3 })).errors.length, 1);
+  const kept = JSON.parse(storage.getItem(stateKey(cfg, "dusk", ACCOUNT)));
+  assert.deepEqual([Object.keys(kept.entries), kept.covered.length], [[h(1)], 1]);
   assert.ok([...storage.keys()].every((key) => key.startsWith("dusk-bridge:discovery:v1:testnet:dusk:")));
-  const again = await discovery.discover({ dusk: ACCOUNT, duskRequests: 3 });
-  assert.equal(again.entries.length, 1);
-  // Its time was kept: one details lookup in all.
-  assert.equal(details, 1);
+
+  // Details the node can't give now are left for the tracker, and read on the next visit.
+  node.before = busy("tx(hash:");
+  node.finalized = tip + 100;
+  const asked = node.calls.length;
+  const later = await discovery.discover({ dusk: ACCOUNT, duskRequests: 3 });
+  assert.deepEqual([later.entries.map((entry) => [entry.routeId, entry.hash, entry.sourceAt]), later.errors], [[["dusk-to-dusk-evm", h(1), undefined]], []]);
+  // No height is read twice: what's new above, then on down from where the first visit stopped.
+  const [[lo, hi]] = kept.covered;
+  for (const call of node.calls.slice(asked).filter((body) => body.includes("moonlightHistory"))) {
+    const [, from, to = Infinity] = /fromBlock: (\d+)(?:, toBlock: (\d+))?/u.exec(call);
+    assert.ok(Number(from) > hi || Number(to) < lo, call);
+  }
+
+  node.before = null;
+  assert.deepEqual((await discovery.discover({ dusk: ACCOUNT, duskRequests: 3 })).entries.map((entry) => entry.sourceAt), [1_761_471_064_000]);
+  // Its time was kept: the next visit asks no details.
+  const read = node.calls.length;
+  await discovery.discover({ dusk: ACCOUNT, duskRequests: 3 });
+  assert.ok(!node.calls.slice(read).some((body) => body.includes("tx(hash:")));
+});
+
+test("what an earlier version kept carries on, and a testnet reset starts it over", async () => {
+  const tip = 1_000_000;
+  const memo = `0x${"ab".repeat(32)}`;
+  const key = stateKey(cfg, "dusk", ACCOUNT);
+  const storage = memoryStorage();
+  // As the bridge kept it before: no genesis, a deposit with its time, and a verified
+  // payout above the heights covered, which the archive gives again.
+  storage.setItem(
+    key,
+    JSON.stringify({
+      covered: [[0, tip - 10]],
+      crowded: null,
+      entries: {
+        [h(1)]: { amountLux: "100000000", blockHeight: tip - 50, destination: EVM, hash: h(1), kind: "deposit", sourceAt: 1_761_471_064_000 },
+        [h(3)]: { amountLux: "1000000000000", blockHeight: tip - 5, hash: h(3), kind: "payout", payer: OTHER, payoutAt: 1_761_471_000_000, routeId: "ethereum-to-dusk", sender: "0xabc", sourceHash: memo },
+      },
+      target: tip - 10,
+      updatedAt: 1,
+      window: 8_640,
+    }),
+  );
+  const node = archiveNode([payout(3, tip - 5, memo), service(2, tip + 50)], { details: { [h(2)]: sent(1_792_980_100) }, finalized: tip + 100 });
+  const discovery = createDiscovery({ archive: node.archive, cfg, rpcBatch: async () => assert.fail("verified before"), storage });
+  const kept = await discovery.discover({ dusk: ACCOUNT, duskRequests: 6 });
+  assert.deepEqual(kept.entries.map((entry) => entry.hash).sort(), [h(1), h(2), memo].sort());
+  // Above what was kept, with the head, then the new transfer's details.
+  const asked = (calls) => calls.map((body) => /fromBlock: (\d+)/u.exec(body)?.[1] ?? (body.includes("tx(hash:") ? "details" : "head"));
+  assert.deepEqual(asked(node.calls), [String(tip - 9), "details"]);
+  assert.equal(JSON.parse(storage.getItem(key)).genesis, node.genesis);
+
+  // Another chain under the same node: what was kept of the old one goes.
+  node.genesis = "bb".repeat(32);
+  node.entries = [];
+  const reset = await discovery.discover({ dusk: ACCOUNT, duskRequests: 6 });
+  assert.deepEqual([reset.entries, reset.errors], [[], []]);
+  assert.equal(JSON.parse(storage.getItem(key)).genesis, "bb".repeat(32));
+
+  // A run whose history another tab cleared meanwhile keeps nothing more, and says nothing.
+  storage.delete(key);
+  node.entries = [service(2, tip + 50)];
+  node.before = (body) => void (body.includes("moonlightHistory") && storage.setItem(key, "null"));
+  const overtaken = await discovery.discover({ dusk: ACCOUNT, duskRequests: 6 });
+  assert.deepEqual([overtaken.entries, overtaken.errors, storage.getItem(key)], [[], [], "null"]);
+
+  // A reset where storage still has the old chain's history but refuses writes: the visit carries on in memory.
+  node.before = null;
+  await discovery.discover({ dusk: ACCOUNT, duskRequests: 6 });
+  const refusing = Object.assign(memoryStorage([[key, storage.getItem(key)]]), { setItem: () => assert.fail("QuotaExceededError") });
+  node.genesis = "cc".repeat(32);
+  const inMemory = await createDiscovery({ archive: node.archive, cfg, rpcBatch: async () => [], storage: refusing }).discover({ dusk: ACCOUNT, duskRequests: 6 });
+  assert.deepEqual([inMemory.entries.map((entry) => entry.hash), inMemory.errors], [[h(2)], []]);
 });
 
 test("a migration first found by its payout is checked once a visit, until its start is filled in", () => {

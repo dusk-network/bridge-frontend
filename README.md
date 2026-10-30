@@ -112,9 +112,10 @@ The list is the same on any device: it comes from the networks, a bounded
 number of requests per visit, and what was read is kept per network and
 account so the next visit asks only for what is new.
 
-- **The Dusk account**: its archive history (`moonlightHistory`, sender and
-  receiver in one request), synced from the newest block down in windows
-  that widen while they hold little, with the extension's resumable coverage.
+- **The Dusk account**: its archive history, synced by
+  `@dusk-network/app-core/history` from the newest block down in windows
+  that widen while they hold little, each step kept as it lands so the next
+  visit carries on. A node on another chain (a reset testnet) starts it over.
   It gives the account's deposits into DuskEVM, its transfers to the bridge
   account, and migration payouts (incoming transfers whose memo is an EVM
   transaction hash that called a configured migration contract).

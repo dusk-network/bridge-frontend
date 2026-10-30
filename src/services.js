@@ -1,3 +1,4 @@
+import { createArchive } from "@dusk-network/app-core/history";
 import { evmAddressOf } from "@dusk-network/networks/duskevm";
 import { createMulticallFetch } from "@hdauven/dusk-multicall";
 import { createPublicClient, http } from "viem";
@@ -77,6 +78,8 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
     fetch: createMulticallFetch({ maxBatch: MAX_BATCH, multicallId: cfg.multicall.contractId || null, nodeUrl: cfg.dusk.nodeUrl }),
     url: cfg.dusk.nodeUrl,
   });
+  // The same node's archive, for account histories.
+  const archive = createArchive({ url: cfg.dusk.nodeUrl });
   const loadDriver = createDriverLoader(fetchDriver ? { fetch: fetchDriver } : {});
   const contract = (id, driver) => ({
     driver: () => loadDriver(driver.url, driver.sha256),
@@ -141,6 +144,7 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
 
   const clients = new Map();
   const tracking = createTracking({
+    archive,
     config: cfg,
     node,
     receiptClient: (network) => {
@@ -152,7 +156,7 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
     withdrawals,
   });
 
-  const discovery = createDiscovery({ cfg, node, rpc, rpcBatch });
+  const discovery = createDiscovery({ archive, cfg, rpc, rpcBatch });
   const evmReads = createEvmReads({ cfg, rpc, rpcBatch });
   // How long DuskEVM's routes take, as its chains say, kept per network.
   const times = withdrawals

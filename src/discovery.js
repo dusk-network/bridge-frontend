@@ -6,10 +6,9 @@
 // per visit and kept here per network and account; a transfer found twice, or
 // found and also sent from this browser, is one entry.
 
-import { decodeBridgeCall } from "@dusk-network/networks/duskevm";
+import { StaleHistoryError, createHistory } from "@dusk-network/app-core/history";
 import { decodeFunctionData } from "viem";
 
-import { syncDuskHistory } from "./dusk-history.js";
 import { syncWithdrawals } from "./l2-withdrawals.js";
 import { entryId } from "./activity.js";
 import { MIGRATION_ABI } from "./legacy-migration.js";
@@ -38,12 +37,100 @@ export function loadState(key, storage = defaultStorage()) {
   }
 }
 
+/** Whether `state` was kept. */
 export function saveState(key, state, storage = defaultStorage()) {
   try {
-    storage?.setItem(key, JSON.stringify(state));
+    storage.setItem(key, JSON.stringify(state));
+    return true;
   } catch {
     // Storage can be full or refused; the next visit reads the network again.
+    return false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// The Dusk account's history (@dusk-network/app-core/history), kept as one
+// JSON per network and account: its sync state, and of its entries only the
+// bridge's, as records:
+// - `{ kind: "deposit", hash, amountLux, destination }`, into DuskEVM
+// - `{ kind: "service", hash, amountLux, destination }`, to the bridge account
+// - `{ kind: "payout", hash, amountLux, payer, sourceHash }`, a migration paying out
+// each with its `blockHeight`, and its time once read: `sourceAt`, or a
+// payout's `payoutAt`. A deposit's amount and DuskEVM address come from its
+// call, with its time: an entry's `value` is what the account paid, a gas
+// refund paid to another account included.
+// ---------------------------------------------------------------------------
+
+const EVM_TX_HASH = /^0x[0-9a-f]{64}$/iu;
+
+/** What an entry of the account's history is to the bridge, as a record, or null. */
+function recordOf(entry, cfg) {
+  const base = { blockHeight: entry.blockHeight, hash: entry.hash };
+  const memo = entry.memo.trim();
+  if (entry.kind === "contract_call" && cfg.duskEvm.enabled && entry.counterparty === cfg.duskEvm.l1StandardBridgeContractId)
+    return { ...base, destination: null, kind: "deposit" };
+  if (entry.direction === "out" && entry.kind === "transfer" && cfg.service && entry.counterparty === cfg.service.account)
+    return { ...base, amountLux: entry.value, destination: memo || null, kind: "service" };
+  if (entry.direction === "in" && EVM_TX_HASH.test(memo))
+    return { ...base, amountLux: entry.value, kind: "payout", payer: entry.counterparty, sourceHash: memo.toLowerCase() };
+  return null;
+}
+
+/** A record as the history asks after it: its time, and a deposit's call, until they're read. */
+function entryOf(record, cfg) {
+  const read = (record.kind === "payout" ? record.payoutAt : record.sourceAt) !== undefined;
+  const bridge = record.destination ? { amount: record.amountLux, kind: "deposit", to: record.destination } : read ? null : undefined;
+  return {
+    blockHeight: record.blockHeight,
+    hash: record.hash,
+    ...(read ? { detailsAt: 1 } : {}),
+    ...(record.kind === "deposit" ? { bridge, counterparty: cfg.duskEvm.l1StandardBridgeContractId } : {}),
+  };
+}
+
+/** The store the history keeps one account's state and records in, under `key`. */
+function historyStore(key, cfg, storage) {
+  // A state storage refused, kept for the rest of the run, null once cleared:
+  // the visit still lists what it found. Undefined while storage keeps it.
+  let unsaved;
+  const load = () => (unsaved === undefined ? loadState(key, storage) : unsaved);
+  const keep = (state) => {
+    unsaved = saveState(key, state, storage) ? undefined : state;
+    return state;
+  };
+  return {
+    clear: () => void keep(null),
+    commit(entries, update) {
+      const kept = load();
+      const found = entries.map((entry) => recordOf(entry, cfg)).filter(Boolean);
+      return keep({
+        ...update(kept),
+        // A record kept already stays as it is: it has its time and what verifying it found.
+        entries: { ...Object.fromEntries(found.map((record) => [record.hash, record])), ...kept?.entries },
+      });
+    },
+    getState: load,
+    keep,
+    list: ({ before, limit }) =>
+      Object.values(load()?.entries ?? {})
+        .filter((record) => before === undefined || record.blockHeight < before)
+        .sort((a, b) => b.blockHeight - a.blockHeight)
+        .slice(0, limit)
+        .map((record) => entryOf(record, cfg)),
+    patch(details) {
+      const state = load();
+      for (const [hash, found] of details) {
+        const record = state?.entries?.[hash];
+        if (!record) continue;
+        record[record.kind === "payout" ? "payoutAt" : "sourceAt"] = found.timestamp;
+        if (found.bridge?.kind === "deposit") {
+          record.amountLux = found.bridge.amount;
+          record.destination ||= found.bridge.to;
+        }
+      }
+      if (state) keep(state);
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -237,52 +324,32 @@ export async function verifyPayouts(records, { account, cfg, rpcBatch }) {
   return changed;
 }
 
-/** Times and recipients for new archive records: one aliased node request. */
-async function addDetails(records, { cfg, node }) {
-  const missing = records.filter(
-    (record) => !record.rejected && (record.kind === "payout" ? record.payoutAt : record.sourceAt) === undefined,
-  );
-  await Promise.all(
-    missing.map(async (record) => {
-      try {
-        const tx = await node.transaction(record.hash);
-        const at = tx?.blockTimestamp ? Number(tx.blockTimestamp) * 1_000 : null;
-        if (record.kind === "payout") record.payoutAt = at;
-        else record.sourceAt = at;
-        const call = tx?.callData;
-        const deposit = call ? decodeBridgeCall(cfg.network, { args: call.data, contractId: call.contractId, fnName: call.fnName }) : null;
-        if (record.kind === "deposit" && deposit?.kind === "deposit" && !record.destination) record.destination = deposit.recipient;
-      } catch {
-        // Left for the tracker, which reads the transaction anyway.
-      }
-    }),
-  );
-}
-
 /**
  * Finds the connected accounts' transfers.
  *
  * @param {object} deps
+ * @param {object} deps.archive the Dusk node's archive (@dusk-network/app-core/history)
  * @param {object} deps.cfg
- * @param {object} deps.node the Dusk node client
  * @param {(network: string, method: string, params: unknown[]) => Promise<any>} deps.rpc
  * @param {(network: string, calls: object[]) => Promise<any[]>} deps.rpcBatch
  * @param {Storage} [deps.storage]
  */
-export function createDiscovery({ cfg, node, rpc, rpcBatch, storage = defaultStorage() }) {
+export function createDiscovery({ archive, cfg, rpc, rpcBatch, storage = defaultStorage() }) {
   async function duskAccount(account, maxRequests) {
-    const key = stateKey(cfg, "dusk", account);
-    const { state } = await syncDuskHistory({
-      account,
-      cfg,
-      maxRequests,
-      query: (selection) => node.query(selection),
-      state: loadState(key, storage),
-    });
-    const records = Object.values(state.entries);
-    await verifyPayouts(records, { account, cfg, rpcBatch });
-    await addDetails(records, { cfg, node });
-    saveState(key, state, storage);
+    const store = historyStore(stateKey(cfg, "dusk", account), cfg, storage);
+    const history = createHistory({ account, archive, network: cfg.network, store });
+    try {
+      await history.sync({ maxDetailRequests: 0, maxRequests });
+    } catch (error) {
+      // Another run started the history over, as on a reset testnet: it's that run's now.
+      if (!(error instanceof StaleHistoryError)) throw error;
+    }
+    // Times and DuskEVM addresses. What can't be read now is left for the
+    // tracker, which reads the transaction anyway.
+    await history.fillDetails(store.list({ limit: Infinity })).catch(() => {});
+    const state = store.getState();
+    const records = Object.values(state?.entries ?? {});
+    if ((await verifyPayouts(records, { account, cfg, rpcBatch })).length) store.keep(state);
     return { entries: records.map((record) => entryFromHistory(record, account, cfg)).filter(Boolean), state };
   }
 
