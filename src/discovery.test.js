@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { encodeDuskExternalAssetRecipient } from "@dusk/evm-sdk";
-import { encodeAbiParameters, encodeFunctionData, pad, parseAbi } from "viem";
+import { encodeAbiParameters, pad } from "viem";
 
 import { createArchive } from "@dusk-network/app-core/history";
 import { networks } from "@dusk-network/networks";
@@ -21,7 +21,6 @@ import {
   mergeTransfers,
   shownFor,
   stateKey,
-  verifyPayouts,
 } from "./discovery.js";
 import { ETH_BRIDGE_INITIATED_TOPIC, syncWithdrawals } from "./l2-withdrawals.js";
 
@@ -30,15 +29,16 @@ const OTHER = MAINNET_BSC_BRIDGE_ACCOUNT;
 const BRIDGE = "2257e5f8ff49cf7c9704a14ca35acbf48eb7ade11a079d98d5cd5655eea1b31d";
 const TRANSFER = `01${"0".repeat(62)}`;
 const EVM = "0x3e5b8223e638cb414bef8cf95393460ca1c3a11d";
-const MIGRATOR = "0x7B1FF96D7edC07D8d83eC2A4da99EF8215a7366B";
 const hex = (text) => Buffer.from(text).toString("hex");
 const h = (n) => n.toString(16).padStart(64, "0");
 
 const cfg = {
   duskEvm: { enabled: true, l1StandardBridgeContractId: BRIDGE, predeploys: { l2StandardBridge: "0x4200000000000000000000000000000000000010" } },
-  evmNetworks: { ethereum: { migrationContract: MIGRATOR } },
-  migrations: ["ethereum"],
-  network: networks.testnet,
+  // Testnet, with OTHER paying Sepolia's migrations out, as a deployment can set it.
+  network: {
+    ...networks.testnet,
+    routes: { ...networks.testnet.routes, migrations: networks.testnet.routes.migrations.map((route) => ({ ...route, payoutAccount: OTHER })) },
+  },
   profile: "testnet",
   service: { account: TESTNET_REGGIO_BRIDGE_ACCOUNT, feeLux: 1_000_000_000n, network: "ethereum" },
 };
@@ -224,73 +224,6 @@ test("a withdrawal that pays someone else is the user's to finish once the user 
   );
 });
 
-const migrateInput = (amountLux, account) =>
-  encodeFunctionData({
-    abi: parseAbi(["function migrate(uint256 amount, string targetAddress)"]),
-    args: [BigInt(amountLux) * 1_000_000_000n, account],
-    functionName: "migrate",
-  });
-
-test("a payout counts as a migration only when its memo names a migration of that amount to this account", async () => {
-  const hashOf = (byte) => `0x${byte.repeat(32)}`;
-  const records = [
-    { amountLux: "1000000000000", hash: h(7), kind: "payout", payer: OTHER, sourceHash: hashOf("aa") },
-    { amountLux: "1000000000000", hash: h(8), kind: "payout", payer: OTHER, sourceHash: hashOf("bb") },
-    // Spoofs: someone else's migration, and the right migration with a token amount.
-    { amountLux: "1000000000000", hash: h(9), kind: "payout", payer: OTHER, sourceHash: hashOf("cc") },
-    { amountLux: "1", hash: h(10), kind: "payout", payer: OTHER, sourceHash: hashOf("aa") },
-  ];
-  const txs = {
-    [hashOf("aa")]: { from: "0xD63B00000000000000000000000000000000DF40", input: migrateInput("1000000000000", ACCOUNT), to: MIGRATOR.toLowerCase() },
-    [hashOf("bb")]: { input: "0x", to: "0x0000000000000000000000000000000000000001" },
-    [hashOf("cc")]: { input: migrateInput("1000000000000", OTHER), to: MIGRATOR.toLowerCase() },
-  };
-  const batches = [];
-  await verifyPayouts(records, {
-    account: ACCOUNT,
-    cfg,
-    rpcBatch: async (network, calls) => {
-      batches.push([network, calls.length]);
-      return calls.map(({ params }) => txs[params[0]]);
-    },
-  });
-  assert.deepEqual(batches, [["ethereum", 4]]);
-  assert.equal(records[0].routeId, "ethereum-to-dusk");
-  assert.deepEqual(records.slice(1).map((record) => record.rejected), [true, true, true]);
-  const entry = entryFromHistory(records[0], ACCOUNT, cfg);
-  assert.deepEqual(
-    { hash: entry.hash, routeId: entry.routeId, status: entry.status, destinationHash: entry.destinationHash },
-    { destinationHash: h(7), hash: hashOf("aa"), routeId: "ethereum-to-dusk", status: "completed" },
-  );
-  assert.equal(entryFromHistory(records[1], ACCOUNT, cfg), null);
-  // Settled payouts aren't asked about again.
-  await verifyPayouts(records, { account: ACCOUNT, cfg, rpcBatch: async () => assert.fail("asked twice") });
-
-  // With the chain's payout account known, the same transfer from anyone else doesn't count.
-  const fromOther = [{ amountLux: "1000000000000", hash: h(11), kind: "payout", payer: ACCOUNT, sourceHash: hashOf("aa") }];
-  await verifyPayouts(fromOther, { account: ACCOUNT, cfg: { ...cfg, evmNetworks: { ethereum: { ...cfg.evmNetworks.ethereum, payoutAccount: OTHER } } }, rpcBatch: async (network, calls) => calls.map(({ params }) => txs[params[0]]) });
-  assert.equal(fromOther[0].rejected, true);
-});
-
-test("a payout a chain couldn't be asked about stays open for the next visit", async () => {
-  const records = [
-    { amountLux: "5", hash: h(12), kind: "payout", sourceHash: `0x${"dd".repeat(32)}` },
-    { amountLux: "5", hash: h(13), kind: "payout", sourceHash: `0x${"ee".repeat(32)}` },
-  ];
-  await verifyPayouts(records, {
-    account: ACCOUNT,
-    cfg,
-    rpcBatch: async () => {
-      throw new Error("RPC batch failed with HTTP 503");
-    },
-  });
-  assert.deepEqual(records.map((record) => [record.rejected, record.routeId]), [[undefined, undefined], [undefined, undefined]]);
-
-  // One call unanswered, one a plain "not found": only the second is settled.
-  await verifyPayouts(records, { account: ACCOUNT, cfg, rpcBatch: async () => [undefined, null] });
-  assert.deepEqual(records.map((record) => record.rejected), [undefined, true]);
-});
-
 // The details the archive gives a transaction sent at `seconds`, with its call.
 const sent = (seconds, callData = null) => ({ blockTimestamp: seconds, err: null, gasSpent: 1, tx: { callData, gasLimit: 1, gasPrice: 1 } });
 // The deposits' call, naming EVM as the DuskEVM address.
@@ -351,10 +284,8 @@ test("a Dusk account's transfers are its deposits, its transfers to the bridge a
     details: { [h(1)]: sent(1_792_980_000, DEPOSIT_CALL), [h(2)]: sent(1_792_980_100), [h(3)]: sent(1_792_980_200) },
     finalized: tip,
   });
-  const rpcBatch = async (_network, calls) =>
-    calls.map(() => ({ from: "0xD63B00000000000000000000000000000000DF40", input: migrateInput("1000000000000", ACCOUNT), to: MIGRATOR.toLowerCase() }));
   const storage = memoryStorage();
-  const found = await createDiscovery({ archive: node.archive, cfg, rpcBatch, storage }).discover({ dusk: ACCOUNT, duskRequests: 6 });
+  const found = await createDiscovery({ archive: node.archive, cfg, storage }).discover({ dusk: ACCOUNT, duskRequests: 6 });
   const route = (id) => found.entries.find((entry) => entry.routeId === id);
   assert.equal(found.entries.length, 3);
   // A deposit's DuskEVM address is the one its call names.
@@ -367,17 +298,17 @@ test("a Dusk account's transfers are its deposits, its transfers to the bridge a
   // Of the account's history, only the bridge's transfers are kept.
   assert.deepEqual(Object.keys(JSON.parse(storage.getItem(stateKey(cfg, "dusk", ACCOUNT))).entries).sort(), [h(1), h(2), h(3)]);
   const hashes = (list) => list.map((entry) => entry.hash).sort();
-  // The next visit lists them as verified, without asking the chain again.
-  const next = await createDiscovery({ archive: node.archive, cfg, rpcBatch: async () => assert.fail("asked again"), storage }).discover({ dusk: ACCOUNT, duskRequests: 6 });
+  // The next visit lists them again.
+  const next = await createDiscovery({ archive: node.archive, cfg, storage }).discover({ dusk: ACCOUNT, duskRequests: 6 });
   assert.deepEqual(hashes(next.entries), hashes(found.entries));
   // Storage that refuses them: the visit still lists them.
   const full = Object.assign(memoryStorage(), { setItem: () => assert.fail("QuotaExceededError") });
-  const unkept = await createDiscovery({ archive: archiveNode(node.entries, { details: node.details, finalized: tip }).archive, cfg, rpcBatch, storage: full }).discover({ dusk: ACCOUNT, duskRequests: 6 });
+  const unkept = await createDiscovery({ archive: archiveNode(node.entries, { details: node.details, finalized: tip }).archive, cfg, storage: full }).discover({ dusk: ACCOUNT, duskRequests: 6 });
   assert.deepEqual(hashes(unkept.entries), hashes(found.entries));
 
   // Without DuskEVM configured, a deposit is nobody's business here.
   const without = archiveNode(node.entries, { details: node.details, finalized: tip });
-  const off = await createDiscovery({ archive: without.archive, cfg: { ...cfg, duskEvm: { ...cfg.duskEvm, enabled: false } }, rpcBatch, storage: memoryStorage() }).discover({ dusk: ACCOUNT, duskRequests: 6 });
+  const off = await createDiscovery({ archive: without.archive, cfg: { ...cfg, duskEvm: { ...cfg.duskEvm, enabled: false } }, storage: memoryStorage() }).discover({ dusk: ACCOUNT, duskRequests: 6 });
   assert.deepEqual(off.entries.map((entry) => entry.routeId).sort(), ["dusk-to-ethereum", "ethereum-to-dusk"]);
 });
 
@@ -385,7 +316,7 @@ test("discovery keeps each account's progress per network and asks again only fo
   const tip = 1_000_000;
   const node = archiveNode([deposit(1, tip - 50)], { details: { [h(1)]: sent(1_761_471_064, DEPOSIT_CALL) }, finalized: tip });
   const storage = memoryStorage();
-  const discovery = createDiscovery({ archive: node.archive, cfg, rpc: async () => assert.fail("no EVM address given"), rpcBatch: async () => [], storage });
+  const discovery = createDiscovery({ archive: node.archive, cfg, rpc: async () => assert.fail("no EVM address given"), storage });
   const busy = (what) => (body) => (body.includes(what) ? new Response("busy", { status: 500 }) : null);
   // The second window's request fails: the visit says so, and keeps what it read before.
   let windows = 0;
@@ -421,8 +352,10 @@ test("what an earlier version kept carries on, and a testnet reset starts it ove
   const memo = `0x${"ab".repeat(32)}`;
   const key = stateKey(cfg, "dusk", ACCOUNT);
   const storage = memoryStorage();
-  // As the bridge kept it before: no genesis, a deposit with its time, and a verified
-  // payout above the heights covered, which the archive gives again.
+  // As the bridge kept it before: no genesis, a deposit with its time, a verified
+  // payout above the heights covered, which the archive gives again, and two it
+  // checked on the migration's chain: one it couldn't ask yet, one it rejected.
+  const unverified = `0x${"cd".repeat(32)}`;
   storage.setItem(
     key,
     JSON.stringify({
@@ -431,6 +364,8 @@ test("what an earlier version kept carries on, and a testnet reset starts it ove
       entries: {
         [h(1)]: { amountLux: "100000000", blockHeight: tip - 50, destination: EVM, hash: h(1), kind: "deposit", sourceAt: 1_761_471_064_000 },
         [h(3)]: { amountLux: "1000000000000", blockHeight: tip - 5, hash: h(3), kind: "payout", payer: OTHER, payoutAt: 1_761_471_000_000, routeId: "ethereum-to-dusk", sender: "0xabc", sourceHash: memo },
+        [h(6)]: { amountLux: "5", blockHeight: tip - 40, hash: h(6), kind: "payout", payer: OTHER, sourceHash: unverified },
+        [h(7)]: { amountLux: "5", blockHeight: tip - 30, hash: h(7), kind: "payout", payer: OTHER, rejected: true, sourceHash: `0x${"ef".repeat(32)}` },
       },
       target: tip - 10,
       updatedAt: 1,
@@ -438,9 +373,11 @@ test("what an earlier version kept carries on, and a testnet reset starts it ove
     }),
   );
   const node = archiveNode([payout(3, tip - 5, memo), service(2, tip + 50)], { details: { [h(2)]: sent(1_792_980_100) }, finalized: tip + 100 });
-  const discovery = createDiscovery({ archive: node.archive, cfg, rpcBatch: async () => assert.fail("verified before"), storage });
+  const discovery = createDiscovery({ archive: node.archive, cfg, storage });
   const kept = await discovery.discover({ dusk: ACCOUNT, duskRequests: 6 });
-  assert.deepEqual(kept.entries.map((entry) => entry.hash).sort(), [h(1), h(2), memo].sort());
+  assert.deepEqual(kept.entries.map((entry) => entry.hash).sort(), [h(1), h(2), memo, unverified].sort());
+  // The payout account vouches for the one not verified yet.
+  assert.equal(kept.entries.find((entry) => entry.hash === unverified).routeId, "ethereum-to-dusk");
   // Above what was kept, with the head, then the new transfer's details.
   const asked = (calls) => calls.map((body) => /fromBlock: (\d+)/u.exec(body)?.[1] ?? (body.includes("tx(hash:") ? "details" : "head"));
   assert.deepEqual(asked(node.calls), [String(tip - 9), "details"]);
@@ -465,7 +402,7 @@ test("what an earlier version kept carries on, and a testnet reset starts it ove
   await discovery.discover({ dusk: ACCOUNT, duskRequests: 6 });
   const refusing = Object.assign(memoryStorage([[key, storage.getItem(key)]]), { setItem: () => assert.fail("QuotaExceededError") });
   node.genesis = "cc".repeat(32);
-  const inMemory = await createDiscovery({ archive: node.archive, cfg, rpcBatch: async () => [], storage: refusing }).discover({ dusk: ACCOUNT, duskRequests: 6 });
+  const inMemory = await createDiscovery({ archive: node.archive, cfg, storage: refusing }).discover({ dusk: ACCOUNT, duskRequests: 6 });
   assert.deepEqual([inMemory.entries.map((entry) => entry.hash), inMemory.errors], [[h(2)], []]);
 });
 

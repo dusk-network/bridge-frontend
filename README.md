@@ -117,8 +117,8 @@ account so the next visit asks only for what is new.
   that widen while they hold little, each step kept as it lands so the next
   visit carries on. A node on another chain (a reset testnet) starts it over.
   It gives the account's deposits into DuskEVM, its transfers to the bridge
-  account, and migration payouts (incoming transfers whose memo is an EVM
-  transaction hash that called a configured migration contract).
+  account, and migration payouts (transfers from a migration's payout
+  account whose memo is the migration's transaction hash).
 - **The EVM address**: DuskEVM's L2 bridge event `ETHBridgeInitiated` filtered
   by sender, 100,000 blocks (the RPC's limit) per request from the newest
   down. Each withdrawal's Dusk recipient is decoded from its `extraData`.
@@ -127,23 +127,28 @@ account so the next visit asks only for what is new.
 
 Every entry is rebuilt from its route and source transaction hash, so a
 receipt link or a looked-up hash opens the same transfer on any device.
+Which payout or credit is a transfer's comes from
+`@dusk-network/app-core/bridge`.
 
 - **Migrations** complete when the Dusk payout appears: Messina pays out the
   migrated amount with the migration's transaction hash as the memo
   (`transactionsByMemo`). Anyone can send a transfer with that memo, so only
-  the exact amount counts, and only from the chain's payout account where one
-  is known (the mainnet defaults, `VITE_ETHEREUM_PAYOUT_ACCOUNT`,
-  `VITE_BSC_PAYOUT_ACCOUNT`, or `VITE_MIGRATION_PAYOUT_ACCOUNT` for both).
+  the exact amount counts, and only from the chain's payout account (the
+  mainnet defaults, `VITE_ETHEREUM_PAYOUT_ACCOUNT`, `VITE_BSC_PAYOUT_ACCOUNT`,
+  or `VITE_MIGRATION_PAYOUT_ACCOUNT` for both). Without one, none counts.
 - **Dusk → BSC** completes when the bridge pays the memo address: an ERC-20
   `Transfer` of the amount minus the fee, found with `eth_getLogs`, from the
-  address the network's file says pays the route out, where it names one.
+  address the network's file says pays the route out. Without one, none
+  counts.
 - **Deposits** complete on their DuskEVM credit. Where the adapter's L1 RPC
   serves `duskevm_getTransactionHashByDuskHash`, the SDK follows the derived
   deposit transaction. Otherwise the bridge watches the L2 bridge's
   `ETHBridgeFinalized` event for the sender's Dusk account, the recipient and
   the amount. DuskEVM testnet takes the second path today.
 - A payout or credit belongs to one transfer: two equal transfers to the same
-  address each need their own, and take them in the order they were sent.
+  address each need their own, and take them in the order they were sent,
+  those sent from another device too. Where that order can't be told, the
+  transfer stays in progress.
 - **Withdrawals** show their three steps, sent, proved and claimed, with
   times, the claim date, and the next action. Readiness is read from the
   Portal and dispute-game state, never inferred from elapsed time.

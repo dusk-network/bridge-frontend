@@ -166,14 +166,6 @@ export function createDuskNode({ url, fetch = globalThis.fetch }) {
     return BigInt(match[1]);
   }
 
-  /** Moonlight transfers whose memo is exactly `memo` (archive nodes). */
-  async function transfersByMemo(memo) {
-    const text = String(memo).replace(/["\\]/gu, "");
-    const data = await query(`transactionsByMemo(memo: "${text}") { json }`);
-    const entries = data?.transactionsByMemo?.json;
-    return Array.isArray(entries) ? entries : [];
-  }
-
   return Object.freeze({
     accountBalance,
     contractCall,
@@ -181,7 +173,6 @@ export function createDuskNode({ url, fetch = globalThis.fetch }) {
     latestBlock,
     query,
     transaction,
-    transfersByMemo,
     url: base,
   });
 }

@@ -159,6 +159,25 @@ function withDuskEvmContracts(net, duskEvm) {
   return { ...net, duskEvm: { ...net.duskEvm, contracts: { ...contracts, ...replaced } } };
 }
 
+/**
+ * The network's file with this deployment's bridge account, fee and time,
+ * its chains' tokens and the accounts that pay migrations out in place of
+ * its own where they differ, so a payout is looked for where this page's
+ * transfers are paid from.
+ */
+function withDeploymentRoutes(net, { evmNetworks, service }) {
+  const { chains, migrations, services } = net.routes;
+  const routes = {
+    ...net.routes,
+    chains: Object.fromEntries(Object.entries(chains).map(([id, chain]) => [id, evmNetworks[id] ? { ...chain, token: evmNetworks[id].tokenContract } : chain])),
+    migrations: migrations.map((route) => (evmNetworks[route.chain] ? { ...route, payoutAccount: evmNetworks[route.chain].payoutAccount || null } : route)),
+    services: services.map((route) =>
+      route.chain === service?.network ? { ...route, account: service.account, feeLux: String(service.feeLux), typicalSeconds: service.delaySeconds } : route,
+    ),
+  };
+  return JSON.stringify(routes) === JSON.stringify(net.routes) ? net : { ...net, routes };
+}
+
 export function loadConfig() {
   const requested = value("VITE_BRIDGE_PROFILE", "mainnet").toLowerCase();
   const profile = requested === "testnet" ? "testnet" : "mainnet";
@@ -228,9 +247,9 @@ export function loadConfig() {
     gasLimitUpper: BigInt(positiveInteger("VITE_GAS_LIMIT_UPPER", 1_000_000_000)),
     migrations,
     multicall: Object.freeze({ contractId: isContractId(multicallId) ? multicallId : "" }),
-    // The network's file, for its routes and labels, and this deployment's
-    // DuskEVM contracts.
-    network: withDuskEvmContracts(net, duskEvm),
+    // The network's file, for its routes and labels, with this deployment's
+    // DuskEVM contracts, bridge accounts and tokens.
+    network: withDeploymentRoutes(withDuskEvmContracts(net, duskEvm), { evmNetworks, service }),
     // Routes shown but not running now, by route ID: those the network's
     // file says aren't running, unless set; `none` runs them all.
     pausedRoutes: Object.freeze(list("VITE_PAUSED_ROUTES", routes(net).filter((route) => !route.running).map((route) => route.id))),
