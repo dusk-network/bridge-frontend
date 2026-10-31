@@ -4,6 +4,7 @@ import test from "node:test";
 import { encodeDuskExternalAssetRecipient } from "@dusk/evm-sdk";
 import { encodeAbiParameters, pad } from "viem";
 
+import { ETH_BRIDGE_INITIATED_TOPIC } from "@dusk-network/app-core/duskevm-withdrawals";
 import { createArchive } from "@dusk-network/app-core/history";
 import { networks } from "@dusk-network/networks";
 import { decodeBase58 } from "@dusk-network/networks/account";
@@ -22,7 +23,6 @@ import {
   shownFor,
   stateKey,
 } from "./discovery.js";
-import { ETH_BRIDGE_INITIATED_TOPIC, syncWithdrawals } from "./l2-withdrawals.js";
 
 const ACCOUNT = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
 const OTHER = MAINNET_BSC_BRIDGE_ACCOUNT;
@@ -76,71 +76,36 @@ const withdrawalLog = (n, block, recipient = ACCOUNT, amount = 2n * 10n ** 18n) 
   transactionHash: `0x${h(n)}`,
 });
 
-test("withdrawals are found by the EVM address, a window at a time, from the newest", async () => {
+test("an EVM address's withdrawals come from DuskEVM's bridge, kept per network and address for the next visit", async () => {
   const head = 3_905_000;
-  const logs = [withdrawalLog(1, head - 50_000), withdrawalLog(2, head - 350_000, OTHER), withdrawalLog(3, 10)];
-  const calls = [];
-  const rpc = async (method, params) => {
-    calls.push([method, params]);
-    if (method === "eth_getBlockByNumber") return { number: `0x${head.toString(16)}` };
-    const [{ fromBlock, toBlock, topics }] = params;
-    const [from, to] = [Number(fromBlock), Number(toBlock)];
-    if (to - from + 1 > 100_000) throw Object.assign(new Error("query exceeds max block range 100000"), { code: -32602 });
-    assert.equal(topics[1], pad(EVM));
-    return logs.filter((log) => Number(log.blockNumber) >= from && Number(log.blockNumber) <= to);
+  let final = head;
+  const logs = [withdrawalLog(1, head - 50_000), withdrawalLog(2, head - 150_000, OTHER)];
+  const windows = [];
+  const rpc = async (network, method, params) => {
+    assert.equal(network, "dusk-evm");
+    if (method === "eth_getBlockByNumber") return { number: `0x${final.toString(16)}` };
+    const [{ address, fromBlock, toBlock, topics }] = params;
+    assert.deepEqual([address, topics], [cfg.duskEvm.predeploys.l2StandardBridge, [ETH_BRIDGE_INITIATED_TOPIC, pad(EVM)]]);
+    windows.push([Number(fromBlock), Number(toBlock)]);
+    return logs.filter((log) => Number(log.blockNumber) >= Number(fromBlock) && Number(log.blockNumber) <= Number(toBlock));
   };
-  const bridge = cfg.duskEvm.predeploys.l2StandardBridge;
-  const first = await syncWithdrawals({ address: EVM, bridge, maxRequests: 5, rpc });
-  assert.deepEqual(first.found.map((entry) => [entry.hash, entry.destination, entry.amountWei]), [
-    [`0x${h(1)}`, ACCOUNT, "2000000000000000000"],
-    [`0x${h(2)}`, OTHER, "2000000000000000000"],
+  const storage = memoryStorage();
+  const discovery = createDiscovery({ archive: null, cfg, rpc, storage });
+
+  const first = await discovery.discover({ evm: EVM, evmRequests: 3 });
+  assert.deepEqual(first.entries.map((entry) => [entry.routeId, entry.hash, entry.amountLux, entry.destination, entry.sender]), [
+    ["dusk-evm-to-dusk", `0x${h(1)}`, "2000000000", ACCOUNT, EVM],
+    ["dusk-evm-to-dusk", `0x${h(2)}`, "2000000000", OTHER, EVM],
   ]);
-  assert.equal(calls.filter(([method]) => method === "eth_getLogs").length, 4);
-  assert.deepEqual(first.state.covered, [[head - 400_000 + 1, head]]);
+  const kept = JSON.parse(storage.getItem(stateKey(cfg, "l2", EVM)));
+  assert.deepEqual(kept.covered, [[head - 200_000 + 1, head]]);
 
-  // Too wide a window for another node: narrower, and nothing skipped.
-  const narrow = await syncWithdrawals({
-    address: EVM,
-    bridge,
-    maxRequests: 4,
-    rpc: async (method, params) => {
-      if (method === "eth_getBlockByNumber") return { number: `0x${head.toString(16)}` };
-      const [{ fromBlock, toBlock }] = params;
-      if (Number(toBlock) - Number(fromBlock) + 1 > 25_000) throw new Error("block range limit exceeded");
-      return [];
-    },
-  });
-  assert.equal(narrow.state.window, 25_000);
-  assert.deepEqual(narrow.state.covered, [[head - 50_000 + 1, head]]);
-
-  // Only final blocks are covered: a log above the finalized head waits, and
-  // coverage an older run kept above it is read again.
-  const latest = head + 600;
-  let finalized = head;
-  const final = async (method, params) => {
-    if (method === "eth_getBlockByNumber") return { number: `0x${finalized.toString(16)}` };
-    const [{ fromBlock, toBlock }] = params;
-    return [withdrawalLog(4, head + 300)].filter((log) => Number(log.blockNumber) >= Number(fromBlock) && Number(log.blockNumber) <= Number(toBlock));
-  };
-  const kept = { covered: [[head - 1_000, latest]], entries: {}, target: latest, window: 100_000 };
-  const before = await syncWithdrawals({ address: EVM, bridge, maxRequests: 3, rpc: final, state: kept });
-  assert.deepEqual(before.found, []);
-  assert.equal(Math.max(...before.state.covered.map(([, hi]) => hi)), head);
-  finalized = latest;
-  const after = await syncWithdrawals({ address: EVM, bridge, maxRequests: 3, rpc: final, state: before.state });
-  assert.deepEqual(after.found.map((entry) => entry.hash), [`0x${h(4)}`]);
-  // A node that doesn't answer "finalized": the latest block, less about an hour.
-  const older = await syncWithdrawals({
-    address: EVM,
-    bridge,
-    maxRequests: 2,
-    rpc: async (method) => {
-      if (method === "eth_getBlockByNumber") throw new Error("invalid block tag");
-      if (method === "eth_blockNumber") return `0x${latest.toString(16)}`;
-      return [];
-    },
-  });
-  assert.equal(older.state.target, latest - 1_800);
+  // The next visit reads what's new above, then carries on below.
+  final = head + 1_000;
+  windows.length = 0;
+  const next = await discovery.discover({ evm: EVM, evmRequests: 3 });
+  assert.deepEqual(windows, [[head + 1, head + 1_000], [head - 300_000 + 1, head - 200_000]]);
+  assert.equal(next.entries.length, 2);
 });
 
 test("a transfer found twice, or found and sent here, is one entry", () => {

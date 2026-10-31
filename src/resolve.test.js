@@ -3,12 +3,11 @@ import test from "node:test";
 
 import { networks } from "@dusk-network/networks";
 import { decodeBase58 } from "@dusk-network/networks/account";
-import { encodeDuskExternalAssetRecipient } from "@dusk/evm-sdk";
+import { encodeDuskExternalAssetRecipient, hashWithdrawal } from "@dusk/evm-sdk";
 import { encodeAbiParameters, encodeEventTopics, encodeFunctionData, parseAbi } from "viem";
 
 import { loadConfig } from "./config.js";
 import { resolveTransfer } from "./resolve.js";
-import { hashWithdrawal } from "./withdrawals.js";
 
 globalThis.__DUSK_BRIDGE_CONFIG__ = {
   VITE_BRIDGE_PROFILE: "testnet",

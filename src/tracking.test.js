@@ -9,6 +9,7 @@ import {
   toHex,
 } from "viem";
 
+import { WithdrawalError } from "@dusk-network/app-core/duskevm-withdrawals";
 import { networks } from "@dusk-network/networks";
 import { encodeDepositArgs, evmAddressOf } from "@dusk-network/networks/duskevm";
 
@@ -531,7 +532,7 @@ test("a withdrawal's check keeps whose proof its stage is: the account it was re
     now: () => 1_793_100_000_000,
     rpc: fakeRpc({}),
     withdrawals: {
-      loadWithdrawalStatus: async () => ({ blockNumber: 50n, details: { amountWei: 10n ** 17n }, proofSubmitter: recipient, stage: "ready_to_finalize", withdrawal: { gasLimit: 519_542n } }),
+      status: async () => ({ blockNumber: 50n, facts: { amountWei: 10n ** 17n }, proofSubmitter: recipient, stage: "ready_to_finalize", withdrawal: { gasLimit: 519_542n } }),
     },
   });
   const checked = await tracking.refresh({ hash: EVM_HASH, routeId: ROUTES.withdrawal.id }, ROUTES.withdrawal);
@@ -539,12 +540,14 @@ test("a withdrawal's check keeps whose proof its stage is: the account it was re
 });
 
 test("a withdrawal follows its stages, and a sent proof waits for Dusk", async () => {
-  let status = { blockNumber: 50n, details: { amountWei: 10n ** 17n }, stage: "ready_to_prove", withdrawal: { gasLimit: 519_542n } };
+  // What it pays and to whom, and who sent it: the package's facts.
+  const facts = { amountWei: 10n ** 17n, from: RECIPIENT, recipient: { account: SENDER, kind: "account" } };
+  let status = { blockNumber: 50n, facts, stage: "ready_to_prove", withdrawal: { gasLimit: 519_542n } };
   let error = null;
   const asked = [];
   const withdrawals = {
-    loadWithdrawalStatus: async (_hash, options) => {
-      asked.push(options.proofSubmitter);
+    status: async (_hash, options) => {
+      asked.push(options.submitter);
       if (error) throw error;
       return status;
     },
@@ -562,7 +565,10 @@ test("a withdrawal follows its stages, and a sent proof waits for Dusk", async (
   const ready = await tracking.refresh(entry, ROUTES.withdrawal);
   assert.equal(ready.status, "pending");
   assert.equal(ready.stage, "ready_to_prove");
-  assert.equal(ready.amountLux, "100000000");
+  assert.deepEqual([ready.amountLux, ready.destination, ready.sender], ["100000000", SENDER, RECIPIENT]);
+  status = { ...status, facts: { ...facts, recipient: { contractId: BRIDGE, kind: "contract" } } };
+  assert.equal((await tracking.refresh(entry, ROUTES.withdrawal)).destination, BRIDGE);
+  status = { ...status, facts };
   assert.equal(ready.sourceAt, (1_792_980_000 + 50) * 1_000);
   // The withdrawal's own gas, which claiming adds to its limit.
   assert.equal(ready.withdrawalGas, "519542");
@@ -583,9 +589,10 @@ test("a withdrawal follows its stages, and a sent proof waits for Dusk", async (
 
   // A prover is known only once a proof or claim was sent from here.
   asked.length = 0;
-  await tracking.refresh({ ...entry, proofSubmitter: "0xa" }, ROUTES.withdrawal);
-  await tracking.refresh({ ...entry, proofSubmitter: "0xa", proveHash: "bb".repeat(32) }, ROUTES.withdrawal);
-  assert.deepEqual(asked, [undefined, "0xa"]);
+  const prover = `0x${"0a".repeat(20)}`;
+  await tracking.refresh({ ...entry, proofSubmitter: prover }, ROUTES.withdrawal);
+  await tracking.refresh({ ...entry, proofSubmitter: prover, proveHash: "bb".repeat(32) }, ROUTES.withdrawal);
+  assert.deepEqual(asked, [null, prover]);
 
   proofTx = duskTx({ blockTimestamp: 1_793_000_000n });
   status = { ...status, provenAt: 1_793_000_000n, readyAt: 1_793_604_800n, stage: "proven_waiting" };
@@ -606,26 +613,29 @@ test("a withdrawal follows its stages, and a sent proof waits for Dusk", async (
   assert.deepEqual([kept.readyAt, kept.readyAtExact, kept.claimOverdue], [dated.readyAt, true, true]);
   status = { ...status, claimOverdue: true, readyAt: 1_793_604_800n };
   const games = [];
-  const load = withdrawals.loadWithdrawalStatus;
-  withdrawals.loadWithdrawalStatus = async (hash, options) => {
+  const load = withdrawals.status;
+  withdrawals.status = async (hash, options) => {
     games.push(options.proofGame);
     return load(hash, options);
   };
   await tracking.refresh({ ...entry, proofGame: late.proofGame }, ROUTES.withdrawal);
-  withdrawals.loadWithdrawalStatus = load;
+  withdrawals.status = load;
   assert.deepEqual(games, [`0x${"6f".repeat(20)}`]);
 
   status = { ...status, stage: "finalized" };
   assert.equal((await tracking.refresh(entry, ROUTES.withdrawal)).status, "completed");
 
-  error = new Error("Withdrawal transaction was not found.");
+  error = new WithdrawalError("not-found");
   assert.equal((await tracking.refresh(entry, ROUTES.withdrawal)).status, "pending");
-  error = new Error("Withdrawal transaction failed on DuskEVM.");
+  error = new WithdrawalError("failed");
   assert.equal((await tracking.refresh(entry, ROUTES.withdrawal)).status, "failed");
   // Another message to Dusk isn't a withdrawal of DUSK: it ends here.
-  error = new Error(NOT_A_DUSK_WITHDRAWAL);
+  error = new WithdrawalError("not-a-withdrawal");
   const other = await tracking.refresh(entry, ROUTES.withdrawal);
   assert.deepEqual([other.status, other.note], ["failed", NOT_A_DUSK_WITHDRAWAL]);
+  // A read that failed is no answer: the next check asks again.
+  error = new Error("not-found");
+  await assert.rejects(tracking.refresh(entry, ROUTES.withdrawal), { message: "not-found" });
 });
 
 test("the scheduler checks an entry until it ends", async () => {
@@ -706,13 +716,13 @@ test("a failed deposit whose call data doesn't read as a deposit ends as failed"
 
 test("a sent proof the Portal took and then rejected leaves the withdrawal ready to prove again", async () => {
   const included = 1_793_000_000n;
-  let status = { blockNumber: 50n, details: { amountWei: 10n ** 17n }, provenAt: included, stage: "ready_to_prove", withdrawal: { gasLimit: 519_542n } };
+  let status = { blockNumber: 50n, facts: { amountWei: 10n ** 17n }, provenAt: included, stage: "ready_to_prove", withdrawal: { gasLimit: 519_542n } };
   const tracking = createTracking({
     config: cfg,
     node: node({ transaction: async () => duskTx({ blockTimestamp: included }) }),
     now: () => 1_793_100_000_000,
     rpc: fakeRpc({}),
-    withdrawals: { loadWithdrawalStatus: async () => status },
+    withdrawals: { status: async () => status },
   });
   const proving = { hash: EVM_HASH, pendingAction: "prove", pendingHash: "aa".repeat(32), routeId: ROUTES.withdrawal.id };
   const settled = await tracking.refresh(proving, ROUTES.withdrawal);

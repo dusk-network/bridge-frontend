@@ -3,22 +3,20 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { encodeDepositArgs } from "@dusk-network/networks/duskevm";
+import { withdrawalGasLimit } from "@dusk-network/networks/gas";
 import { releaseFor } from "@duskdomains/sdk/releases";
-import { parseMessagePassedReceipt } from "@dusk/evm-sdk";
 
 import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
 import { actionLead, actionPrivacy, availableLine, pricedReview, receiptModel, recipientLine, reviewChecks, routeLine, transfersModel } from "./page-models.js";
 import { buildQuote, withdrawalStepMax } from "./quote.js";
-import { withdrawalGasLimit } from "./gas.js";
 import { activityPanel, cardPage, cardRegions, contractsSheet, footer, header, networkSheet, receiptPage, reviewSheet, walletLines } from "./views.js";
 import { formatDateTime } from "./format.js";
 import { chainMark, pairMark } from "./icons.js";
 import { approveLines, duskCallLines, duskTransferLines, migrateLines, walletFee, withdrawalAmount } from "./wallet-lines.js";
 import { driverJson, loadDataDriver } from "./data-driver.js";
-import { withdrawalToDriverInput } from "./withdrawals.js";
-import { contractCreditLog, messagePassedLog, u256 } from "./withdrawals.fixtures.js";
+import { contractCreditLog, messagePassedLog, u256, withdrawalInput } from "./withdrawals.fixtures.js";
 
 const DUSKEVM = {
   VITE_DUSKEVM_DISPUTE_GAME_FACTORY_CONTRACT_ID: "3b7d562aa0e6b94ce29c5ce2a6f0587ad771afdace86abb0baf66f93e49548cd",
@@ -43,7 +41,6 @@ const PAID = "213qXNRaEAXrgJTFxXsPMeFasiEtPVJwZ3x2wKgZog2kXtXE7ovGRFfn1spfKBU4AU
 // A Portal call as the bridge sends it: its arguments, encoded by the Portal's own data driver.
 const portalDriver = await loadDataDriver(readFileSync(new URL("../public/drivers/optimism_portal_dd_opt.wasm", import.meta.url)));
 const portalCall = (fnName, args) => portalDriver.encodeInputFn(fnName, driverJson(args));
-const withdrawalInput = (log) => withdrawalToDriverInput(parseMessagePassedReceipt({ logs: [log] }).withdrawal);
 const OUTPUT_ROOT_PROOF = { latest_blockhash: Array(32).fill(1), message_passer_storage_root: Array(32).fill(2), state_root: Array(32).fill(3), version: Array(32).fill(0) };
 
 /** The card as the controller builds it: Dusk to DuskEVM, 25, both wallets connected. */

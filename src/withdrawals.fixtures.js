@@ -1,7 +1,10 @@
-// What both withdrawal suites start from: testnet's 1,008 DUSK DuskEVM
+// What the withdrawal tests start from: testnet's 1,008 DUSK DuskEVM
 // withdrawal 0x04a8a897… (nonce 42, L2 block 0x2f265d), on DuskEVM testnet's
 // bridge route to an account, and testnet's tip on 28 Oct 2026. Not a test
 // itself; only the tests import it.
+
+import { parseWithdrawalReceipt } from "@dusk-network/app-core/duskevm-withdrawals";
+import { networks } from "@dusk-network/networks";
 
 // Its MessagePassed event, as DuskEVM's receipt gives it: relayMessage(...)
 // from DuskEVM's messenger to Dusk's, finalizeBridgeETH(from, to, amount,
@@ -55,4 +58,21 @@ export function u256(value) {
     remaining >>= 8n;
   }
   return out;
+}
+
+/** A receipt with one log, as DuskEVM's RPC gives it. */
+export const receiptOf = (log) => ({ blockHash: log.blockHash, blockNumber: log.blockNumber, logs: [log], status: "0x1", transactionHash: log.transactionHash });
+
+/** A log's withdrawal as the Portal's data driver takes it: its fields as bytes, its numbers as u256. */
+export function withdrawalInput(log) {
+  const { withdrawal } = parseWithdrawalReceipt(networks.testnet, receiptOf(log));
+  const bytes = (hex) => Array.from(Buffer.from(hex.slice(2), "hex"));
+  return {
+    data: bytes(withdrawal.data),
+    ["gas_limit"]: u256(withdrawal.gasLimit),
+    nonce: u256(withdrawal.nonce),
+    sender: bytes(withdrawal.sender),
+    target: bytes(withdrawal.target),
+    value: u256(withdrawal.value),
+  };
 }

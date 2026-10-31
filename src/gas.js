@@ -1,30 +1,12 @@
 // Gas for the bridge's Dusk contract calls: each operation's limit, as every
 // Dusk app sets it (@dusk-network/networks/gas), at the node's price. Only
 // the gas a transaction uses is charged, but a failed one is charged its
-// whole limit, so each operation gets its own limit.
-
-import { withdrawalGasLimit as withdrawalStepGas } from "@dusk-network/networks/gas";
-
-/** The gas limit no bridge transaction goes above. */
-export const DEFAULT_GAS_LIMIT_UPPER = 1_000_000_000n;
+// whole limit, so each operation gets its own limit. A proof's or a claim's
+// comes with its call (@dusk-network/app-core/duskevm-withdrawals).
 
 /** Why a proof or claim that needs more gas than the bound isn't sent. */
 export const WITHDRAWAL_GAS_REFUSAL =
   "This withdrawal needs more gas than the wallet allows, so it wasn't sent.";
-
-/**
- * The limit to prove or claim a withdrawal with, one for both steps: 50M and
- * the gas the withdrawal itself asks for, at least 1M. Above the bound it
- * isn't sent, since less gas could leave the withdrawal's call short.
- */
-export function withdrawalGasLimit(
-  withdrawalGas = 0n,
-  upper = DEFAULT_GAS_LIMIT_UPPER,
-) {
-  const limit = withdrawalStepGas(withdrawalGas);
-  if (limit > BigInt(upper)) throw new Error(WITHDRAWAL_GAS_REFUSAL);
-  return limit;
-}
 
 /**
  * Gas for the wallet: the operation's limit at the node's price, as the page

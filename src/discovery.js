@@ -8,10 +8,10 @@
 // is one entry.
 
 import { migrationPayoutOf } from "@dusk-network/app-core/bridge";
+import { syncWithdrawals } from "@dusk-network/app-core/duskevm-withdrawals";
 import { StaleHistoryError, createHistory } from "@dusk-network/app-core/history";
 import { routes } from "@dusk-network/networks";
 
-import { syncWithdrawals } from "./l2-withdrawals.js";
 import { entryId } from "./activity.js";
 import { sentToSomeoneElse, withdrawalNextAction } from "./transfer-view.js";
 
@@ -291,8 +291,8 @@ export function createDiscovery({ archive, cfg, rpc, storage = defaultStorage() 
     const { state } = await syncWithdrawals({
       address,
       bridge: cfg.duskEvm.predeploys.l2StandardBridge,
+      duskEvm: { request: ({ method, params }) => rpc("dusk-evm", method, params) },
       maxRequests,
-      rpc: (method, params) => rpc("dusk-evm", method, params),
       state: loadState(key, storage),
     });
     saveState(key, state, storage);

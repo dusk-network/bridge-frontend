@@ -123,7 +123,8 @@ account so the next visit asks only for what is new.
   for, so its payouts aren't listed).
 - **The EVM address**: DuskEVM's L2 bridge event `ETHBridgeInitiated` filtered
   by sender, 100,000 blocks (the RPC's limit) per request from the newest
-  down. Each withdrawal's Dusk recipient is decoded from its `extraData`.
+  down, synced by `@dusk-network/app-core/duskevm-withdrawals`. Each
+  withdrawal's Dusk recipient is decoded from its `extraData`.
 
 ## Following a transfer
 
@@ -154,7 +155,10 @@ Which payout or credit is a transfer's comes from
   transfer stays in progress.
 - **Withdrawals** show their three steps, sent, proved and claimed, with
   times, the claim date, and the next action. Readiness is read from the
-  Portal and dispute-game state, never inferred from elapsed time.
+  Portal and dispute-game state, never inferred from elapsed time. Where each
+  one is, its proof and its claim come from
+  `@dusk-network/app-core/duskevm-withdrawals`, which reads every call back
+  against the withdrawal before the page hands it to Dusk Wallet.
 
 The claim date is when the Portal takes the claim, worked out as every Dusk
 app does (`@dusk-network/networks/duskevm`): the later of the proof plus the
@@ -173,14 +177,17 @@ time, a second later for their strict comparisons.
   unresolved more than an hour past its clock is late: "Waiting for DuskEVM
   to settle this proof. Claim from … at the soonest.", with no countdown or
   calendar entry, since that date moves on with each check.
-- A claim is ready once the Portal's check passes and its date has come.
+- A claim is ready once the Portal's check passes, its game has resolved for
+  the defender and the Portal still takes it, and its date has come. A proof
+  whose game the Portal refuses (blacklisted, retired, no longer respected,
+  or won by the challenger) is made again.
 - A proof goes against a game that covers the withdrawal, has already
   resolved, and that the Portal would take, where there is one: the anchor
   state registry calls it proper and respected, and it was created after the
   respected game type last changed (`respectedGameTypeUpdatedAt`), as the web
   wallet requires. Its date is then exact when the proof is made ("If you
   prove now, you can claim from …"). Otherwise the proof goes against the
-  newest covering game.
+  newest covering game the Portal takes a proof against.
 
 Several contract reads on one screen go to the node as one Multicall for Dusk
 query (`93de287b…6ce1d4`, mainnet and testnet), through
@@ -229,7 +236,8 @@ route the file doesn't have can't be added. DuskEVM's contract IDs in the
 file come from its address book (duskevm-genesis); they are never guessed
 from EVM addresses. The anchor state registry
 (`VITE_DUSKEVM_ANCHOR_STATE_REGISTRY_CONTRACT_ID`) is optional. Without it
-(`none`), a proof goes against the newest covering game.
+(`none`), a proof goes against the newest covering game the Portal hasn't
+blacklisted and the challenger hasn't won.
 
 The same keys can be provided before the app loads through
 `window.__DUSK_BRIDGE_CONFIG__`, which allows one immutable build to be
@@ -278,6 +286,11 @@ npm run check
 
 `npm run check` runs the tests, creates a production bundle, and audits
 production dependencies at high severity.
+
+`node scripts/compare-withdrawals.mjs <checkout>` compares, on testnet, the
+proofs and claims this checkout and another hand Dusk Wallet for user2's
+withdrawals, byte for byte, with a stand-in wallet that signs nothing. CI
+doesn't run it.
 
 ## Trust boundaries
 

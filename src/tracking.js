@@ -5,6 +5,7 @@
 // transfer in the order they were sent, @dusk-network/app-core/bridge says.
 
 import { depositArrivals, migrationPayouts, serviceArrivals } from "@dusk-network/app-core/bridge";
+import { WithdrawalError } from "@dusk-network/app-core/duskevm-withdrawals";
 import { isAccount } from "@dusk-network/networks/account";
 import { BRIDGE_FUNCTIONS, decodeBridgeCall } from "@dusk-network/networks/duskevm";
 import { observeDepositStatus } from "@dusk/evm-sdk";
@@ -13,7 +14,7 @@ import { decodeFunctionData, toHex } from "viem";
 import { MIGRATION_ABI } from "./legacy-migration.js";
 import { networkName } from "./names.js";
 import { normalizeEvmAddress } from "./validation.js";
-import { NOT_A_DUSK_WITHDRAWAL } from "./withdrawals.js";
+import { NOT_A_DUSK_WITHDRAWAL, waitWords } from "./withdrawals.js";
 
 export const STATUS_WORDS = Object.freeze({
   completed: "Completed",
@@ -104,7 +105,7 @@ const isMethodMissing = (error) =>
  * @param {object} deps.node the Dusk node client
  * @param {(network: string, method: string, params: unknown[]) => Promise<any>} deps.rpc
  *   JSON-RPC by network: "ethereum", "bsc", "dusk-evm" or "dusk-evm-l1"
- * @param {object} [deps.withdrawals] the withdrawal service
+ * @param {object} [deps.withdrawals] the page's withdrawals (withdrawals.js)
  * @param {(network: string) => object} [deps.receiptClient] viem client, for the adapter path
  * @param {() => number} [deps.now]
  * @param {typeof fetch} [deps.fetch] what the payout searches send their requests with
@@ -357,36 +358,35 @@ export function createTracking(deps) {
   async function refreshWithdrawal(entry) {
     let status;
     try {
-      status = await deps.withdrawals.loadWithdrawalStatus(entry.hash, {
+      status = await deps.withdrawals.status(entry.hash, {
         // The proof's game, as the last check found it: read in the same query.
         proofGame: entry.proofGame ?? null,
         // The account that proved, once this browser sent a proof or a claim;
-        // before that, the connected account's proof, or any other found.
-        proofSubmitter: entry.proveHash || entry.claimHash || entry.pendingHash ? entry.proofSubmitter ?? undefined : undefined,
+        // before that, the connected account's proof, or the recipient's.
+        submitter: entry.proveHash || entry.claimHash || entry.pendingHash ? entry.proofSubmitter ?? null : null,
       });
     } catch (error) {
-      if (error?.message === "Withdrawal transaction was not found.")
-        return pending(`Waiting for ${name("dusk-evm")}.`, { stage: "submitted" });
-      if (error?.message === "Withdrawal transaction failed on DuskEVM.")
+      const refused = error instanceof WithdrawalError ? error.code : null;
+      if (refused === "not-found") return pending(`Waiting for ${name("dusk-evm")}.`, { stage: "submitted" });
+      if (refused === "failed")
         return failed("The withdrawal failed on DuskEVM. Your DUSK is still there.", {
           stage: "failed",
         });
       // Another message to Dusk, or no message at all: nothing to prove or claim.
-      if (error?.message === NOT_A_DUSK_WITHDRAWAL || error?.message === "Withdrawal MessagePassed event was not found.")
-        return failed(NOT_A_DUSK_WITHDRAWAL, { stage: "failed" });
+      if (refused === "not-a-withdrawal") return failed(NOT_A_DUSK_WITHDRAWAL, { stage: "failed" });
       throw error;
     }
     const settled = await settlePendingAction(entry, status);
     const current = settled.status;
     // A proof whose game couldn't be read this time says no date: the one known so far stands.
     const dated = "readyAt" in current || !["proven_waiting", "ready_to_finalize"].includes(current.stage);
+    // What it pays and to whom, as Dusk's L1 bridge pays it out.
+    const { amountWei, from, recipient } = current.facts ?? {};
     const patch = {
       ...(settled.patch ?? {}),
-      amountLux: current.details?.amountWei
-        ? (current.details.amountWei / WEI_PER_LUX).toString()
-        : entry.amountLux,
-      destination: current.details?.recipient ?? entry.destination,
-      sender: current.details?.from ?? entry.sender,
+      amountLux: amountWei ? (amountWei / WEI_PER_LUX).toString() : entry.amountLux,
+      destination: recipient ? (recipient.account ?? recipient.contractId) : entry.destination,
+      sender: from ?? entry.sender,
       // Claiming adds this to its gas limit: the quote's maximum uses it.
       withdrawalGas: current.withdrawal?.gasLimit === undefined ? entry.withdrawalGas : String(current.withdrawal.gasLimit),
       proofRejected: current.proofRejected ?? false,
@@ -404,7 +404,7 @@ export function createTracking(deps) {
         entry.sourceAt ??
         (current.blockNumber === undefined ? null : await blockTime("dusk-evm", current.blockNumber)),
       stage: current.stage,
-      statusMessage: current.statusMessage ?? "",
+      statusMessage: waitWords(status),
       withdrawalHash: current.withdrawalHash,
     };
     if (current.stage === "finalized") return completed(patch);

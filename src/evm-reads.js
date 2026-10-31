@@ -2,10 +2,10 @@
 // from each chain's public RPC: the wallet isn't asked to switch chains just
 // so the page can read.
 
+import { withdrawalCall } from "@dusk-network/app-core/duskevm-withdrawals";
 import { erc20Abi as ERC20 } from "@dusk/evm-sdk";
 import { decodeFunctionResult, encodeFunctionData, toHex } from "viem";
 
-import { prepareWithdrawalCall } from "./duskevm-withdrawal.js";
 import { MIGRATION_ABI } from "./legacy-migration.js";
 
 /**
@@ -84,12 +84,8 @@ export function createEvmReads({ cfg, rpc, rpcBatch }) {
     let gas = WITHDRAW_GAS_FALLBACK;
     if (amountWei && duskAccount) {
       try {
-        const { l2Transaction } = prepareWithdrawalCall({ account: owner, amountWei, duskAccount });
-        gas = await estimate(
-          "dusk-evm",
-          { data: l2Transaction.data, from: owner, to: l2Transaction.to, value: toHex(l2Transaction.value) },
-          WITHDRAW_GAS_FALLBACK,
-        );
+        const { data, to, value } = withdrawalCall(cfg.network, { amountWei, sender: owner, to: duskAccount });
+        gas = await estimate("dusk-evm", { data, from: owner, to, value: toHex(value) }, WITHDRAW_GAS_FALLBACK);
       } catch {
         gas = WITHDRAW_GAS_FALLBACK;
       }
