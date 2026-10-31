@@ -86,3 +86,44 @@ test("an account the wallet gives in lower case is used with its checksum's capi
   assert.equal(wallet.getEvmState().account, "0x75685f9D88749B583732B40d56fe007cD404b72D");
   delete globalThis.ethereum;
 });
+
+test("a chain the wallet adds is selected too, and the page shows the chain the wallet says it's on", async () => {
+  const added = new Set();
+  let chain = 1;
+  // Whether a switch to an added chain selects it: a wallet can say yes and stay.
+  let selects = true;
+  globalThis.ethereum = {
+    on() {},
+    removeListener() {},
+    async request({ method, params }) {
+      if (method === "eth_accounts") return ["0x0000000000000000000000000000000000000001"];
+      if (method === "eth_chainId") return `0x${chain.toString(16)}`;
+      const id = Number.parseInt(params?.[0]?.chainId, 16);
+      if (method === "wallet_switchEthereumChain") {
+        if (!added.has(id)) throw Object.assign(new Error("Unrecognized chain ID."), { code: 4902 });
+        if (selects) chain = id;
+        return null;
+      }
+      // Added, not selected, as some wallets do.
+      if (method === "wallet_addEthereumChain") return void added.add(id);
+      throw new Error(`Unexpected method: ${method}`);
+    },
+  };
+  const wallet = await import(`./evm-wallet.js?added=${Date.now()}`);
+  const shown = [];
+  wallet.subscribeEvmWallet((state) => shown.push(state.chainId));
+  await wallet.initializeEvmWallet();
+  const walletChain = async () => Number.parseInt(await globalThis.ethereum.request({ method: "eth_chainId" }), 16);
+
+  await wallet.ensureEvmChain({ chainId: 745, chainName: "DuskEVM Testnet", rpcUrl: "https://rpc.testnet.evm.dusk.network" });
+  // The page shows the chain the wallet says, and it's the one asked for.
+  assert.equal(shown.at(-1), await walletChain());
+  assert.equal(shown.at(-1), 745);
+
+  // One that adds a chain but stays where it is: the page says where, and goes no further.
+  selects = false;
+  await assert.rejects(wallet.ensureEvmChain({ chainId: 11_155_111, chainName: "Sepolia", rpcUrl: "https://ethereum-sepolia-rpc.publicnode.com" }), /Sepolia/u);
+  assert.equal(shown.at(-1), await walletChain());
+  assert.equal(shown.at(-1), 745);
+  delete globalThis.ethereum;
+});

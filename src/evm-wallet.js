@@ -272,11 +272,14 @@ export async function connectEvmWallet() {
 export async function ensureEvmChain(network) {
   if (!provider) await connectEvmWallet();
   const hexChainId = `0x${network.chainId.toString(16)}`;
-  try {
-    await provider.request({
+  const select = () =>
+    provider.request({
       method: "wallet_switchEthereumChain",
       params: [{ chainId: hexChainId }],
     });
+  let added = false;
+  try {
+    await select();
   } catch (error) {
     if (error?.code !== 4902 || !network.rpcUrl) throw error;
     await provider.request({
@@ -297,9 +300,15 @@ export async function ensureEvmChain(network) {
         },
       ],
     });
+    // Adding a chain needn't select it.
+    await select();
+    added = true;
   }
-  chainId = network.chainId;
+  // Once added, the chain the wallet says it's on, not the one asked for.
+  chainId = added ? parseChainId(await provider.request({ method: "eth_chainId" })) : network.chainId;
   publish();
+  if (chainId !== network.chainId)
+    throw new Error(`Your wallet is still on another chain. Switch it to ${network.chainName ?? network.name} and try again.`);
 }
 
 /** Why an EVM request isn't sent: since its review, the wallet switched account. */
