@@ -1,13 +1,27 @@
 import assert from "node:assert/strict";
+import { register } from "node:module";
 import test from "node:test";
 import { getAddress } from "viem";
 
-// The testnet profile, with DuskEVM configured, before the modules read it.
+// Reown's AppKit, which the page loads once someone connects through it, stood
+// in for: its `createAppKit` hands back `globalThis.reownAppKit`.
+const standIn = (source) => `data:text/javascript,${encodeURIComponent(source)}`;
+const standIns = {
+  "@reown/appkit": standIn("export const createAppKit = () => globalThis.reownAppKit;"),
+  "@reown/appkit-adapter-wagmi": standIn("export class WagmiAdapter {}"),
+};
+register(standIn(`const standIns = ${JSON.stringify(standIns)};
+export function resolve(specifier, context, next) {
+  return Object.hasOwn(standIns, specifier) ? { shortCircuit: true, url: standIns[specifier] } : next(specifier, context);
+}`));
+
+// The testnet profile, with DuskEVM and Reown configured, before the modules read it.
 globalThis.__DUSK_BRIDGE_CONFIG__ = {
   VITE_BRIDGE_PROFILE: "testnet",
   VITE_DUSKEVM_DISPUTE_GAME_FACTORY_CONTRACT_ID: "33".repeat(32),
   VITE_DUSKEVM_L1_STANDARD_BRIDGE_CONTRACT_ID: "11".repeat(32),
   VITE_DUSKEVM_OPTIMISM_PORTAL_CONTRACT_ID: "22".repeat(32),
+  VITE_REOWN_PROJECT_ID: "stand-in",
 };
 const { config } = await import("./config.js");
 const { networks } = await import("@dusk-network/networks");
@@ -16,7 +30,7 @@ const { serviceTransferRequest } = await import("./service-transfer.js");
 const { decodeBridgeCall } = await import("@dusk-network/networks/duskevm");
 const { depositRequest } = await import("./dusk-deposit.js");
 const { submitDuskEvmWithdrawal } = await import("./duskevm-withdrawal.js");
-const { initializeEvmWallet } = await import("./evm-wallet.js");
+const { connectEvmWallet, heldAccount, initializeEvmWallet } = await import("./evm-wallet.js");
 const { approveMigration, submitMigration } = await import("./legacy-migration.js");
 
 // What the review prepares and then sends, as the account it was reviewed for.
@@ -154,10 +168,10 @@ const DUSK = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFv
 /**
  * An EIP-1193 wallet stand-in on the reviewed account, in lower case as
  * wallets give it. It signs as the account it has selected, whatever the
- * request's `from` says, and `onSwitch` runs while its chain-switch dialog
- * is open.
+ * request's `from` says, or, as a WalletConnect session, as `from`; and
+ * `onSwitch` runs while its chain-switch dialog is open.
  */
-async function useEvmWallet({ onSwitch = () => {} } = {}) {
+function fakeEvmWallet({ onSwitch = () => {}, signsFrom = false } = {}) {
   const listeners = new Map();
   const wallet = {
     accounts: [REVIEWED.toLowerCase()],
@@ -174,13 +188,19 @@ async function useEvmWallet({ onSwitch = () => {} } = {}) {
         return null;
       }
       if (method === "eth_sendTransaction") {
-        wallet.sent.push({ from: params[0].from, signer: wallet.accounts[0] });
+        wallet.sent.push({ from: params[0].from, signer: signsFrom ? params[0].from : wallet.accounts[0] });
         return `0x${"ab".repeat(32)}`;
       }
       throw new Error(`Unexpected method: ${method}`);
     },
     sent: [],
   };
+  return wallet;
+}
+
+/** A browser wallet the page found itself, as it does without Reown's modal. */
+async function useEvmWallet(options) {
+  const wallet = fakeEvmWallet(options);
   globalThis.ethereum = wallet;
   await initializeEvmWallet();
   return wallet;
@@ -200,13 +220,13 @@ globalThis.fetch = async (_url, { body }) => {
   return Response.json(Array.isArray(calls) ? calls.map(answer) : answer(calls));
 };
 
+const sends = {
+  approve: (account) => approveMigration(config.evmNetworks.ethereum, "1", { account }),
+  migrate: (account) => submitMigration(config.evmNetworks.ethereum, "1", DUSK, { account }),
+  withdraw: (account) => submitDuskEvmWithdrawal({ account, amount: "1", duskAccount: DUSK }),
+};
+
 test("an EVM withdrawal, approval or migration goes out from the account it was reviewed for, or not at all", async () => {
-  const sepolia = config.evmNetworks.ethereum;
-  const sends = {
-    approve: (account) => approveMigration(sepolia, "1", { account }),
-    migrate: (account) => submitMigration(sepolia, "1", DUSK, { account }),
-    withdraw: (account) => submitDuskEvmWithdrawal({ account, amount: "1", duskAccount: DUSK }),
-  };
   const switches = {
     // The wallet switches account while its chain-switch dialog is open.
     during: (wallet) => {
@@ -228,6 +248,79 @@ test("an EVM withdrawal, approval or migration goes out from the account it was 
     const steady = await useEvmWallet();
     await send(REVIEWED);
     assert.deepEqual(steady.sent.map(({ from, signer }) => [from.toLowerCase(), signer]), [[REVIEWED.toLowerCase(), REVIEWED.toLowerCase()]], name);
+    // A wallet that selected another account, still listing the reviewed
+    // one after it, and hasn't said so: nothing is sent.
+    const second = await useEvmWallet();
+    second.accounts = [OTHER, REVIEWED.toLowerCase()];
+    await assert.rejects(send(REVIEWED), { code: "EVM_ACCOUNT_CHANGED" }, `${name}, listed second`);
+    assert.deepEqual(second.sent, [], `${name}, listed second`);
   }
   delete globalThis.ethereum;
+});
+
+test("where Reown picks the EVM account, the reviewed one may be any the wallet lists; otherwise it's the wallet's first", () => {
+  const listed = [OTHER, REVIEWED.toLowerCase()];
+  assert.equal(heldAccount(listed, REVIEWED, { reownPicks: true }), REVIEWED.toLowerCase());
+  assert.equal(heldAccount(listed, REVIEWED), undefined);
+  assert.equal(heldAccount([REVIEWED.toLowerCase(), OTHER], REVIEWED), REVIEWED.toLowerCase());
+  assert.equal(heldAccount([OTHER], REVIEWED, { reownPicks: true }), undefined);
+  assert.equal(heldAccount([], REVIEWED, { reownPicks: true }), undefined);
+});
+
+/** Reown's AppKit stand-in, connected to the reviewed account through `wallet`, by a connector of `type`. */
+function fakeAppKit() {
+  const subscribers = { account: [], providers: [] };
+  const appKit = {
+    connect(wallet, type) {
+      appKit.connection = { type, wallet };
+      subscribers.providers.forEach((listener) => listener({ eip155: wallet }));
+      subscribers.account.forEach((listener) => listener({ address: REVIEWED, isConnected: true }));
+    },
+    connection: null,
+    getAccount: () => ({ address: REVIEWED, isConnected: Boolean(appKit.connection) }),
+    getChainId: () => 1,
+    getWalletInfo: () => undefined,
+    getWalletProvider: () => appKit.connection?.wallet ?? null,
+    getWalletProviderType: () => appKit.connection?.type,
+    open: async () => {},
+    subscribeAccount: (listener) => subscribers.account.push(listener),
+    subscribeNetwork: () => {},
+    subscribeProviders: (listener) => subscribers.providers.push(listener),
+  };
+  return appKit;
+}
+
+test("through Reown's modal, a browser wallet that selected another account and lists the reviewed one second is sent nothing", async () => {
+  // Astra's case: the wallet switches to another account during the chain
+  // switch, lists the reviewed one after it, and says so only later.
+  const switchesLate = (wallet) => {
+    const listed = [OTHER, REVIEWED.toLowerCase()];
+    wallet.accounts = listed;
+    setTimeout(() => wallet.emit("accountsChanged", listed));
+  };
+  globalThis.reownAppKit = fakeAppKit();
+  // A browser wallet, an EIP-6963 one, and one whose connector AppKit doesn't name.
+  for (const type of ["INJECTED", "ANNOUNCED", undefined]) {
+    for (const [name, send] of Object.entries(sends)) {
+      const wallet = fakeEvmWallet({ onSwitch: switchesLate });
+      if (globalThis.reownAppKit.connection) globalThis.reownAppKit.connect(wallet, type);
+      else {
+        globalThis.reownAppKit.connection = { type, wallet };
+        await connectEvmWallet();
+      }
+      await assert.rejects(send(REVIEWED), { code: "EVM_ACCOUNT_CHANGED" }, `${name}, ${type}`);
+      assert.deepEqual(wallet.sent, [], `${name}, ${type}`);
+    }
+  }
+});
+
+test("through Reown, a WalletConnect session sends from the reviewed account wherever the wallet lists it", async () => {
+  for (const [name, send] of Object.entries(sends)) {
+    const session = fakeEvmWallet({ signsFrom: true });
+    session.accounts = [OTHER, REVIEWED.toLowerCase()];
+    globalThis.reownAppKit.connect(session, "WALLET_CONNECT");
+    await send(REVIEWED);
+    assert.deepEqual(session.sent.map(({ from, signer }) => [from.toLowerCase(), signer.toLowerCase()]), [[REVIEWED.toLowerCase(), REVIEWED.toLowerCase()]], name);
+  }
+  delete globalThis.reownAppKit;
 });

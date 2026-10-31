@@ -14,6 +14,11 @@ const discoveredProviders = [];
 const providerNames = new WeakMap();
 let provider = null;
 let account = null;
+// Whether the page's side picks the account among those the wallet lists,
+// and the wallet signs as the request's `from`: a WalletConnect session
+// through Reown. A browser wallet, one reached through Reown's modal too,
+// picks it itself, its first; so does one whose connector AppKit doesn't name.
+let reownPicks = false;
 let chainId = null;
 let cleanup = () => {};
 let discoveryStarted = false;
@@ -174,13 +179,18 @@ async function initializeReown() {
         "--w3m-border-radius-master": "2px",
       },
     });
+    // AppKit's type for the connector the account came through, read again
+    // on each connect and provider change: `WALLET_CONNECT` for a session.
+    const walletConnect = () => Boolean(provider) && appKit.getWalletProviderType?.() === "WALLET_CONNECT";
     const connected = appKit.getAccount("eip155");
     provider = connected?.isConnected ? appKit.getWalletProvider() : null;
+    reownPicks = walletConnect();
     account = connected?.isConnected ? (connected.address ?? null) : null;
     chainId = connected?.isConnected ? parseChainId(appKit.getChainId()) : null;
     if (provider) watch(provider);
     appKit.subscribeProviders((providers) => {
       provider = providers.eip155 ?? null;
+      reownPicks = walletConnect();
       if (provider) watch(provider);
       publish();
     });
@@ -190,6 +200,7 @@ async function initializeReown() {
         provider = null;
         chainId = null;
       }
+      reownPicks = walletConnect();
       publish();
     }, "eip155");
     appKit.subscribeNetwork(({ chainId: nextChainId }) => {
@@ -245,6 +256,7 @@ export async function initializeEvmWallet() {
     return state();
   }
   provider = discovered;
+  reownPicks = false;
   watch(provider);
   return refresh();
 }
@@ -260,6 +272,7 @@ export async function connectEvmWallet() {
   discoverProviders();
   provider = provider ?? findProvider();
   if (!provider) throw new Error("Install an EVM wallet extension first.");
+  reownPicks = false;
   watch(provider);
   const accounts = await provider.request({ method: "eth_requestAccounts" });
   account = accounts?.[0] ?? null;
@@ -315,16 +328,27 @@ export async function ensureEvmChain(network) {
 export const EVM_ACCOUNT_CHANGED = "Your EVM wallet switched to another account, so nothing was sent. Review it again.";
 
 /**
+ * `reviewed` as the wallet's `accounts` hold it now, or undefined: the
+ * wallet's selected account, its first; or, in a WalletConnect session
+ * through Reown, where the page's side picks the account, any the wallet
+ * lists.
+ */
+export function heldAccount(accounts, reviewed, { reownPicks: picks = false } = {}) {
+  const same = (value) => Boolean(value && reviewed) && String(value).toLowerCase() === String(reviewed).toLowerCase();
+  return picks ? accounts.find(same) : same(accounts[0]) ? accounts[0] : undefined;
+}
+
+/**
  * The account a request goes out from: `reviewed`, the one it was reviewed
  * for, asked of the wallet again right before sending. The wallet can switch
  * account while its chain-switch dialog is open, and say so only later: then
  * nothing is sent.
  */
 export async function reviewedEvmAccount(reviewed) {
-  const [current] = (await provider?.request({ method: "eth_accounts" })) ?? [];
-  const same = (value) => Boolean(value && reviewed) && String(value).toLowerCase() === String(reviewed).toLowerCase();
+  const accounts = (await provider?.request({ method: "eth_accounts" })) ?? [];
+  const current = heldAccount(accounts, reviewed, { reownPicks });
   // As the page last heard it, and as the wallet says now.
-  if (!same(account) || !same(current))
+  if (String(account ?? "").toLowerCase() !== String(reviewed ?? "").toLowerCase() || !reviewed || !current)
     throw Object.assign(new Error(EVM_ACCOUNT_CHANGED), { code: "EVM_ACCOUNT_CHANGED" });
   return current;
 }
