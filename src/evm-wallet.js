@@ -302,6 +302,24 @@ export async function ensureEvmChain(network) {
   publish();
 }
 
+/** Why an EVM request isn't sent: since its review, the wallet switched account. */
+export const EVM_ACCOUNT_CHANGED = "Your EVM wallet switched to another account, so nothing was sent. Review it again.";
+
+/**
+ * The account a request goes out from: `reviewed`, the one it was reviewed
+ * for, asked of the wallet again right before sending. The wallet can switch
+ * account while its chain-switch dialog is open, and say so only later: then
+ * nothing is sent.
+ */
+export async function reviewedEvmAccount(reviewed) {
+  const [current] = (await provider?.request({ method: "eth_accounts" })) ?? [];
+  const same = (value) => Boolean(value && reviewed) && String(value).toLowerCase() === String(reviewed).toLowerCase();
+  // As the page last heard it, and as the wallet says now.
+  if (!same(account) || !same(current))
+    throw Object.assign(new Error(EVM_ACCOUNT_CHANGED), { code: "EVM_ACCOUNT_CHANGED" });
+  return current;
+}
+
 export function getEvmClients(network) {
   if (!provider || !account) throw new Error("Connect an EVM wallet first.");
   const chain = defineChain({

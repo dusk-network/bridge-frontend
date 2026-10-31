@@ -15,6 +15,9 @@ const { sendDuskContractCall, sendDuskTransfer, useDuskWallet } = await import("
 const { serviceTransferRequest } = await import("./service-transfer.js");
 const { decodeBridgeCall } = await import("@dusk-network/networks/duskevm");
 const { depositRequest } = await import("./dusk-deposit.js");
+const { submitDuskEvmWithdrawal } = await import("./duskevm-withdrawal.js");
+const { initializeEvmWallet } = await import("./evm-wallet.js");
+const { approveMigration, submitMigration } = await import("./legacy-migration.js");
 
 // What the review prepares and then sends, as the account it was reviewed for.
 const submitServiceTransfer = async ({ account, ...options }) => sendDuskTransfer(await serviceTransferRequest(options), { account });
@@ -141,4 +144,90 @@ test("a deposit or transfer reviewed for one Dusk account isn't sent as another"
   assert.equal(wallet.sent.length, 0);
   await submitServiceTransfer({ account: "21n5ncyu", amountLux: 2_000_000_000n, destination: TYPED, node });
   assert.equal(wallet.sent.length, 1);
+});
+
+// The EVM account a review shows, checksummed, and another the wallet holds.
+const REVIEWED = "0x75685f9D88749B583732B40d56fe007cD404b72D";
+const OTHER = "0xf49ea944fd8a6bde7358a61ac1004fbaa9321aec";
+const DUSK = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
+
+/**
+ * An EIP-1193 wallet stand-in on the reviewed account, in lower case as
+ * wallets give it. It signs as the account it has selected, whatever the
+ * request's `from` says, and `onSwitch` runs while its chain-switch dialog
+ * is open.
+ */
+async function useEvmWallet({ onSwitch = () => {} } = {}) {
+  const listeners = new Map();
+  const wallet = {
+    accounts: [REVIEWED.toLowerCase()],
+    chainId: 1,
+    emit: (event, value) => (listeners.get(event) ?? []).forEach((listener) => listener(value)),
+    on: (event, listener) => listeners.set(event, [...(listeners.get(event) ?? []), listener]),
+    removeListener: (event, listener) => listeners.set(event, (listeners.get(event) ?? []).filter((other) => other !== listener)),
+    async request({ method, params }) {
+      if (method === "eth_accounts") return wallet.accounts;
+      if (method === "eth_chainId") return `0x${wallet.chainId.toString(16)}`;
+      if (method === "wallet_switchEthereumChain") {
+        wallet.chainId = Number.parseInt(params[0].chainId, 16);
+        await onSwitch(wallet);
+        return null;
+      }
+      if (method === "eth_sendTransaction") {
+        wallet.sent.push({ from: params[0].from, signer: wallet.accounts[0] });
+        return `0x${"ab".repeat(32)}`;
+      }
+      throw new Error(`Unexpected method: ${method}`);
+    },
+    sent: [],
+  };
+  globalThis.ethereum = wallet;
+  await initializeEvmWallet();
+  return wallet;
+}
+
+// The source chain's RPC: every call succeeds, and a sent transaction is mined.
+globalThis.fetch = async (_url, { body }) => {
+  const result = (method) =>
+    ({
+      eth_blockNumber: "0x10",
+      eth_call: `0x${"1".padStart(64, "0")}`,
+      eth_chainId: "0xaa36a7",
+      eth_getTransactionReceipt: { blockHash: `0x${"cd".repeat(32)}`, blockNumber: "0x10", logs: [], status: "0x1", transactionHash: `0x${"ab".repeat(32)}`, transactionIndex: "0x0" },
+    })[method];
+  const calls = JSON.parse(body);
+  const answer = ({ id, method }) => ({ id, jsonrpc: "2.0", result: result(method) });
+  return Response.json(Array.isArray(calls) ? calls.map(answer) : answer(calls));
+};
+
+test("an EVM withdrawal, approval or migration goes out from the account it was reviewed for, or not at all", async () => {
+  const sepolia = config.evmNetworks.ethereum;
+  const sends = {
+    approve: (account) => approveMigration(sepolia, "1", { account }),
+    migrate: (account) => submitMigration(sepolia, "1", DUSK, { account }),
+    withdraw: (account) => submitDuskEvmWithdrawal({ account, amount: "1", duskAccount: DUSK }),
+  };
+  const switches = {
+    // The wallet switches account while its chain-switch dialog is open.
+    during: (wallet) => {
+      wallet.accounts = [OTHER];
+      wallet.emit("accountsChanged", [OTHER]);
+    },
+    // Or it says so only once the switch is done.
+    after: (wallet) => {
+      wallet.accounts = [OTHER];
+      setTimeout(() => wallet.emit("accountsChanged", [OTHER]));
+    },
+  };
+  for (const [name, send] of Object.entries(sends)) {
+    for (const [when, onSwitch] of Object.entries(switches)) {
+      const wallet = await useEvmWallet({ onSwitch });
+      await assert.rejects(send(REVIEWED), { code: "EVM_ACCOUNT_CHANGED" }, `${name}, switched ${when}`);
+      assert.deepEqual(wallet.sent, [], `${name}, switched ${when}`);
+    }
+    const steady = await useEvmWallet();
+    await send(REVIEWED);
+    assert.deepEqual(steady.sent.map(({ from, signer }) => [from.toLowerCase(), signer]), [[REVIEWED.toLowerCase(), REVIEWED.toLowerCase()]], name);
+  }
+  delete globalThis.ethereum;
 });

@@ -81,10 +81,10 @@ export function sentActionPatch(review, hash, submitterOf) {
  * review stale, or why it failed, naming `wallet`.
  */
 export function notSent(review, error, { announce, wallet = "dusk" }) {
-  const moved = error?.code === "DUSK_ACCOUNT_CHANGED";
+  const moved = error?.code === "DUSK_ACCOUNT_CHANGED" ? "dusk" : error?.code === "EVM_ACCOUNT_CHANGED" ? "evm" : "";
   review.busy = false;
   if (moved) review.stale = true;
-  review.error = moved ? SIGNER_MOVED.dusk : friendlyWalletError(error, wallet);
+  review.error = moved ? SIGNER_MOVED[moved] : friendlyWalletError(error, wallet);
   announce(review.error);
   return review;
 }

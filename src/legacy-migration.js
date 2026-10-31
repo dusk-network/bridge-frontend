@@ -1,7 +1,7 @@
 import { erc20Abi } from "@dusk/evm-sdk";
 import { formatUnits, parseAbi, parseUnits } from "viem";
 
-import { ensureEvmChain, getEvmClients } from "./evm-wallet.js";
+import { ensureEvmChain, getEvmClients, reviewedEvmAccount } from "./evm-wallet.js";
 import { normalizeDuskAddress, normalizeEvmAddress } from "./validation.js";
 
 /** The migration contracts' one function, the same on Ethereum and BNB Smart Chain. */
@@ -28,35 +28,37 @@ export function assertMigrationBalance(balance, amount) {
   return value;
 }
 
-export async function approveMigration(network, amount) {
+/** Approves exactly `amount` from `account`, the EVM account it was reviewed for, or sends nothing. */
+export async function approveMigration(network, amount, { account: reviewed } = {}) {
   await ensureEvmChain(network);
-  const { account, publicClient, walletClient } = getEvmClients(network);
+  const { publicClient, walletClient } = getEvmClients(network);
   const value = parseMigrationAmount(amount);
   const { request } = await publicClient.simulateContract({
-    account,
+    account: reviewed,
     abi: erc20Abi,
     address: network.tokenContract,
     functionName: "approve",
     args: [network.migrationContract, value],
   });
-  const hash = await walletClient.writeContract(request);
+  const hash = await walletClient.writeContract({ ...request, account: await reviewedEvmAccount(reviewed) });
   const receipt = await publicClient.waitForTransactionReceipt({ hash });
   if (receipt.status !== "success")
     throw new Error("The approval transaction failed.");
   return hash;
 }
 
-export async function submitMigration(network, amount, duskAccount) {
+/** Migrates `amount` to `duskAccount` from `account`, the EVM account it was reviewed for, or sends nothing. */
+export async function submitMigration(network, amount, duskAccount, { account: reviewed } = {}) {
   await ensureEvmChain(network);
-  const { account, publicClient, walletClient } = getEvmClients(network);
+  const { publicClient, walletClient } = getEvmClients(network);
   const value = parseMigrationAmount(amount);
   const recipient = normalizeDuskAddress(duskAccount);
   const { request } = await publicClient.simulateContract({
-    account,
+    account: reviewed,
     abi: MIGRATION_ABI,
     address: normalizeEvmAddress(network.migrationContract),
     functionName: "migrate",
     args: [value, recipient],
   });
-  return walletClient.writeContract(request);
+  return walletClient.writeContract({ ...request, account: await reviewedEvmAccount(reviewed) });
 }

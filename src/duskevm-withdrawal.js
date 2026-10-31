@@ -3,7 +3,7 @@ import { withdrawalCall } from "@dusk-network/app-core/duskevm-withdrawals";
 import { duskToLux } from "./amount.js";
 import { config } from "./config.js";
 import { ensureDuskConnected } from "./dusk-wallet.js";
-import { ensureEvmChain, getEvmClients } from "./evm-wallet.js";
+import { ensureEvmChain, getEvmClients, reviewedEvmAccount } from "./evm-wallet.js";
 import { normalizeDuskAddress } from "./validation.js";
 
 /** DuskEVM counts 18 decimals; Dusk holds whole Lux (9). */
@@ -29,14 +29,16 @@ export const duskEvmNetwork = () => ({
 /**
  * Sends the DuskEVM step and returns its hash once the wallet has sent it;
  * the tracker follows it from there. The Dusk recipient is the one given, or
- * the connected Dusk account.
+ * the connected Dusk account. It goes out from `account`, the EVM account
+ * it was reviewed for, or not at all.
  */
-export async function submitDuskEvmWithdrawal({ amount, duskAccount }) {
+export async function submitDuskEvmWithdrawal({ account: reviewed, amount, duskAccount }) {
   const amountWei = withdrawalAmountWei(amount);
   const recipient = duskAccount ? normalizeDuskAddress(duskAccount) : (await ensureDuskConnected()).account;
   const network = duskEvmNetwork();
   await ensureEvmChain(network);
-  const { account, walletClient } = getEvmClients(network);
+  const { walletClient } = getEvmClients(network);
+  const account = await reviewedEvmAccount(reviewed);
   // DuskEVM's bridge's bridgeETHTo, paying the Dusk account in its extra data.
   const { data, to, value } = withdrawalCall(config.network, { amountWei, sender: account, to: recipient });
   const hash = await walletClient.sendTransaction({ account, data, to, value });
