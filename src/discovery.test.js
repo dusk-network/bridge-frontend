@@ -100,11 +100,12 @@ test("an EVM address's withdrawals come from DuskEVM's bridge, kept per network 
   const kept = JSON.parse(storage.getItem(stateKey(cfg, "l2", EVM)));
   assert.deepEqual(kept.covered, [[head - 200_000 + 1, head]]);
 
-  // The next visit reads what's new above, then carries on below.
+  // The next visit reads the newest final blocks again, a window down from
+  // the new head, then carries on below.
   final = head + 1_000;
   windows.length = 0;
   const next = await discovery.discover({ evm: EVM, evmRequests: 3 });
-  assert.deepEqual(windows, [[head + 1, head + 1_000], [head - 300_000 + 1, head - 200_000]]);
+  assert.deepEqual(windows, [[head + 1_000 - 100_000 + 1, head + 1_000], [head - 300_000 + 1, head - 200_000]]);
   assert.equal(next.entries.length, 2);
 });
 
@@ -369,6 +370,62 @@ test("what an earlier version kept carries on, and a testnet reset starts it ove
   node.genesis = "cc".repeat(32);
   const inMemory = await createDiscovery({ archive: node.archive, cfg, storage: refusing }).discover({ dusk: ACCOUNT, duskRequests: 6 });
   assert.deepEqual([inMemory.entries.map((entry) => entry.hash), inMemory.errors], [[h(2)], []]);
+});
+
+test("two tabs that find a testnet reset at once keep what the faster one read of the new chain", async () => {
+  const tip = 1_000_000;
+  const storage = memoryStorage();
+  const node = archiveNode([deposit(1, tip - 50)], { details: { [h(1)]: sent(1_761_471_064, DEPOSIT_CALL) }, finalized: tip });
+
+  await createDiscovery({ archive: node.archive, cfg, storage }).discover({ dusk: ACCOUNT, duskRequests: 6 });
+
+  // The testnet is reset: another genesis, and a transfer to the bridge account on the new chain.
+  node.genesis = "bb".repeat(32);
+  node.entries = [service(2, tip - 20)];
+  node.details = { [h(2)]: sent(1_792_980_100) };
+
+  // One tab's visit reads the history kept, then waits for its head.
+  const held = Promise.withResolvers();
+  const reached = Promise.withResolvers();
+  let first = true;
+  const waiting = {
+    assertArchive: () => node.archive.assertArchive(),
+    query: async (text, options) => {
+      if (first) {
+        first = false;
+        reached.resolve();
+        await held.promise;
+      }
+      return node.archive.query(text, options);
+    },
+    url: node.archive.url,
+  };
+  const slow = createDiscovery({ archive: waiting, cfg, storage }).discover({ dusk: ACCOUNT, duskRequests: 6 });
+  await reached.promise;
+
+  // Meanwhile the other tab starts the history over on the new chain, and lists its transfer.
+  const fast = await createDiscovery({ archive: node.archive, cfg, storage }).discover({ dusk: ACCOUNT, duskRequests: 6 });
+  assert.deepEqual(fast.entries.map((entry) => entry.hash), [h(2)]);
+
+  const asked = node.calls.length;
+  held.resolve();
+  const late = await slow;
+  // The slower tab lists the same, its time kept, and asked for its head alone.
+  assert.deepEqual(late.entries.map((entry) => [entry.hash, entry.sourceAt]), [[h(2), 1_792_980_100_000]]);
+  assert.equal(node.calls.length, asked + 1);
+  assert.equal(JSON.parse(storage.getItem(stateKey(cfg, "dusk", ACCOUNT))).genesis, "bb".repeat(32));
+});
+
+test("a transfer to the bridge account whose memo is bytes names no EVM address", async () => {
+  const tip = 1_000_000;
+  // The address typed as text, and the same 20 bytes raw.
+  const raw = service(3, tip - 80);
+  raw.events[0].data.memo = "ee1b68ed496712cda857ada41d326d357049e51c";
+  const node = archiveNode([service(2, tip - 90), raw], { details: { [h(2)]: sent(1_792_980_100), [h(3)]: sent(1_792_980_200) }, finalized: tip });
+  const found = await createDiscovery({ archive: node.archive, cfg, storage: memoryStorage() }).discover({ dusk: ACCOUNT, duskRequests: 6 });
+  const byHash = Object.fromEntries(found.entries.map((entry) => [entry.hash, entry]));
+  assert.deepEqual([byHash[h(2)].routeId, byHash[h(2)].destination], ["dusk-to-ethereum", "0xeE1b68ED496712cda857ada41d326d357049E51C"]);
+  assert.deepEqual([byHash[h(3)].routeId, byHash[h(3)].destination], ["dusk-to-ethereum", undefined]);
 });
 
 // Mainnet, with one account paying out both chains' migrations, as a deployment can set it.
