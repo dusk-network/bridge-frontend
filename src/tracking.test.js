@@ -147,6 +147,47 @@ const archive = ({ history = {}, memos = {}, txs = {} } = {}) => ({
   },
 });
 
+/** A deposit's details, sent at `at` seconds, as the archive gives them. */
+const depositDetails = (at) => ({
+  blockHash: "5c".repeat(32),
+  blockTimestamp: at,
+  err: null,
+  gasSpent: 1,
+  tx: {
+    callData: {
+      contractId: BRIDGE,
+      data: Buffer.from(encodeDepositArgs({ amountLux: 100_000_000n, minGasLimit: 200_000, to: RECIPIENT })).toString("hex"),
+      fnName: "depositETHToWithValue",
+    },
+    gasLimit: 1,
+    gasPrice: 1,
+  },
+});
+
+/** A deposit of 0.1 DUSK by SENDER to the bridge, as the archive lists it in SENDER's history. */
+const depositEntry = (hash, height = 10) => ({
+  block_height: height,
+  events: [{ data: { receiver: BRIDGE, sender: SENDER, value: "100000000" }, reverted: false, target: TRANSFER_CONTRACT, topic: "deposit" }],
+  origin: hash,
+});
+
+/**
+ * 2 DUSK to `account`, naming RECIPIENT, as the archive lists it in
+ * `account`'s history: from another account, as SENDER is the BSC route's.
+ */
+const transferEntry = (hash, account, height = 4_000) => ({
+  block_height: height,
+  events: [
+    {
+      data: { gas_spent: "1000", memo: hex(RECIPIENT), receiver: account, refund_info: null, sender: TESTNET_REGGIO_BRIDGE_ACCOUNT, value: "2000000000" },
+      reverted: false,
+      target: TRANSFER_CONTRACT,
+      topic: "moonlight",
+    },
+  ],
+  origin: hash,
+});
+
 function duskTx(overrides = {}) {
   return {
     blockHeight: 10n,
@@ -282,7 +323,10 @@ test("a migration is paid out by its own route's payout account, also where that
 test("two equal deposits don't both arrive on one credit", async () => {
   const txs = { [DUSK_HASH]: depositTx(1_792_980_100), ["ef".repeat(32)]: depositTx(1_792_980_200) };
   const tracking = createTracking({
-    archive: archive(),
+    archive: archive({
+      history: { [SENDER]: [depositEntry(DUSK_HASH), depositEntry("ef".repeat(32))] },
+      txs: { [DUSK_HASH]: depositDetails(1_792_980_100), ["ef".repeat(32)]: depositDetails(1_792_980_200) },
+    }),
     config: cfg,
     fetch: fakeChain(() => [credit(evmTx("34"), 1_900n)]),
     node: node({ transaction: async (hash) => txs[hash] }),
@@ -301,11 +345,12 @@ test("two equal deposits don't both arrive on one credit", async () => {
   assert.equal(takenByAnother(second, { destinationHash: evmTx("35"), status: "completed" }, others), false);
 });
 
-test("an equal deposit sent just before, which the sender's history doesn't list yet, keeps its credit", async () => {
+test("an equal deposit sent just before keeps its credit, once the sender's history lists both", async () => {
   const txs = { [DUSK_HASH]: depositTx(1_792_980_100), ["ef".repeat(32)]: depositTx(1_792_980_200) };
+  // The archive hasn't listed either deposit in the sender's history yet.
+  const history = { [SENDER]: [] };
   const tracking = createTracking({
-    // The archive hasn't listed either deposit in the sender's history yet.
-    archive: archive(),
+    archive: archive({ history }),
     config: cfg,
     fetch: fakeChain(() => [credit(evmTx("34"), 1_900n)]),
     node: node({ transaction: async (hash) => txs[hash] }),
@@ -315,7 +360,12 @@ test("an equal deposit sent just before, which the sender's history doesn't list
   const first = { ...kept(DUSK_HASH, 1_792_980_100_000), id: "first" };
   const second = { ...kept("ef".repeat(32), 1_792_980_200_000), id: "second" };
 
-  // Checked first, the later one waits: the one credit is the earlier one's.
+  // Neither is taken while the archive doesn't list them.
+  assert.equal((await tracking.refresh(second, ROUTES.deposit, { others: [first, second] })).status, "pending");
+  assert.equal((await tracking.refresh(first, ROUTES.deposit, { others: [first, second] })).status, "pending");
+
+  // Listed: checked first, the later one waits; the one credit is the earlier one's.
+  history[SENDER].push(depositEntry(DUSK_HASH), depositEntry("ef".repeat(32)));
   assert.equal((await tracking.refresh(second, ROUTES.deposit, { others: [first, second] })).status, "pending");
   assert.equal((await tracking.refresh(first, ROUTES.deposit, { others: [first, second] })).destinationHash, evmTx("34"));
 });
@@ -340,7 +390,13 @@ test("a Dusk → BNB Smart Chain transfer completes when the bridge pays the mem
   });
   const txs = { [DUSK_HASH]: sent(RECIPIENT) };
   let tx = null;
-  const tracking = createTracking({ archive: archive({ txs }), config: bscCfg, fetch: chain, node: node({ transaction: async () => tx }), rpc: fakeRpc({}) });
+  const tracking = createTracking({
+    archive: archive({ history: { [BSC_SERVICE.account]: [transferEntry(DUSK_HASH, BSC_SERVICE.account)] }, txs }),
+    config: bscCfg,
+    fetch: chain,
+    node: node({ transaction: async () => tx }),
+    rpc: fakeRpc({}),
+  });
   const entry = { hash: DUSK_HASH, routeId: ROUTES.service.id };
 
   assert.equal((await tracking.refresh(entry, ROUTES.service)).status, "pending");
@@ -370,7 +426,7 @@ test("a Dusk → BNB Smart Chain transfer completes when the bridge pays the mem
   assert.equal((await tracking.refresh(entry, ROUTES.service)).status, "failed");
 });
 
-test("an equal transfer out sent just before, which the bridge account's history doesn't list yet, keeps its payout", async () => {
+test("an equal transfer out sent just before keeps its payout, once the bridge account's history lists both", async () => {
   const payout = {
     address: BSC_TOKEN,
     blockNumber: toHex(1_600n),
@@ -387,8 +443,10 @@ test("an equal transfer out sent just before, which the bridge account's history
   });
   const later = "ef".repeat(32);
   const txs = { [DUSK_HASH]: sent(1_792_980_100), [later]: sent(1_792_980_200) };
+  // The archive hasn't listed either transfer in the bridge account's history yet.
+  const history = { [BSC_SERVICE.account]: [] };
   const tracking = createTracking({
-    archive: archive({ txs }),
+    archive: archive({ history, txs }),
     config: bscCfg,
     fetch: fakeChain(() => [payout]),
     node: node({ transaction: async (hash) => duskTx({ blockTimestamp: BigInt(txs[hash].blockTimestamp), json: { receiver: BSC_SERVICE.account, sender: SENDER, value: 2_000_000_000 } }) }),
@@ -398,6 +456,12 @@ test("an equal transfer out sent just before, which the bridge account's history
   const first = { ...kept(DUSK_HASH, 1_792_980_100_000), id: "first" };
   const second = { ...kept(later, 1_792_980_200_000), id: "second" };
 
+  // Neither is taken while the archive doesn't list them.
+  assert.equal((await tracking.refresh(second, ROUTES.service, { others: [first, second] })).status, "pending");
+  assert.equal((await tracking.refresh(first, ROUTES.service, { others: [first, second] })).status, "pending");
+
+  // Listed: checked first, the later one waits; the one payout is the earlier one's.
+  history[BSC_SERVICE.account].push(transferEntry(DUSK_HASH, BSC_SERVICE.account), transferEntry(later, BSC_SERVICE.account));
   assert.equal((await tracking.refresh(second, ROUTES.service, { others: [first, second] })).status, "pending");
   assert.equal((await tracking.refresh(first, ROUTES.service, { others: [first, second] })).destinationHash, evmTx("02"));
 });
@@ -412,7 +476,8 @@ test("a deposit is followed to its DuskEVM credit through the bridge event when 
   const rpc = fakeRpc(NO_ADAPTER);
   // Looked at a year after it was sent, as a deposit found in the account's history can be.
   const now = () => (1_792_980_999 + 365 * 86_400) * 1_000;
-  const tracking = createTracking({ archive: archive(), config: cfg, fetch: chain, node: node({ transaction: async () => depositTx() }), now, rpc });
+  const listed = archive({ history: { [SENDER]: [depositEntry(DUSK_HASH)] } });
+  const tracking = createTracking({ archive: listed, config: cfg, fetch: chain, node: node({ transaction: async () => depositTx() }), now, rpc });
   const entry = { hash: DUSK_HASH, routeId: ROUTES.deposit.id };
 
   const waiting = await tracking.refresh(entry, ROUTES.deposit);
@@ -430,7 +495,7 @@ test("a deposit is followed to its DuskEVM credit through the bridge event when 
   assert.equal(rpc.calls.filter(({ method }) => method === "duskevm_getTransactionHashByDuskHash").length, 1);
 
   // An RPC that can't answer: the check fails, as any read does.
-  const down = createTracking({ archive: archive(), config: cfg, fetch: async () => new Response("busy", { status: 503 }), node: node({ transaction: async () => depositTx() }), rpc });
+  const down = createTracking({ archive: listed, config: cfg, fetch: async () => new Response("busy", { status: 503 }), node: node({ transaction: async () => depositTx() }), rpc });
   await assert.rejects(down.refresh(entry, ROUTES.deposit), /HTTP 503/u);
 });
 
@@ -617,7 +682,13 @@ test("tracking an entry again while it's being checked keeps one loop", async ()
 test("a credit from before the deposit was sent here isn't taken as its credit", async () => {
   // Sent here: the DuskEVM head read before sending (block 1,700) bounds the search.
   const chain = fakeChain(() => [credit(evmTx("01"), 1_500n), credit(evmTx("02"), 1_800n)]);
-  const tracking = createTracking({ archive: archive(), config: cfg, fetch: chain, node: node({ transaction: async () => depositTx() }), rpc: fakeRpc(NO_ADAPTER) });
+  const tracking = createTracking({
+    archive: archive({ history: { [SENDER]: [depositEntry(DUSK_HASH)] } }),
+    config: cfg,
+    fetch: chain,
+    node: node({ transaction: async () => depositTx() }),
+    rpc: fakeRpc(NO_ADAPTER),
+  });
   const entry = { hash: DUSK_HASH, id: "sent", routeId: ROUTES.deposit.id, scanFrom: "1700" };
   assert.equal((await tracking.refresh(entry, ROUTES.deposit, { others: [entry] })).destinationHash, evmTx("02"));
 });
