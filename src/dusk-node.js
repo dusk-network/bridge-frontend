@@ -56,6 +56,15 @@ function parseTransaction(raw) {
   });
 }
 
+/** The last finalized block's height, as `lastBlockPair` gives it, or null. */
+function finalizedHeight(pair) {
+  try {
+    return BigInt(pair.json.last_finalized_block[0]);
+  } catch {
+    return null;
+  }
+}
+
 export function createDuskNode({ url, fetch = globalThis.fetch }) {
   const base = String(url ?? "").replace(/\/+$/u, "");
   if (!/^https?:\/\//iu.test(base))
@@ -120,10 +129,14 @@ export function createDuskNode({ url, fetch = globalThis.fetch }) {
     }
   }
 
-  // Transaction lookups made in the same tick share one aliased query.
+  // Transaction lookups made in the same tick share one aliased query, with
+  // the last finalized block: a transaction in a block at or under it is
+  // kept, and later lookups of it on this page take it from here.
+  const final = new Map();
   let pending = [];
   function transaction(hash) {
     const id = normalizeHash(hash);
+    if (final.has(id)) return Promise.resolve(final.get(id));
     return new Promise((resolve, reject) => {
       pending.push({ id, reject, resolve });
       if (pending.length === 1) queueMicrotask(flushTransactions);
@@ -135,10 +148,14 @@ export function createDuskNode({ url, fetch = globalThis.fetch }) {
     const ids = [...new Set(batch.map(({ id }) => id))];
     try {
       const data = await query(
-        ids.map((id, index) => `t${index}: tx(hash: "${id}") { ${TX_FIELDS} }`).join(" "),
+        [...ids.map((id, index) => `t${index}: tx(hash: "${id}") { ${TX_FIELDS} }`), "pair: lastBlockPair { json }"].join(" "),
       );
-      for (const item of batch)
-        item.resolve(parseTransaction(data?.[`t${ids.indexOf(item.id)}`]));
+      const finalized = finalizedHeight(data?.pair);
+      const found = ids.map((id, index) => parseTransaction(data?.[`t${index}`]));
+      found.forEach((tx, index) => {
+        if (tx && finalized !== null && tx.blockHeight <= finalized) final.set(ids[index], tx);
+      });
+      for (const item of batch) item.resolve(found[ids.indexOf(item.id)]);
     } catch (error) {
       for (const item of batch) item.reject(error);
     }

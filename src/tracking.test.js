@@ -16,6 +16,7 @@ import { encodeDepositArgs, evmAddressOf } from "@dusk-network/networks/duskevm"
 // Two accounts the networks' files name: the BSC and the Sepolia bridge accounts.
 const MAINNET_BSC_BRIDGE_ACCOUNT = networks.mainnet.routes.services[0].account;
 const TESTNET_REGGIO_BRIDGE_ACCOUNT = networks.testnet.routes.services[0].account;
+import { createDuskNode } from "./dusk-node.js";
 import { createScheduler, createTracking, takenByAnother } from "./tracking.js";
 import { NOT_A_DUSK_WITHDRAWAL } from "./withdrawals.js";
 
@@ -428,6 +429,67 @@ test("a Dusk → BNB Smart Chain transfer completes when the bridge pays the mem
   assert.match((await tracking.refresh(entry, ROUTES.service)).note, /didn't exceed the bridge fee/u);
   tx = duskTx({ error: "Panic" });
   assert.equal((await tracking.refresh(entry, ROUTES.service)).status, "failed");
+});
+
+test("a transfer waiting for its payout asks Dusk for its transaction until its block is final, then no more", async () => {
+  // 2 DUSK to the bridge account in block 4,000, naming RECIPIENT, as Rusk's GraphQL gives it.
+  const sent = {
+    blockHeight: 4_000,
+    blockTimestamp: 1_792_980_999,
+    err: null,
+    gasSpent: 1_000,
+    id: DUSK_HASH,
+    tx: { json: JSON.stringify({ fee: { gas_price: "1" }, receiver: BSC_SERVICE.account, sender: SENDER, type: "moonlight", value: 2_000_000_000 }), memo: hex(RECIPIENT) },
+  };
+  let included = null;
+  let finalized = 3_999;
+  let asked = 0;
+  // Dusk's node: the transaction once it's in a block, and the last finalized block when asked.
+  const rusk = async (url, { body }) => {
+    const data = {};
+    for (const [, alias, hash] of String(body).matchAll(/(\w+): tx\(hash: "(\w+)"\)/gu)) {
+      asked += hash === DUSK_HASH ? 1 : 0;
+      data[alias] = hash === DUSK_HASH ? included : null;
+    }
+    if (String(body).includes("lastBlockPair")) data.pair = { json: { last_block: [finalized + 2, "aa".repeat(32)], last_finalized_block: [finalized, "bb".repeat(32)] } };
+    return new Response(JSON.stringify(data));
+  };
+  const tracking = createTracking({
+    archive: archive({ history: { [BSC_SERVICE.account]: [transferEntry(DUSK_HASH, BSC_SERVICE.account)] }, txs: { [DUSK_HASH]: sent } }),
+    config: bscCfg,
+    fetch: fakeChain(() => []),
+    node: createDuskNode({ fetch: rusk, url: "https://node.test" }),
+    rpc: fakeRpc({}),
+  });
+  let entry = { hash: DUSK_HASH, routeId: ROUTES.service.id };
+  // What My transfers shows of it.
+  const shown = ({ amountLux, destination, feeLux, note, sender, sourceAt, status }) => ({ amountLux, destination, feeLux, note, sender, sourceAt, status });
+  const check = async () => {
+    entry = { ...entry, ...(await tracking.refresh(entry, ROUTES.service)) };
+    return shown(entry);
+  };
+
+  // Not in a block yet: asked again on the next check.
+  assert.deepEqual([(await check()).note, asked], ["Waiting for Dusk.", 1]);
+  included = sent;
+
+  const waiting = await check();
+  assert.deepEqual(waiting, {
+    amountLux: "2000000000",
+    destination: RECIPIENT,
+    feeLux: "1000",
+    note: "Waiting for the payout on BNB Smart Chain.",
+    sender: SENDER,
+    sourceAt: 1_792_980_999_000,
+    status: "pending",
+  });
+  // Its block isn't final yet: the next check asks again.
+  assert.deepEqual(await check(), waiting);
+  assert.equal(asked, 3);
+
+  finalized = 4_001;
+  for (let i = 0; i < 4; i += 1) assert.deepEqual(await check(), waiting);
+  assert.equal(asked, 4);
 });
 
 test("an equal transfer out sent just before keeps its payout, once the bridge account's history lists both", async () => {
