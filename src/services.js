@@ -156,7 +156,7 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
     withdrawals,
   });
 
-  const discovery = createDiscovery({ archive, cfg, rpc, rpcBatch });
+  const discovery = createDiscovery({ archive, cfg, rpc });
   const evmReads = createEvmReads({ cfg, rpc, rpcBatch });
   // How long DuskEVM's routes take, as its chains say, kept per network.
   const times = withdrawals

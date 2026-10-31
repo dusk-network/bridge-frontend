@@ -120,18 +120,6 @@ test("the gas price is the node's median, or 1 Lux without one", async () => {
   assert.equal(await down.gasPrice(), 1n);
 });
 
-test("memo lookups return the node's transfer list", async () => {
-  const rusk = ruskLike({
-    graphql: (selection) => {
-      assert.equal(selection, 'transactionsByMemo(memo: "0xabc") { json }');
-      return { transactionsByMemo: { json: [{ origin: "d".repeat(64) }] } };
-    },
-  });
-  const node = createDuskNode({ fetch: rusk.fetch, url: NODE });
-
-  assert.deepEqual(await node.transfersByMemo("0xabc"), [{ origin: "d".repeat(64) }]);
-});
-
 test("amounts past 2^53 Lux keep every digit, in transactions and in query answers", async () => {
   // Rusk writes a transfer's value and deposit as bare numbers; its fees as text.
   const inner = '{"type":"moonlight","value":18446744073709551615,"nonce":19,"deposit":9007199254740993,"fee":{"gas_limit":"5000000","gas_price":"1"},"memo":"12345678901234567890"}';

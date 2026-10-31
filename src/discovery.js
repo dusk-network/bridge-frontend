@@ -1,17 +1,18 @@
 // My transfers: what the connected accounts did through the bridge, read from
 // the networks so the list is the same on any device. The Dusk account's
 // archive history gives its deposits, its transfers to the bridge account and
-// the payouts of its migrations; DuskEVM's bridge events give the EVM
-// address's withdrawals. Each source is synced a bounded number of requests
-// per visit and kept here per network and account; a transfer found twice, or
-// found and also sent from this browser, is one entry.
+// the payouts of its migrations (@dusk-network/app-core/bridge); DuskEVM's
+// bridge events give the EVM address's withdrawals. Each source is synced a
+// bounded number of requests per visit and kept here per network and
+// account; a transfer found twice, or found and also sent from this browser,
+// is one entry.
 
+import { migrationPayoutOf } from "@dusk-network/app-core/bridge";
 import { StaleHistoryError, createHistory } from "@dusk-network/app-core/history";
-import { decodeFunctionData } from "viem";
+import { routes } from "@dusk-network/networks";
 
 import { syncWithdrawals } from "./l2-withdrawals.js";
 import { entryId } from "./activity.js";
-import { MIGRATION_ABI } from "./legacy-migration.js";
 import { sentToSomeoneElse, withdrawalNextAction } from "./transfer-view.js";
 
 const WEI_PER_LUX = 1_000_000_000n;
@@ -54,25 +55,25 @@ export function saveState(key, state, storage = defaultStorage()) {
 // bridge's, as records:
 // - `{ kind: "deposit", hash, amountLux, destination }`, into DuskEVM
 // - `{ kind: "service", hash, amountLux, destination }`, to the bridge account
-// - `{ kind: "payout", hash, amountLux, payer, sourceHash }`, a migration paying out
+// - `{ kind: "payout", hash, amountLux, routeId, sourceHash }`, a migration paying out
 // each with its `blockHeight`, and its time once read: `sourceAt`, or a
 // payout's `payoutAt`. A deposit's amount and DuskEVM address come from its
 // call, with its time: an entry's `value` is what the account paid, a gas
 // refund paid to another account included.
 // ---------------------------------------------------------------------------
 
-const EVM_TX_HASH = /^0x[0-9a-f]{64}$/iu;
-
 /** What an entry of the account's history is to the bridge, as a record, or null. */
 function recordOf(entry, cfg) {
   const base = { blockHeight: entry.blockHeight, hash: entry.hash };
-  const memo = entry.memo.trim();
   if (entry.kind === "contract_call" && cfg.duskEvm.enabled && entry.counterparty === cfg.duskEvm.l1StandardBridgeContractId)
     return { ...base, destination: null, kind: "deposit" };
   if (entry.direction === "out" && entry.kind === "transfer" && cfg.service && entry.counterparty === cfg.service.account)
-    return { ...base, amountLux: entry.value, destination: memo || null, kind: "service" };
-  if (entry.direction === "in" && EVM_TX_HASH.test(memo))
-    return { ...base, amountLux: entry.value, kind: "payout", payer: entry.counterparty, sourceHash: memo.toLowerCase() };
+    return { ...base, amountLux: entry.value, destination: entry.memo.trim() || null, kind: "service" };
+  // A transfer from a migration's payout account, with its hash as the memo,
+  // of what it paid. One from an account that pays out both chains doesn't
+  // say which it is for: left out.
+  const payout = migrationPayoutOf(entry, cfg.network);
+  if (payout?.route) return { ...base, amountLux: payout.amount.toString(), kind: "payout", routeId: payout.route, sourceHash: payout.hash };
   return null;
 }
 
@@ -105,12 +106,11 @@ function historyStore(key, cfg, storage) {
       const found = entries.map((entry) => recordOf(entry, cfg)).filter(Boolean);
       return keep({
         ...update(kept),
-        // A record kept already stays as it is: it has its time and what verifying it found.
+        // A record kept already stays as it is: it has its time.
         entries: { ...Object.fromEntries(found.map((record) => [record.hash, record])), ...kept?.entries },
       });
     },
     getState: load,
-    keep,
     list: ({ before, limit }) =>
       Object.values(load()?.entries ?? {})
         .filter((record) => before === undefined || record.blockHeight < before)
@@ -144,8 +144,11 @@ function historyStore(key, cfg, storage) {
 export function mergeTransfer(existing, update) {
   if (!existing) return { status: "pending", ...update, parties: [...new Set((update.parties ?? []).filter(Boolean).map(partyKey))] };
   const merged = { ...existing };
+  // An amount once known stays: the account's history reads what its balance
+  // moved, a gas refund paid with the transfer included.
+  const known = existing.amountLux !== undefined && existing.amountLux !== null;
   for (const [key, value] of Object.entries(update))
-    if (value !== undefined && value !== null && key !== "parties") merged[key] = value;
+    if (value !== undefined && value !== null && key !== "parties" && !(key === "amountLux" && known)) merged[key] = value;
   if (TERMINAL.has(existing.status) && !TERMINAL.has(update.status)) {
     merged.status = existing.status;
     merged.note = existing.note;
@@ -226,7 +229,10 @@ export function entryFromHistory(record, account, cfg) {
       sender: account,
       sourceAt: record.sourceAt ?? undefined,
     };
-  if (record.kind === "payout" && record.routeId)
+  // A payout an earlier version kept unverified: the one route its payout account pays out.
+  const paid = record.routeId || record.rejected ? [] : routes(cfg.network).filter((route) => route.kind === "migration" && route.payoutAccount && route.payoutAccount === record.payer);
+  const routeId = record.routeId ?? (paid.length === 1 ? paid[0].id : null);
+  if (record.kind === "payout" && routeId)
     return {
       amountLux: record.amountLux,
       destination: account,
@@ -234,7 +240,7 @@ export function entryFromHistory(record, account, cfg) {
       destinationHash: record.hash,
       hash: record.sourceHash,
       parties: [account, record.sender],
-      routeId: record.routeId,
+      routeId,
       sender: record.sender ?? undefined,
       sourceAt: record.sourceAt ?? undefined,
       status: "completed",
@@ -255,86 +261,15 @@ export function entryFromWithdrawal(record, address) {
 }
 
 /**
- * Whether a migration call pays `account` exactly this payout's amount: the
- * memo is public, so a transfer naming someone else's migration, or carrying
- * another amount, isn't its payout. With the payout account known, only
- * transfers from it count.
- */
-function paysAsMigrated(record, tx, account, payer) {
-  try {
-    const { args } = decodeFunctionData({ abi: MIGRATION_ABI, data: tx.input });
-    return (
-      args[1] === account &&
-      (args[0] / WEI_PER_LUX).toString() === String(record.amountLux) &&
-      (!payer || record.payer === payer)
-    );
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Payouts whose memo names a migration: kept when that EVM transaction is a
- * migration to `account` of the amount paid, with its route; rejected when
- * every configured chain says it isn't. A chain that can't be asked leaves
- * the payout to the next visit. One batch per chain.
- */
-export async function verifyPayouts(records, { account, cfg, rpcBatch }) {
-  const open = records.filter((record) => record.kind === "payout" && !record.routeId && !record.rejected);
-  if (!open.length) return [];
-  const settled = new Set();
-  const unknown = new Set();
-  const changed = [];
-  for (const network of cfg.migrations) {
-    const contract = String(cfg.evmNetworks[network].migrationContract).toLowerCase();
-    const waiting = open.filter((record) => !settled.has(record.hash));
-    if (!waiting.length) break;
-    let results;
-    try {
-      results = await rpcBatch(
-        network,
-        waiting.map((record) => ({ method: "eth_getTransactionByHash", params: [record.sourceHash] })),
-      );
-    } catch {
-      for (const record of waiting) unknown.add(record.hash);
-      continue;
-    }
-    waiting.forEach((record, index) => {
-      const tx = results[index];
-      // No answer for this one: whether it's a migration isn't known yet.
-      if (tx === undefined) {
-        unknown.add(record.hash);
-        return;
-      }
-      if (!tx || String(tx.to ?? "").toLowerCase() !== contract) return;
-      settled.add(record.hash);
-      // Only the chain's payout account pays its migrations, where it's known.
-      if (paysAsMigrated(record, tx, account, cfg.evmNetworks[network].payoutAccount || null))
-        Object.assign(record, { routeId: `${network}-to-dusk`, sender: String(tx.from ?? "").toLowerCase() });
-      else record.rejected = true;
-      changed.push(record);
-    });
-  }
-  // A memo that is no migration on any configured chain isn't one.
-  for (const record of open)
-    if (!settled.has(record.hash) && !unknown.has(record.hash)) {
-      record.rejected = true;
-      changed.push(record);
-    }
-  return changed;
-}
-
-/**
  * Finds the connected accounts' transfers.
  *
  * @param {object} deps
  * @param {object} deps.archive the Dusk node's archive (@dusk-network/app-core/history)
  * @param {object} deps.cfg
  * @param {(network: string, method: string, params: unknown[]) => Promise<any>} deps.rpc
- * @param {(network: string, calls: object[]) => Promise<any[]>} deps.rpcBatch
  * @param {Storage} [deps.storage]
  */
-export function createDiscovery({ archive, cfg, rpc, rpcBatch, storage = defaultStorage() }) {
+export function createDiscovery({ archive, cfg, rpc, storage = defaultStorage() }) {
   async function duskAccount(account, maxRequests) {
     const store = historyStore(stateKey(cfg, "dusk", account), cfg, storage);
     const history = createHistory({ account, archive, network: cfg.network, store });
@@ -348,9 +283,7 @@ export function createDiscovery({ archive, cfg, rpc, rpcBatch, storage = default
     // tracker, which reads the transaction anyway.
     await history.fillDetails(store.list({ limit: Infinity })).catch(() => {});
     const state = store.getState();
-    const records = Object.values(state?.entries ?? {});
-    if ((await verifyPayouts(records, { account, cfg, rpcBatch })).length) store.keep(state);
-    return { entries: records.map((record) => entryFromHistory(record, account, cfg)).filter(Boolean), state };
+    return { entries: Object.values(state?.entries ?? {}).map((record) => entryFromHistory(record, account, cfg)).filter(Boolean), state };
   }
 
   async function evmAddress(address, maxRequests) {

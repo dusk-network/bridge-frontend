@@ -228,13 +228,16 @@ test("each chain's migrations count only payouts from its own known account", ()
   // BSC's migrations are paid by the account Dusk to BSC transfers go to.
   assert.equal(mainnet.evmNetworks.bsc.payoutAccount, MAINNET_BSC_BRIDGE_ACCOUNT);
   for (const account of [MAINNET_ETHEREUM_PAYOUT_ACCOUNT, MAINNET_BSC_BRIDGE_ACCOUNT]) assert.equal(decodeBase58(account).length, 96);
-  // None is known on testnet: any sender's payout of the exact amount counts there.
+  // None is known on testnet: no transfer counts as a migration's payout there.
   assert.equal(withConfig({ VITE_BRIDGE_PROFILE: "testnet" }).cfg.evmNetworks.ethereum.payoutAccount, "");
-  // One for all chains, one per chain, or none.
+  // One for all chains, one per chain, or none: payouts are looked for from the one set.
+  const payers = (cfg) => cfg.network.routes.migrations.map((route) => [route.chain, route.payoutAccount]);
   const one = withConfig({ VITE_BRIDGE_PROFILE: "mainnet", VITE_MIGRATION_PAYOUT_ACCOUNT: TESTNET_REGGIO_BRIDGE_ACCOUNT }).cfg;
   assert.deepEqual([one.evmNetworks.ethereum.payoutAccount, one.evmNetworks.bsc.payoutAccount], [TESTNET_REGGIO_BRIDGE_ACCOUNT, TESTNET_REGGIO_BRIDGE_ACCOUNT]);
+  assert.deepEqual(payers(one), [["bsc", TESTNET_REGGIO_BRIDGE_ACCOUNT], ["ethereum", TESTNET_REGGIO_BRIDGE_ACCOUNT]]);
   const each = withConfig({ VITE_BRIDGE_PROFILE: "mainnet", VITE_BSC_PAYOUT_ACCOUNT: "none" }).cfg;
   assert.deepEqual([each.evmNetworks.ethereum.payoutAccount, each.evmNetworks.bsc.payoutAccount], [MAINNET_ETHEREUM_PAYOUT_ACCOUNT, ""]);
+  assert.deepEqual(payers(each), [["bsc", null], ["ethereum", MAINNET_ETHEREUM_PAYOUT_ACCOUNT]]);
 });
 
 test("routes can be shown as not running, by one switch", () => {
@@ -277,8 +280,12 @@ test("the bridge's calls are read on the DuskEVM contracts the deployment sets, 
 test("a payout to BNB Smart Chain is looked for from the address the network's file names", () => {
   assert.equal(withConfig({ VITE_BRIDGE_PROFILE: "mainnet" }).cfg.service.payoutAddress, networks.mainnet.routes.services[0].payoutAddress);
   assert.match(networks.mainnet.routes.services[0].payoutAddress, /^0x[0-9a-fA-F]{40}$/u);
-  // Testnet's file names none: any sender's transfer of the amount counts there, as before.
+  // Testnet's file names none: no transfer can be told to be its payout there.
   assert.equal(withConfig({ VITE_BRIDGE_PROFILE: "testnet" }).cfg.service.payoutAddress, "");
+  // A deployment's own bridge account and token are where its transfers are paid.
+  const own = withConfig({ VITE_BRIDGE_PROFILE: "mainnet", VITE_BSC_TOKEN_CONTRACT: `0x${"11".repeat(20)}`, VITE_SERVICE_BRIDGE_ACCOUNT: TESTNET_REGGIO_BRIDGE_ACCOUNT }).cfg;
+  assert.deepEqual([own.network.routes.services[0].account, own.network.routes.chains.bsc.token], [TESTNET_REGGIO_BRIDGE_ACCOUNT, `0x${"11".repeat(20)}`]);
+  assert.equal(withConfig({ VITE_BRIDGE_PROFILE: "mainnet" }).cfg.network, networks.mainnet);
 });
 
 test("DuskEVM's L1 RPC is the one the network's file names, unless a setting names another", () => {
