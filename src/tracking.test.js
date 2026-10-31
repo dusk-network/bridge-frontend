@@ -368,7 +368,10 @@ test("an equal deposit sent just before keeps its credit, once the sender's hist
   // Listed: checked first, the later one waits; the one credit is the earlier one's.
   history[SENDER].push(depositEntry(DUSK_HASH), depositEntry("ef".repeat(32)));
   assert.equal((await tracking.refresh(second, ROUTES.deposit, { others: [first, second] })).status, "pending");
-  assert.equal((await tracking.refresh(first, ROUTES.deposit, { others: [first, second] })).destinationHash, evmTx("34"));
+  // It takes it once the blocks before are read again, as the later one could have had it.
+  let checked = first;
+  for (let i = 0; i < 20 && checked.status !== "completed"; i += 1) checked = { ...checked, ...(await tracking.refresh(checked, ROUTES.deposit, { others: [checked, second] })) };
+  assert.equal(checked.destinationHash, evmTx("34"));
 });
 
 test("a Dusk → BNB Smart Chain transfer completes when the bridge pays the memo address", async () => {
@@ -464,7 +467,10 @@ test("an equal transfer out sent just before keeps its payout, once the bridge a
   // Listed: checked first, the later one waits; the one payout is the earlier one's.
   history[BSC_SERVICE.account].push(transferEntry(DUSK_HASH, BSC_SERVICE.account), transferEntry(later, BSC_SERVICE.account));
   assert.equal((await tracking.refresh(second, ROUTES.service, { others: [first, second] })).status, "pending");
-  assert.equal((await tracking.refresh(first, ROUTES.service, { others: [first, second] })).destinationHash, evmTx("02"));
+  // It takes it once the blocks before are read again, as the later one could have had it.
+  let checked = first;
+  for (let i = 0; i < 20 && checked.status !== "completed"; i += 1) checked = { ...checked, ...(await tracking.refresh(checked, ROUTES.service, { others: [checked, second] })) };
+  assert.equal(checked.destinationHash, evmTx("02"));
 });
 
 test("a deposit is followed to its DuskEVM credit through the bridge event when the adapter can't map hashes", async () => {
