@@ -13,13 +13,12 @@ import { StaleHistoryError, createHistory } from "@dusk-network/app-core/history
 import { routes } from "@dusk-network/networks";
 
 import { entryId } from "./activity.js";
+import { pageStorage as defaultStorage } from "./page-storage.js";
 import { sentToSomeoneElse, withdrawalNextAction } from "./transfer-view.js";
 
 const WEI_PER_LUX = 1_000_000_000n;
 const TERMINAL = new Set(["completed", "failed"]);
 const STORAGE_PREFIX = "dusk-bridge:discovery:v1";
-
-const defaultStorage = () => globalThis.localStorage;
 
 /** Who a transfer involves, compared without EVM checksum case. */
 export const partyKey = (value) => {

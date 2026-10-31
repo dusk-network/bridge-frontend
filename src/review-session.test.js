@@ -80,7 +80,10 @@ test("a request that wasn't sent says why on the review and in the page's live r
   // The wallet came back as another account: the review can't be confirmed.
   const moved = notSent({ busy: true }, { code: "DUSK_ACCOUNT_CHANGED" }, { announce });
   assert.deepEqual([moved.error, moved.stale], [SIGNER_MOVED.dusk, true]);
+  // The EVM wallet switched account while it switched chain: the same.
+  const switched = notSent({ busy: true }, { code: "EVM_ACCOUNT_CHANGED" }, { announce, wallet: "evm" });
+  assert.deepEqual([switched.busy, switched.error, switched.stale], [false, SIGNER_MOVED.evm, true]);
   // Anything else in plain words, naming the wallet that refused.
   notSent({}, { code: 4100 }, { announce, wallet: "evm" });
-  assert.deepEqual(said, [WALLET_CANCELLED, SIGNER_MOVED.dusk, "The EVM wallet is locked. Unlock it, reconnect, and try again."]);
+  assert.deepEqual(said, [WALLET_CANCELLED, SIGNER_MOVED.dusk, SIGNER_MOVED.evm, "The EVM wallet is locked. Unlock it, reconnect, and try again."]);
 });

@@ -299,6 +299,7 @@ doesn't run it.
 - Data drivers run only when they match their pinned SHA-256.
 - Local storage contains transaction metadata, what was read for My
   transfers and the chains' times, per network and account; no keys and no
-  balances.
+  balances. Where the browser denies the page storage, they're kept in
+  memory while the page is open.
 - Contract IDs, RPC endpoints and this site's origin are deployment trust
   inputs. Review them before publishing.

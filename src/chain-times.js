@@ -2,6 +2,8 @@
 // network: read when a page asks, at most every 10 minutes, and kept in this
 // browser for a day, so a page shows it at once on the next visit.
 
+import { pageStorage } from "./page-storage.js";
+
 /** `number()` on DuskEVM's L1Block predeploy: the Dusk block it last took in. */
 const L1_BLOCK_NUMBER = "0x8381f58a";
 
@@ -34,7 +36,7 @@ export async function readDepositLag({ l1Block, node, rpcBatch }) {
  * @param {Storage | null} [deps.storage]
  * @param {() => number} [deps.now]
  */
-export function createChainTimes({ key, read, storage = globalThis.localStorage ?? null, now = Date.now, ttlMs = TTL_MS }) {
+export function createChainTimes({ key, read, storage = pageStorage(), now = Date.now, ttlMs = TTL_MS }) {
   let kept = {};
   try {
     const parsed = JSON.parse(storage?.getItem(key) ?? "null");

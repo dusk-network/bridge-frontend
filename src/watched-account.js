@@ -5,13 +5,14 @@
 
 import { isDuskName } from "@duskdomains/sdk/names";
 
+import { pageStorage } from "./page-storage.js";
 import { checkDuskRecipient } from "./recipient.js";
 import { normalizeDuskAddress } from "./validation.js";
 
 const keyFor = (profile) => `dusk-bridge:watched:${profile}`;
 
 /** The followed account, `{ account, name }`, or null. */
-export function readWatched(profile, storage = globalThis.localStorage) {
+export function readWatched(profile, storage = pageStorage()) {
   try {
     const value = JSON.parse(storage?.getItem(keyFor(profile)) ?? "null");
     if (!value || typeof value.account !== "string") return null;
@@ -22,7 +23,7 @@ export function readWatched(profile, storage = globalThis.localStorage) {
 }
 
 /** Keeps the followed account on this device, or forgets it (null). */
-export function saveWatched(profile, watched, storage = globalThis.localStorage) {
+export function saveWatched(profile, watched, storage = pageStorage()) {
   try {
     if (watched) storage?.setItem(keyFor(profile), JSON.stringify({ account: watched.account, name: watched.name ?? "" }));
     else storage?.removeItem(keyFor(profile));

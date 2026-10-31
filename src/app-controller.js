@@ -1205,12 +1205,14 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         else render();
         return;
       }
+      // An EVM step goes out from the account it was reviewed for, which the
+      // wallet is asked for again once it's on the chain.
       if (route.mode === "migration") {
         const network = cfg.evmNetworks[route.from.id];
         const step = review.steps[review.current];
         const amount = formatLux(review.amountLux).replace(/,/gu, "");
         if (step.title.startsWith("Approve")) {
-          await approveMigration(network, amount);
+          await approveMigration(network, amount, { account: review.signer?.account });
           review.current += 1;
           review.after = "";
           review.busy = false;
@@ -1220,7 +1222,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
           renderSheet();
           return;
         }
-        const hash = await submitMigration(network, amount, review.destination);
+        const hash = await submitMigration(network, amount, review.destination, { account: review.signer?.account });
         return sent({
           amountLux: review.amountLux.toString(),
           destination: review.destination,
@@ -1231,7 +1233,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         });
       }
       if (route.mode === "duskevm-withdrawal") {
-        const result = await submitDuskEvmWithdrawal({ amount: formatLux(review.amountLux).replace(/,/gu, ""), duskAccount: review.destination });
+        const result = await submitDuskEvmWithdrawal({ account: review.signer?.account, amount: formatLux(review.amountLux).replace(/,/gu, ""), duskAccount: review.destination });
         return sent({
           amountLux: review.amountLux.toString(),
           destination: result.duskAccount,

@@ -3,13 +3,12 @@
 // source transaction hash: the tracker rebuilds everything else from the
 // chain, so a lost or cleared entry can be added back from its hash.
 
+import { pageStorage as defaultStorage } from "./page-storage.js";
 import { canonicalHash } from "./permalink.js";
 
 const STORAGE_KEY = "dusk-bridge:activity:v2";
 const LEGACY_KEY = "dusk-bridge:activity:v1";
 const MAX_ITEMS = 200;
-
-const defaultStorage = () => globalThis.localStorage;
 
 // Each network keeps its own list: a site that serves another network keeps
 // that one's transfers apart, though route names such as ethereum-to-dusk
