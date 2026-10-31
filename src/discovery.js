@@ -67,8 +67,9 @@ function recordOf(entry, cfg) {
   const base = { blockHeight: entry.blockHeight, hash: entry.hash };
   if (entry.kind === "contract_call" && cfg.duskEvm.enabled && entry.counterparty === cfg.duskEvm.l1StandardBridgeContractId)
     return { ...base, destination: null, kind: "deposit" };
+  // A memo of bytes rather than typed text names no address the bridge reads.
   if (entry.direction === "out" && entry.kind === "transfer" && cfg.service && entry.counterparty === cfg.service.account)
-    return { ...base, amountLux: entry.value, destination: entry.memo.trim() || null, kind: "service" };
+    return { ...base, amountLux: entry.value, destination: (!entry.memoBinary && entry.memo.trim()) || null, kind: "service" };
   // A transfer from a migration's payout account, with its hash as the memo,
   // of what it paid. One from an account that pays out both chains doesn't
   // say which it is for: left out.
@@ -99,8 +100,14 @@ function historyStore(key, cfg, storage) {
     unsaved = saveState(key, state, storage) ? undefined : state;
     return state;
   };
+  // A reset chain's history is forgotten, and details are kept, only while
+  // `check` says it's still the one the run read: another tab may have
+  // started it over meanwhile.
   return {
-    clear: () => void keep(null),
+    clear(check) {
+      check?.(load());
+      keep(null);
+    },
     commit(entries, update) {
       const kept = load();
       const found = entries.map((entry) => recordOf(entry, cfg)).filter(Boolean);
@@ -117,8 +124,9 @@ function historyStore(key, cfg, storage) {
         .sort((a, b) => b.blockHeight - a.blockHeight)
         .slice(0, limit)
         .map((record) => entryOf(record, cfg)),
-    patch(details) {
+    patch(details, check) {
       const state = load();
+      check?.(state);
       for (const [hash, found] of details) {
         const record = state?.entries?.[hash];
         if (!record) continue;
