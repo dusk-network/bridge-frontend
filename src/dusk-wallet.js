@@ -2,13 +2,16 @@ import { createDuskWallet } from "@dusk/connect";
 
 import { config } from "./config.js";
 import { toHex } from "./data-driver.js";
+import { webStorageAllowed } from "./page-storage.js";
 
 // Dusk Connect is used for the account, signing and sending only. Chain state
 // is read from the deployment's own node (see dusk-node.js).
 let wallet;
 
 export async function createDuskConnection() {
-  wallet = wallet ?? createDuskWallet();
+  // Dusk Connect remembers the wallet last used in Web Storage, and can't
+  // start where the browser denies it: there, it isn't asked to.
+  wallet = wallet ?? createDuskWallet(webStorageAllowed() ? {} : { rememberLastUsedProvider: false });
   await wallet.ready();
   return {
     connect: () => wallet.connect({ reason: "bridge_recipient" }),
