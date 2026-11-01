@@ -4,10 +4,11 @@ import test from "node:test";
 import { getAddress } from "viem";
 
 // Reown's AppKit, which the page loads once someone connects through it, stood
-// in for: its `createAppKit` hands back `globalThis.reownAppKit`.
+// in for: its `createAppKit` hands back `globalThis.reownAppKit`, with the
+// options it keeps, all but enableBaseAccount as AppKit 1.8 does.
 const standIn = (source) => `data:text/javascript,${encodeURIComponent(source)}`;
 const standIns = {
-  "@reown/appkit": standIn("export const createAppKit = () => globalThis.reownAppKit;"),
+  "@reown/appkit": standIn("export const createAppKit = ({ enableBaseAccount, ...options }) => Object.assign(globalThis.reownAppKit, { options });"),
   "@reown/appkit-adapter-wagmi": standIn("export class WagmiAdapter {}"),
 };
 register(standIn(`const standIns = ${JSON.stringify(standIns)};
@@ -286,6 +287,7 @@ function fakeAppKit() {
     subscribeAccount: (listener) => subscribers.account.push(listener),
     subscribeNetwork: () => {},
     subscribeProviders: (listener) => subscribers.providers.push(listener),
+    updateOptions: (options) => Object.assign(appKit.options, options),
   };
   return appKit;
 }
@@ -312,6 +314,9 @@ test("through Reown's modal, a browser wallet that selected another account and 
       assert.deepEqual(wallet.sent, [], `${name}, ${type}`);
     }
   }
+  // Neither Coinbase Wallet nor Base Account: their SDKs call Coinbase as they load.
+  assert.equal(globalThis.reownAppKit.options.enableCoinbase, false);
+  assert.equal(globalThis.reownAppKit.options.enableBaseAccount, false);
 });
 
 test("through Reown, a WalletConnect session sends from the reviewed account wherever the wallet lists it", async () => {
