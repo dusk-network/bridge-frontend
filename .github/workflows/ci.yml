@@ -14,9 +14,19 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v5
         with:
           cache: npm
           node-version: 24
-      - run: npm ci
+      - name: Validate package release ages
+        run: node scripts/verify-package-release-ages.js --days 0.5
+      - name: Pin npm
+        run: npm install --global npm@11.18.0 --ignore-scripts
+        working-directory: ${{ runner.temp }}
+      - name: Install dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: Verify registry signatures
+        run: npm audit signatures
       - run: npm run check
