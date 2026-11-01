@@ -115,8 +115,11 @@ export function createTracking(deps) {
   const now = deps.now ?? Date.now;
   const name = (id) => networkName(config, id);
   let adapterLookup = "unknown";
-  // Each chain's block times, as the payout searches read them.
+  // Each chain's block times, as the payout searches read them, and the
+  // calls of the deposits a sender's history lists, once their blocks are
+  // final: neither changes.
   const blockTimes = new Map();
+  const depositCalls = new Map();
   /** A payout search on `network`'s RPC, however long ago the transfer was sent. */
   const searchOn = (network, rpcUrl) => {
     if (!blockTimes.has(network)) blockTimes.set(network, new Map());
@@ -296,6 +299,7 @@ export function createTracking(deps) {
     const { arrivals } = await depositArrivals({
       ...searchOn("dusk-evm", config.duskEvm.rpcUrl),
       archive,
+      cache: depositCalls,
       deposits: [deposit(entry, tx), ...peers.flatMap((other, i) => (peerTxs[i] && !peerTxs[i].error ? [deposit(other, peerTxs[i])] : []))],
       taken: takenDestinations(entry, others),
       via: "rpc",

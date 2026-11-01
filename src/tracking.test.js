@@ -492,6 +492,57 @@ test("a transfer waiting for its payout asks Dusk for its transaction until its 
   assert.equal(asked, 4);
 });
 
+test("a deposit waiting for its credit asks for an equal one's call before it until that one's block is final, then no more", async () => {
+  // The sender's history: an equal deposit sent from another device in block 8, then this one in block 10.
+  const earlier = "ef".repeat(32);
+  let finalized = 7;
+  let asked = 0;
+  const listed = archive({
+    history: { [SENDER]: [depositEntry(earlier, 8), depositEntry(DUSK_HASH, 10)] },
+    txs: { [earlier]: { ...depositDetails(1_792_980_100), blockHeight: 8 } },
+  });
+  const tracking = createTracking({
+    // The archive, with the last finalized block when asked.
+    archive: {
+      query: async (text) => {
+        asked += [...text.matchAll(/tx\(hash: "(\w+)"\)/gu)].filter(([, hash]) => hash === earlier).length;
+        const data = await listed.query(text);
+        if (text.includes("lastBlockPair")) data.pair = { json: { last_block: [finalized + 2, "aa".repeat(32)], last_finalized_block: [finalized, "bb".repeat(32)] } };
+        return data;
+      },
+    },
+    config: cfg,
+    // DuskEVM hasn't credited either yet.
+    fetch: fakeChain(() => []),
+    node: node({ transaction: async () => depositTx(1_792_980_200) }),
+    rpc: fakeRpc(NO_ADAPTER),
+  });
+  let entry = { hash: DUSK_HASH, routeId: ROUTES.deposit.id };
+  // What My transfers shows of it.
+  const shown = ({ amountLux, destination, note, sender, sourceAt, status }) => ({ amountLux, destination, note, sender, sourceAt, status });
+  const check = async () => {
+    entry = { ...entry, ...(await tracking.refresh(entry, ROUTES.deposit)) };
+    return shown(entry);
+  };
+
+  const waiting = await check();
+  assert.deepEqual(waiting, {
+    amountLux: "100000000",
+    destination: RECIPIENT,
+    note: "Waiting for DuskEVM.",
+    sender: SENDER,
+    sourceAt: 1_792_980_200_000,
+    status: "pending",
+  });
+  // The earlier one's block isn't final yet: the next check asks again.
+  assert.deepEqual(await check(), waiting);
+  assert.equal(asked, 2);
+
+  finalized = 11;
+  for (let i = 0; i < 4; i += 1) assert.deepEqual(await check(), waiting);
+  assert.equal(asked, 3);
+});
+
 test("an equal transfer out sent just before keeps its payout, once the bridge account's history lists both", async () => {
   const payout = {
     address: BSC_TOKEN,
