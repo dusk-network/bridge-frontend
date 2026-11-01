@@ -543,6 +543,26 @@ test("a deposit waiting for its credit asks for an equal one's call before it un
   assert.equal(asked, 3);
 });
 
+test("a deposit followed without its sender's history says why its credit can't be told: none came in time, or another could be its", async () => {
+  // The sender's history can't be read: a credit counts only within 2 minutes of the deposit, in block 999.
+  const unread = { query: async () => Promise.reject(new Error("unreachable")) };
+  const noteWith = async (credits) => {
+    const tracking = createTracking({ archive: unread, config: cfg, fetch: fakeChain(() => credits), node: node({ transaction: async () => depositTx() }), rpc: fakeRpc(NO_ADAPTER) });
+    return (await tracking.refresh({ hash: DUSK_HASH, routeId: ROUTES.deposit.id }, ROUTES.deposit)).note;
+  };
+
+  // None within them, and one 15 minutes on.
+  assert.equal(
+    await noteWith([credit(evmTx("34"), 1_900n)]),
+    "No credit came within 2 minutes of this deposit, and a later one can't be told apart from another transfer's. Check the address on the DuskEVM explorer.",
+  );
+  // Two within them: either could be another transfer's.
+  assert.equal(
+    await noteWith([credit(evmTx("34"), 1_020n), credit(evmTx("35"), 1_040n)]),
+    "An equal deposit to the same address was sent just before this one, so its credit can't be told apart. Check the address on the DuskEVM explorer.",
+  );
+});
+
 test("an equal transfer out sent just before keeps its payout, once the bridge account's history lists both", async () => {
   const payout = {
     address: BSC_TOKEN,

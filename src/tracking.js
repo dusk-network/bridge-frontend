@@ -4,7 +4,7 @@
 // Which payout or credit on the other side is a transfer's, each paying one
 // transfer in the order they were sent, @dusk-network/app-core/bridge says.
 
-import { depositArrivals, migrationPayouts, serviceArrivals } from "@dusk-network/app-core/bridge";
+import { CREDIT_WINDOW_MS, depositArrivals, migrationPayouts, serviceArrivals } from "@dusk-network/app-core/bridge";
 import { WithdrawalError } from "@dusk-network/app-core/duskevm-withdrawals";
 import { isAccount } from "@dusk-network/networks/account";
 import { BRIDGE_FUNCTIONS, decodeBridgeCall } from "@dusk-network/networks/duskevm";
@@ -34,6 +34,8 @@ const NO_PAYOUT = Object.freeze({
 
 const UNSURE_DEPOSIT =
   "An equal deposit to the same address was sent just before this one, so its credit can't be told apart. Check the address on the DuskEVM explorer.";
+// "late": its window closed without a credit, as when the sender's history can't be read.
+const LATE_DEPOSIT = `No credit came within ${CREDIT_WINDOW_MS / 60_000} minutes of this deposit, and a later one can't be told apart from another transfer's. Check the address on the DuskEVM explorer.`;
 
 /** What a Dusk transaction paid: the gas it spent at its price, in Lux. */
 export function duskFeePaid(tx) {
@@ -54,12 +56,12 @@ const completed = (extra = {}) => ({ ...extra, note: "", status: "completed" });
  * page's words: completed, failed when it pays nothing out, or pending,
  * with where the search stopped. A read that failed throws, as any check's.
  */
-function outcome(arrival, patch, waiting, unsure = waiting) {
+function outcome(arrival, patch, waiting, unsure = waiting, late = unsure) {
   if (arrival.state === "arrived")
     return completed({ ...patch, destinationAt: arrival.at, destinationHash: arrival.hash });
   if (arrival.reason === "error") throw new Error(arrival.error);
   if (arrival.reason === "no-payout") return failed(NO_PAYOUT[arrival.problem], patch);
-  return pending(arrival.reason === "unsure" || arrival.reason === "late" ? unsure : waiting, { ...patch, scan: arrival.scan });
+  return pending(arrival.reason === "unsure" ? unsure : arrival.reason === "late" ? late : waiting, { ...patch, scan: arrival.scan });
 }
 
 function memoText(hex) {
@@ -305,7 +307,7 @@ export function createTracking(deps) {
       via: "rpc",
     });
     const [arrival] = arrivals.values();
-    return outcome(arrival, patch, `Waiting for ${name("dusk-evm")}.`, UNSURE_DEPOSIT);
+    return outcome(arrival, patch, `Waiting for ${name("dusk-evm")}.`, UNSURE_DEPOSIT, LATE_DEPOSIT);
   }
 
   async function settlePendingAction(entry, status) {
