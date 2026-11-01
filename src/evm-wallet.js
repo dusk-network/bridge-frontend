@@ -158,6 +158,8 @@ async function initializeReown() {
     const origin = globalThis.location?.origin ?? "https://bridge.dusk.network";
     appKit = createAppKit({
       adapters: [adapter],
+      enableBaseAccount: false,
+      enableCoinbase: false,
       features: {
         analytics: false,
         email: false,
@@ -179,6 +181,11 @@ async function initializeReown() {
         "--w3m-border-radius-master": "2px",
       },
     });
+    // AppKit 1.8 drops enableBaseAccount from createAppKit's options, so its wagmi
+    // adapter would still add Base Account, whose SDK calls Coinbase when it
+    // loads. The adapter reads the option once it has set up its own
+    // connectors, after this line.
+    appKit.updateOptions({ enableBaseAccount: false });
     // AppKit's type for the connector the account came through, read again
     // on each connect and provider change: `WALLET_CONNECT` for a session.
     const walletConnect = () => Boolean(provider) && appKit.getWalletProviderType?.() === "WALLET_CONNECT";
