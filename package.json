@@ -12,7 +12,7 @@
     "test": "node --test"
   },
   "devDependencies": {
-    "vite": "8.0.16"
+    "vite": "8.3.5"
   },
   "dependencies": {
     "@dusk-network/app-core": "0.5.0",
@@ -28,6 +28,6 @@
   "overrides": {
     "@base-org/account": "2.5.10",
     "axios": "1.20.0",
-    "follow-redirects": "1.16.1"
+    "follow-redirects": "1.16.2"
   }
 }
