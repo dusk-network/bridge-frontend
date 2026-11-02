@@ -92,7 +92,9 @@ body {
   font-variant-ligatures: no-contextual;
   -webkit-font-smoothing: antialiased;
 }
-#app { min-height: 100vh; display: flex; flex-direction: column; }
+/* A .dusk name can run to 260 characters without a break: in text it wraps,
+   and never pushes the page sideways. Shorter words wrap as before. */
+#app { min-height: 100vh; display: flex; flex-direction: column; overflow-wrap: anywhere; }
 .page-slot { flex: 1 0 auto; }
 a { color: inherit; }
 button, input, textarea { font: inherit; color: inherit; }
@@ -154,6 +156,8 @@ svg.glyph { display: block; flex: 0 0 auto; }
 .wpill.cta { padding: 0 14px; }
 .wpill.cta svg { width: 14px; height: 14px; }
 .wpill .mono { font-size: 13px; }
+/* A .dusk name can run to 260 characters: a long one ends in an ellipsis, as Dusk Connect's own button does. */
+.wpill .nm { min-width: 0; max-width: 18ch; overflow: hidden; text-overflow: ellipsis; }
 .chainchip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; background: var(--surface-2); color: var(--text-2); font-size: 12px; }
 
 /* An icon button whose label shows on hover and focus. */
@@ -350,6 +354,11 @@ h1 { font-size: 28px; font-weight: 500; letter-spacing: -0.01em; line-height: 1.
 .netopt[aria-disabled="true"] { cursor: not-allowed; }
 .netopt[aria-disabled="true"] .cm, .netopt[aria-disabled="true"] .nm { opacity: .45; }
 .netopt > svg.ic { width: 16px; height: 16px; }
+/* The Dusk wallets to choose from, as rows like the network menu's. */
+.wallets { padding: 6px; }
+.wallets .av { width: 32px; height: 32px; border-radius: 50%; background: var(--surface-2); color: var(--text-2); display: grid; place-items: center; }
+.wallets .netopt:hover .av { background: var(--surface-3); }
+.wallets .netopt > svg.ic { color: var(--text-2); }
 .netscrim { display: none; }
 
 /* The Activity tab: the transfers in the card, a little wider on a computer. */
@@ -583,7 +592,8 @@ form.group .l1 { display: block; color: var(--text); font-size: 14px; font-weigh
   .hdr-r .wpill { min-width: 0; gap: 5px; padding: 0 10px 0 4px; }
   .hdr-r .wpill .av, .hdr-r .wpill .av .cm { width: 22px; height: 22px; }
   .hdr-r .wpill .av svg { width: 13px; height: 13px; }
-  .hdr-r .wpill .nm, .hdr-r .wpill .mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .hdr-r .wpill .mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .hdr-r .wpill .nm { max-width: 10ch; }
   .hdr-r .wpill .tail { display: none; }
   .hdr-r .wpill.cta { display: none; }
   .page, .col { padding: 16px 16px 12px; }

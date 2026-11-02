@@ -111,3 +111,18 @@ test("in My transfers, a route's marks and DuskEVM's tag fit their cell, clear o
     assert.ok(width <= cell, `${where}: ${width}px in a ${cell}px cell`);
   }
 });
+
+test("a long .dusk name ends in an ellipsis in the top bar and wraps in text, on a computer and a phone", () => {
+  // Outside any media query, so at every width.
+  const top = css.slice(0, css.indexOf("@media (max-width: 1023px)"));
+  const rule = (selector) => new RegExp(`\\n${selector.replace(/\./gu, "\\.")} \\{([^}]*)\\}`, "u").exec(top)?.[1] ?? "";
+  for (const declaration of ["max-width: 18ch", "overflow: hidden", "text-overflow: ellipsis", "min-width: 0"]) assert.ok(rule(".wpill .nm").includes(declaration), declaration);
+  // The pill keeps to one line, so the name is cut, not wrapped.
+  assert.match(rule(".wpill"), /white-space: nowrap/u);
+  // On a phone it's cut shorter, so the EVM wallet beside it still reads "0x7568…".
+  const phone = css.slice(css.indexOf("@media (max-width: 767px)"));
+  const cap = Number.parseFloat(/\n {2}\.hdr-r \.wpill \.nm \{[^}]*max-width: ([\d.]+)ch/u.exec(phone)?.[1]);
+  assert.ok(cap < 18, `${cap}ch on a phone`);
+  // Elsewhere (the review, My transfers, a receipt) a name with no break in it wraps, so the page never scrolls sideways.
+  assert.match(rule("#app"), /overflow-wrap: anywhere/u);
+});

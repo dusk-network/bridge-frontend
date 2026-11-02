@@ -71,8 +71,8 @@ function duskPill(dusk) {
     return `<a class="wpill cta" href="${html(dusk.getUrl)}" target="_blank" rel="noreferrer">Get Dusk Wallet ${icon("ext")}<span class="sr-only"> (opens in a new tab)</span></a>`;
   if (dusk.state !== "connected")
     return `<button type="button" class="wpill cta" data-action="connect-dusk">${dusk.state === "locked" ? "Unlock Dusk Wallet" : "Connect Dusk Wallet"}</button>`;
-  // The account by its .dusk name where Dusk Wallet sent one.
-  const who = dusk.name ? `<span class="nm">${html(dusk.name)}</span>` : `<code class="mono">${shortLabel(dusk.account)}</code>`;
+  // The account by its .dusk name where it has one; a long one ends in an ellipsis, in full on hover.
+  const who = dusk.name ? `<span class="nm" title="${html(dusk.name)}">${html(dusk.name)}</span>` : `<code class="mono">${shortLabel(dusk.account)}</code>`;
   return `<button type="button" class="wpill" data-action="connect-dusk" aria-label="Dusk Wallet, account ${html(dusk.name ? `${dusk.name}, ${dusk.account}` : dusk.account)}"><span class="av">${chainMark("dusk", "xs")}</span>${who}</button>`;
 }
 
@@ -486,6 +486,18 @@ export function contractsSheet(vm) {
   const about = terms.length ? `<p class="about-links">${terms.join('<span class="sep" aria-hidden="true">·</span>')}</p>` : "";
   const servers = vm.servers ? `<section class="cgroup"><h3 class="gt">Servers</h3><p class="card about-servers">${html(vm.servers)}</p></section>` : "";
   return `<div class="sheet-head"><div><h2 id="sheet-title">About this page · ${html(vm.badge)}</h2><p class="sub">Check these against your wallet before you confirm.</p></div><button type="button" class="icon-btn round" data-action="close-sheet" aria-label="Close">${icon("close")}</button></div><div class="sheet-body">${about}${servers}${groups}</div>`;
+}
+
+/** The Dusk wallets installed, to choose the one this page uses: by name, and the ID each gives itself. */
+export function walletsSheet(vm) {
+  const rows = vm.wallets
+    .map(
+      (wallet) =>
+        `<li><button type="button" class="netopt" data-action="choose-dusk" data-wallet="${html(wallet.id)}"><span class="av">${icon("wallet")}</span><span><span class="nm">${html(wallet.name)}</span><span class="sb">${html(wallet.rdns)}</span></span>${icon("chev-r")}</button></li>`,
+    )
+    .join("");
+  return `<div class="sheet-head"><div><h2 id="sheet-title">Choose a wallet</h2><p class="sub">${vm.wallets.length > 1 ? "More than one Dusk wallet is installed." : "The wallet you used here before isn't installed."} Choose the one to connect.</p></div><button type="button" class="icon-btn round" data-action="close-sheet" aria-label="Close">${icon("close")}</button></div>
+  <div class="sheet-body"><ul class="group wallets">${rows}</ul></div>`;
 }
 
 export function networkSheet(vm) {
