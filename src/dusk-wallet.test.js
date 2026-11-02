@@ -174,6 +174,55 @@ test("with two Dusk wallets installed, Connect asks which one, and the page keep
   const again = await createDuskConnection();
   assert.deepEqual(again.choices, []);
   assert.equal(again.state.selectedProfile.account, BOB);
+  await again.connect();
+  assert.equal(again.state.selectedProfile.account, BOB);
+});
+
+const pick = (connection, name) => connection.choices.find((choice) => choice.name === name).id;
+
+test("with two wallets, a connection cancelled in the wallet leaves the choice open: Connect asks again, also on the next visit", async () => {
+  const refuse = (method) => {
+    if (method === "dusk_requestProfiles") throw Object.assign(new Error("User rejected the request."), { code: 4001 });
+  };
+  const storage = webStorage();
+  openPage({ storage });
+  installWallet({ during: refuse });
+  installWallet({ account: BOB, name: "Piewallet", rdns: "com.piewallet" });
+  const dusk = await createDuskConnection();
+  await assert.rejects(dusk.connect(pick(dusk, "Dusk Wallet")), { code: 4001 });
+  // Nothing connected: the next Connect offers both again.
+  assert.deepEqual(dusk.choices.map(({ name }) => name), ["Dusk Wallet", "Piewallet"]);
+
+  openPage({ storage });
+  installWallet({ during: refuse });
+  installWallet({ account: BOB, name: "Piewallet", rdns: "com.piewallet" });
+  const next = await createDuskConnection();
+  assert.deepEqual(next.choices.map(({ name }) => name), ["Dusk Wallet", "Piewallet"]);
+  await next.connect(pick(next, "Piewallet"));
+  assert.equal(next.state.selectedProfile.account, BOB);
+  assert.deepEqual(next.choices, []);
+});
+
+test("with two wallets, one that doesn't answer when chosen leaves the choice open, also after a reload", { timeout: 5_000 }, async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const storage = webStorage();
+  openPage({ storage });
+  installWallet({ stall: true });
+  installWallet({ account: BOB, name: "Piewallet", rdns: "com.piewallet" });
+  const dusk = await createDuskConnection();
+  const choosing = dusk.connect(pick(dusk, "Dusk Wallet"));
+  // Dusk Connect gives up on a read after 10 seconds.
+  for (let turn = 0; turn < 10; turn += 1) await new Promise((resolve) => setImmediate(resolve));
+  t.mock.timers.tick(10_000);
+  await assert.rejects(choosing, { name: "DuskWalletRequestTimeoutError" });
+  assert.deepEqual(dusk.choices.map(({ name }) => name), ["Dusk Wallet", "Piewallet"]);
+
+  // Reloaded, with Dusk Wallet answering again: still not taken for you.
+  openPage({ storage });
+  installWallet();
+  installWallet({ account: BOB, name: "Piewallet", rdns: "com.piewallet" });
+  const next = await createDuskConnection();
+  assert.deepEqual(next.choices.map(({ name }) => name), ["Dusk Wallet", "Piewallet"]);
 });
 
 test("a wallet chosen before that's gone isn't swapped for the one installed now: Connect asks", async () => {

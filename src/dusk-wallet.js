@@ -19,12 +19,17 @@ export async function createDuskConnection() {
   });
   return {
     /**
-     * The wallets to choose from where Dusk Connect leaves the choice to you:
-     * several are installed, or the one chosen before isn't. Empty once one
-     * is in use.
+     * The wallets to choose from where Dusk Connect leaves the choice to you
+     * (several are installed, or the one chosen before isn't), and, with
+     * several installed, until the one in use lets this page in: a choice
+     * cancelled or unanswered in the wallet, on this visit or an earlier
+     * one, can be made again. A wallet the page connected keeps its place,
+     * locked too. Empty otherwise.
      */
     get choices() {
-      return wallet.provider ? [] : wallet.providers.map(({ name, rdns, uuid }) => ({ id: uuid, name, rdns }));
+      const installed = wallet.providers;
+      const open = !wallet.provider || (installed.length > 1 && !wallet.state.authorized);
+      return open ? installed.map(({ name, rdns, uuid }) => ({ id: uuid, name, rdns })) : [];
     },
     /** Connects, with the wallet chosen (`id`) where there was a choice. */
     async connect(id) {
