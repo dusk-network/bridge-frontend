@@ -715,7 +715,12 @@ test("a withdrawal claimed outside this browser reads as claimed", () => {
 
 test("your Dusk account shows by the .dusk name Dusk Wallet sent", () => {
   const top = header({ badge: "Testnet", dusk: { account: ACCOUNT, name: "alice.dusk", state: "connected" }, evm: { state: "connect" }, isTestnet: true, nav: "move" });
-  assert.match(top, /<span class="av">.*<\/span><span class="nm">alice\.dusk<\/span><\/button>/u);
+  assert.match(top, /<span class="av">.*<\/span><span class="nm" title="alice\.dusk">alice\.dusk<\/span><\/button>/u);
+  // A long name is cut short in the bar (style.css): it's there in full on hover and for a screen reader.
+  const long = `${"a".repeat(63)}.${"b".repeat(63)}.dusk`;
+  const named = header({ badge: "Testnet", dusk: { account: ACCOUNT, name: long, state: "connected" }, evm: { state: "connect" }, isTestnet: true });
+  assert.ok(named.includes(`<span class="nm" title="${long}">${long}</span>`));
+  assert.ok(named.includes(`aria-label="Dusk Wallet, account ${long}, ${ACCOUNT}"`));
   assert.doesNotMatch(header({ badge: "Testnet", dusk: { account: ACCOUNT, state: "connected" }, evm: { state: "connect" }, isTestnet: true }), /class="nm"/u);
   // A receipt names your own account by it, any other by its short code.
   const entry = { amountLux: "100000000", destination: EVM, hash: "38".repeat(32), id: "x", routeId: "dusk-to-dusk-evm", sender: ACCOUNT, status: "pending" };

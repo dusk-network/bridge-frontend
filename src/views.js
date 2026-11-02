@@ -71,8 +71,8 @@ function duskPill(dusk) {
     return `<a class="wpill cta" href="${html(dusk.getUrl)}" target="_blank" rel="noreferrer">Get Dusk Wallet ${icon("ext")}<span class="sr-only"> (opens in a new tab)</span></a>`;
   if (dusk.state !== "connected")
     return `<button type="button" class="wpill cta" data-action="connect-dusk">${dusk.state === "locked" ? "Unlock Dusk Wallet" : "Connect Dusk Wallet"}</button>`;
-  // The account by its .dusk name where Dusk Wallet sent one.
-  const who = dusk.name ? `<span class="nm">${html(dusk.name)}</span>` : `<code class="mono">${shortLabel(dusk.account)}</code>`;
+  // The account by its .dusk name where it has one; a long one ends in an ellipsis, in full on hover.
+  const who = dusk.name ? `<span class="nm" title="${html(dusk.name)}">${html(dusk.name)}</span>` : `<code class="mono">${shortLabel(dusk.account)}</code>`;
   return `<button type="button" class="wpill" data-action="connect-dusk" aria-label="Dusk Wallet, account ${html(dusk.name ? `${dusk.name}, ${dusk.account}` : dusk.account)}"><span class="av">${chainMark("dusk", "xs")}</span>${who}</button>`;
 }
 
