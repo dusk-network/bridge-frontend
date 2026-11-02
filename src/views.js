@@ -488,6 +488,18 @@ export function contractsSheet(vm) {
   return `<div class="sheet-head"><div><h2 id="sheet-title">About this page · ${html(vm.badge)}</h2><p class="sub">Check these against your wallet before you confirm.</p></div><button type="button" class="icon-btn round" data-action="close-sheet" aria-label="Close">${icon("close")}</button></div><div class="sheet-body">${about}${servers}${groups}</div>`;
 }
 
+/** The Dusk wallets installed, to choose the one this page uses: by name, and the ID each gives itself. */
+export function walletsSheet(vm) {
+  const rows = vm.wallets
+    .map(
+      (wallet) =>
+        `<li><button type="button" class="netopt" data-action="choose-dusk" data-wallet="${html(wallet.id)}"><span class="av">${icon("wallet")}</span><span><span class="nm">${html(wallet.name)}</span><span class="sb">${html(wallet.rdns)}</span></span>${icon("chev-r")}</button></li>`,
+    )
+    .join("");
+  return `<div class="sheet-head"><div><h2 id="sheet-title">Choose a wallet</h2><p class="sub">${vm.wallets.length > 1 ? "More than one Dusk wallet is installed." : "The wallet you used here before isn't installed."} Choose the one to connect.</p></div><button type="button" class="icon-btn round" data-action="close-sheet" aria-label="Close">${icon("close")}</button></div>
+  <div class="sheet-body"><ul class="group wallets">${rows}</ul></div>`;
+}
+
 export function networkSheet(vm) {
   const other = vm.otherSite
     ? `<a class="btn sec sm full" href="${html(vm.otherSite)}" rel="noreferrer">Go to the ${html(vm.otherName)} bridge ${icon("ext")}</a>`

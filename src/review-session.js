@@ -5,7 +5,7 @@
 // open review shows. A review is also for one signer, the account it showed:
 // once the wallet signs as another, it can't be confirmed.
 
-import { friendlyWalletError } from "./transfer-view.js";
+import { duskWalletChanged, friendlyWalletError } from "./transfer-view.js";
 
 /** What a review says once its wallet switched account: it can't be confirmed. */
 export const SIGNER_MOVED = Object.freeze({
@@ -77,14 +77,20 @@ export function sentActionPatch(review, hash, submitterOf) {
  * Puts on `review` why its request wasn't sent, and says it in the page's
  * live region too (`announce`), so a screen reader hears what became of this
  * request, never an older transfer's news: that you cancelled it in your
- * wallet, that the wallet came back as another account, which leaves the
+ * wallet, that the wallet came back as another account or, as Dusk Connect
+ * refuses, changed network or account as it went out, which leaves the
  * review stale, or why it failed, naming `wallet`.
  */
 export function notSent(review, error, { announce, wallet = "dusk" }) {
   const moved = error?.code === "DUSK_ACCOUNT_CHANGED" ? "dusk" : error?.code === "EVM_ACCOUNT_CHANGED" ? "evm" : "";
+  const changed = wallet === "dusk" ? duskWalletChanged(error) : "";
   review.busy = false;
-  if (moved) review.stale = true;
-  review.error = moved ? SIGNER_MOVED[moved] : friendlyWalletError(error, wallet);
+  if (moved || changed) review.stale = true;
+  review.error = moved
+    ? SIGNER_MOVED[moved]
+    : changed
+      ? `${changed}, so nothing was sent. Close it and review again.`
+      : friendlyWalletError(error, wallet);
   announce(review.error);
   return review;
 }

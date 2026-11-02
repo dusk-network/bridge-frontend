@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { DuskSdkError } from "@dusk/connect";
+
 import { SIGNER_MOVED, createReviewSession, notSent, sameSigner, sentActionPatch } from "./review-session.js";
-import { WALLET_CANCELLED } from "./transfer-view.js";
+import { WALLET_CANCELLED, friendlyWalletError } from "./transfer-view.js";
 
 test("a request prepared for a closed review never fills the next one, even on the same route", async () => {
   const reviews = createReviewSession();
@@ -86,4 +88,17 @@ test("a request that wasn't sent says why on the review and in the page's live r
   // Anything else in plain words, naming the wallet that refused.
   notSent({}, { code: 4100 }, { announce, wallet: "evm" });
   assert.deepEqual(said, [WALLET_CANCELLED, SIGNER_MOVED.dusk, SIGNER_MOVED.evm, "The EVM wallet is locked. Unlock it, reconnect, and try again."]);
+});
+
+test("a send Dusk Connect refused because Dusk Wallet changed network or account leaves the review stale, in plain words", () => {
+  // As Dusk Connect refuses: nothing went to the wallet.
+  const refused = (reason) => new DuskSdkError("Wallet changed before sending", { data: { reason } });
+  const network = notSent({ busy: true }, refused("network_changed"), { announce: () => {} });
+  assert.deepEqual([network.busy, network.stale, network.error], [false, true, "Dusk Wallet switched network, so nothing was sent. Close it and review again."]);
+  const session = notSent({ busy: true }, refused("session_changed"), { announce: () => {} });
+  assert.deepEqual([session.stale, session.error], [true, "Dusk Wallet locked or changed accounts, so nothing was sent. Close it and review again."]);
+  // Refused while connecting, outside a review: try again.
+  assert.equal(friendlyWalletError(refused("session_changed")), "Dusk Wallet locked or changed accounts. Try again.");
+  // Any other refusal leaves the review as it was.
+  assert.equal(notSent({ busy: true }, new DuskSdkError("Wallet network changed", { data: { reason: "other" } }), { announce: () => {} }).stale, undefined);
 });

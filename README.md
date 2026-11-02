@@ -6,7 +6,8 @@ Dusk and DuskEVM.
 The application coordinates bridge transactions but never owns wallet keys:
 
 - Dusk Connect talks to a compatible Dusk wallet extension, for the account,
-  signing and sending only.
+  signing and sending only. With more than one installed, or without the one
+  chosen here before, Connect Dusk Wallet asks which to use.
 - An injected EVM wallet handles Ethereum, BSC and DuskEVM approvals.
 - Reown AppKit provides browser-wallet discovery and WalletConnect when
   `VITE_REOWN_PROJECT_ID` is configured.

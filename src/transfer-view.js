@@ -72,11 +72,24 @@ export const walletCancelled = (error) =>
 /** What a proof or claim that wasn't sent keeps on its transfer: that you cancelled it, or why it failed. */
 export const actionErrorOf = (error) => (walletCancelled(error) ? WALLET_CANCELLED : error?.message ?? String(error));
 
+/**
+ * What changed when Dusk Connect sent nothing because Dusk Wallet switched
+ * network, locked or changed accounts while a request was under way, or "".
+ */
+export function duskWalletChanged(error) {
+  const reason = error?.data?.reason;
+  if (reason === "network_changed") return "Dusk Wallet switched network";
+  if (reason === "session_changed") return "Dusk Wallet locked or changed accounts";
+  return "";
+}
+
 /** Wallet errors in plain words, naming the wallet that raised them. */
 export function friendlyWalletError(error, wallet = "dusk") {
   const codes = [error?.code, error?.cause?.code, error?.cause?.cause?.code];
   const name = wallet === "evm" ? "EVM wallet" : "Dusk wallet";
   if (walletCancelled(error)) return WALLET_CANCELLED;
+  const changed = wallet === "dusk" ? duskWalletChanged(error) : "";
+  if (changed) return `${changed}. Try again.`;
   if (codes.includes(4100) || /wallet (?:is )?locked/iu.test(error?.message ?? ""))
     return `The ${name} is locked. Unlock it, reconnect, and try again.`;
   if (codes.includes(4900)) return `The ${name} disconnected. Reconnect it and try again.`;

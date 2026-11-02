@@ -11,7 +11,7 @@ import { loadConfig } from "./config.js";
 import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
 import { actionLead, actionPrivacy, availableLine, pricedReview, receiptModel, recipientLine, reviewChecks, routeLine, transfersModel } from "./page-models.js";
 import { buildQuote, withdrawalStepMax } from "./quote.js";
-import { activityPanel, cardPage, cardRegions, contractsSheet, footer, header, networkSheet, receiptPage, reviewSheet, walletLines } from "./views.js";
+import { activityPanel, cardPage, cardRegions, contractsSheet, footer, header, networkSheet, receiptPage, reviewSheet, walletLines, walletsSheet } from "./views.js";
 import { formatDateTime } from "./format.js";
 import { chainMark, pairMark } from "./icons.js";
 import { approveLines, duskCallLines, duskTransferLines, migrateLines, walletFee, withdrawalAmount } from "./wallet-lines.js";
@@ -826,4 +826,17 @@ test("a Dusk recipient handed over in the link reads as Paying, with a way to ch
   // The card: the line, then Change.
   const page = cardPage(cardVmFor({ to: { ...cardVmFor().to, label: "Recipient on Dusk", line: line(T.migration, { handedOver: true }), net: { id: "dusk", name: "Dusk" } } }));
   assert.match(page, /<p class="recip">Paying <b class="mono">21n5nc…fMMLNz<\/b> · <button type="button" class="linkish" data-action="recipient-edit">Change<\/button><\/p>/u);
+});
+
+test("with more than one Dusk wallet to choose from, each is offered by name, and so is one left alone", () => {
+  const two = walletsSheet({ wallets: [{ id: "a", name: "Dusk Wallet", rdns: "network.dusk.wallet" }, { id: "b<", name: "Piewallet", rdns: "com.piewallet" }] });
+  assert.match(two, /<h2 id="sheet-title">Choose a wallet<\/h2><p class="sub">More than one Dusk wallet is installed\. Choose the one to connect\.<\/p>/u);
+  assert.deepEqual([...two.matchAll(/data-action="choose-dusk" data-wallet="([^"]+)">.*?<span class="nm">([^<]+)<\/span><span class="sb">([^<]+)<\/span>/gu)].map((match) => match.slice(1)), [
+    ["a", "Dusk Wallet", "network.dusk.wallet"],
+    ["b&lt;", "Piewallet", "com.piewallet"],
+  ]);
+  // The wallet chosen here before is gone: the one left is offered, not taken for you.
+  const one = walletsSheet({ wallets: [{ id: "a", name: "Dusk Wallet", rdns: "network.dusk.wallet" }] });
+  assert.match(one, /<p class="sub">The wallet you used here before isn't installed\. Choose the one to connect\.<\/p>/u);
+  assert.equal([...one.matchAll(/data-action="choose-dusk"/gu)].length, 1);
 });

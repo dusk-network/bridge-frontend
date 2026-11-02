@@ -60,6 +60,7 @@ import {
   reviewSheet,
   strip,
   unavailablePage,
+  walletsSheet,
 } from "./views.js";
 import { approveLines, duskCallLines, duskTransferLines, migrateLines, withdrawLines } from "./wallet-lines.js";
 
@@ -99,15 +100,12 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   // The Dusk account My transfers lists: the connected one, or else the followed one.
   const listedDusk = () => duskAccount() || state.watching?.account || "";
   // The profile's .dusk name: the one Dusk Wallet sends once it checked the
-  // name points back to the account, or else the account's verified primary
-  // name, looked up through this page's node.
+  // name points back to the account (Dusk Connect passes on only a canonical
+  // .dusk name), or else the account's verified primary name, looked up
+  // through this page's node.
   const namesFound = new Map();
   const namesAsked = new Set();
-  const duskName = () => {
-    const sent = duskState().selectedProfile?.name;
-    const name = typeof sent === "string" && sent ? sent : namesFound.get(duskAccount()) ?? "";
-    return /^[^\s<>"'&]{1,64}\.dusk$/u.test(name) ? name : "";
-  };
+  const duskName = () => duskState().selectedProfile?.name || namesFound.get(duskAccount()) || "";
   function lookUpName(account) {
     if (!account || namesFound.has(account) || namesAsked.has(account) || duskState().selectedProfile?.name || !services.names) return;
     // Asked once at a time; a failed lookup is asked again on the next change.
@@ -885,6 +883,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     } else if (state.sheet === "review" && reviews.current) {
       dialog.className = "sheet wide";
       dialog.innerHTML = reviewSheet(reviewVm());
+    } else if (state.sheet === "wallets") {
+      dialog.className = "sheet narrow";
+      dialog.innerHTML = walletsSheet({ wallets: state.dusk?.choices ?? [] });
     }
   }
 
@@ -932,7 +933,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const route = formRoute();
     if (!route) return;
     if (!signerReady(route)) {
-      await (route.signer === "dusk" ? connectDusk() : connectEvm());
+      await (route.signer === "dusk" ? connectDusk(opener) : connectEvm());
       return;
     }
     const quote = quoteFor(route);
@@ -1098,6 +1099,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const entry = state.activity.find((item) => item.id === id);
     const route = entry && routeOf(entry.routeId);
     if (!entry || !route || !services.withdrawals) return;
+    // Dusk Wallet signs it: first the wallet, where there's one to choose.
+    if (state.dusk?.choices.length) return connectDusk(opener);
     const view = transferView(entry, { cfg, route, timing: timing() });
     const label = kind === "prove" ? "Prove on Dusk" : "Claim on Dusk";
     // The price the page quoted the step at: the review and the request use it too.
@@ -1292,10 +1295,24 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   // Wallets
   // -------------------------------------------------------------------------
 
-  async function connectDusk() {
+  async function connectDusk(opener) {
     try {
       if (!state.dusk) return;
+      // Several wallets, or not the one chosen before: you choose, Dusk Connect won't.
+      if (state.dusk.choices.length) {
+        openSheet("wallets", opener);
+        return;
+      }
       await state.dusk.connect();
+    } catch (error) {
+      showError(friendlyWalletError(error, "dusk"));
+    }
+  }
+
+  async function chooseDusk(id) {
+    closeSheet();
+    try {
+      await state.dusk.connect(id);
     } catch (error) {
       showError(friendlyWalletError(error, "dusk"));
     }
@@ -1504,7 +1521,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       calendar: downloadCalendar,
       "close-sheet": closeSheet,
       confirm: confirmReview,
-      "connect-dusk": connectDusk,
+      "choose-dusk": () => chooseDusk(target.dataset.wallet),
+      "connect-dusk": () => connectDusk(target),
       "connect-evm": connectEvm,
       "discover-more": () => discover({ more: true }),
       max: () => {

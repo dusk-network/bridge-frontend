@@ -1,4 +1,4 @@
-import { createDuskWallet } from "@dusk/connect";
+import { DuskWalletRequestTimeoutError, createDuskWallet } from "@dusk/connect";
 
 import { config } from "./config.js";
 import { toHex } from "./data-driver.js";
@@ -12,9 +12,25 @@ export async function createDuskConnection() {
   // Dusk Connect remembers the wallet last used in Web Storage, and can't
   // start where the browser denies it: there, it isn't asked to.
   wallet = wallet ?? createDuskWallet(webStorageAllowed() ? {} : { rememberLastUsedProvider: false });
-  await wallet.ready();
+  // A wallet slow to answer as the page opens is still installed: the page
+  // goes on, and asks it again when the page gets focus.
+  await wallet.ready().catch((error) => {
+    if (!(error instanceof DuskWalletRequestTimeoutError)) throw error;
+  });
   return {
-    connect: () => wallet.connect({ reason: "bridge_recipient" }),
+    /**
+     * The wallets to choose from where Dusk Connect leaves the choice to you:
+     * several are installed, or the one chosen before isn't. Empty once one
+     * is in use.
+     */
+    get choices() {
+      return wallet.provider ? [] : wallet.providers.map(({ name, rdns, uuid }) => ({ id: uuid, name, rdns }));
+    },
+    /** Connects, with the wallet chosen (`id`) where there was a choice. */
+    async connect(id) {
+      if (id) await wallet.selectProvider(id);
+      return wallet.connect({ reason: "bridge_recipient" });
+    },
     disconnect: () => wallet.disconnect(),
     get state() {
       return wallet.state;
