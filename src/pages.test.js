@@ -504,7 +504,7 @@ test("the Contracts sheet lists every address in full, per route, and names no o
     assert.ok(html.includes(`<code class="mono">${value}</code>`), value);
     assert.ok(html.includes(`data-copy="${value}"`), value);
   }
-  assert.ok(html.includes(`https://apps.testnet.dusk.network/explorer/accounts/?key=${testnet.service.account}`));
+  assert.ok(html.includes(`https://explorer.testnet.dusk.network/accounts/?key=${testnet.service.account}`));
   // The Terms of use and Privacy policy, and nothing more: no operator, and no contract said to hold or keep DUSK.
   assert.match(
     html,
