@@ -17,7 +17,7 @@ import { proofSubmitterFor } from "./services.js";
 import { receiptPage, reviewSheet, transferRow } from "./views.js";
 
 const cfg = {
-  dusk: { explorerUrl: "https://apps.testnet.dusk.network/explorer/" },
+  dusk: { explorerUrl: "https://explorer.testnet.dusk.network/" },
   duskEvm: { depositSeconds: 60, explorerUrl: "https://explorer.testnet.evm.dusk.network" },
   evmNetworks: { ethereum: { explorerUrl: "https://sepolia.etherscan.io", migrationSeconds: 3_600 } },
   profile: "testnet",
@@ -40,7 +40,7 @@ const GB = "en-GB";
 test("explorer links point at each network's own explorer", () => {
   assert.equal(
     explorerTxUrl(cfg, "dusk", `0x${DUSK_HASH}`),
-    `https://apps.testnet.dusk.network/explorer/transactions/transaction?id=${DUSK_HASH}`,
+    `https://explorer.testnet.dusk.network/transactions/transaction?id=${DUSK_HASH}`,
   );
   assert.equal(explorerTxUrl(cfg, "dusk-evm", "34".repeat(32)), `https://explorer.testnet.evm.dusk.network/tx/${L2_HASH}`);
   assert.equal(explorerTxUrl(cfg, "ethereum", L2_HASH), `https://sepolia.etherscan.io/tx/${L2_HASH}`);
@@ -70,7 +70,7 @@ test("a deposit shows Pending with its steps, then Completed with both transacti
     ["Confirmed on Dusk", "done"],
     ["Arriving on DuskEVM", "now"],
   ]);
-  assert.equal(pending.steps[0].href, `https://apps.testnet.dusk.network/explorer/transactions/transaction?id=${DUSK_HASH}`);
+  assert.equal(pending.steps[0].href, `https://explorer.testnet.dusk.network/transactions/transaction?id=${DUSK_HASH}`);
   assert.equal(pending.steps[1].atText, "Today, 10:31 CET");
   assert.equal(pending.steps[2].detail, "");
   assert.equal(pending.late, false);
