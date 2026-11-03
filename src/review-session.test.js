@@ -102,3 +102,26 @@ test("a send Dusk Connect refused because Dusk Wallet changed network or account
   // Any other refusal leaves the review as it was.
   assert.equal(notSent({ busy: true }, new DuskSdkError("Wallet network changed", { data: { reason: "other" } }), { announce: () => {} }).stale, undefined);
 });
+
+test("Confirm takes no click in the moment a review comes up, nor its next step, and takes one half a second on", () => {
+  let now = 1_000;
+  const reviews = createReviewSession({ now: () => now });
+  // Review pressed twice: the second click lands on Confirm as the sheet opens.
+  reviews.start({ routeId: "ethereum-to-dusk" });
+  assert.equal(reviews.confirmable, false);
+  now += 499;
+  assert.equal(reviews.confirmable, false);
+  now += 1;
+  assert.equal(reviews.confirmable, true);
+
+  // The approval went through: step 2's Confirm, where the first one was, waits again.
+  reviews.stepShown();
+  assert.equal(reviews.confirmable, false);
+  now += 500;
+  assert.equal(reviews.confirmable, true);
+
+  // A review opened again starts over.
+  reviews.end();
+  reviews.start({ routeId: "dusk-evm-to-dusk" });
+  assert.equal(reviews.confirmable, false);
+});

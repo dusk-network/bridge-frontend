@@ -3,7 +3,9 @@
 // it: if that review is closed and another opened meanwhile, even for the
 // same route, the old request is dropped, so Confirm sends exactly what the
 // open review shows. A review is also for one signer, the account it showed:
-// once the wallet signs as another, it can't be confirmed.
+// once the wallet signs as another, it can't be confirmed. Its Confirm takes
+// no click in the moment the review, or its next step, comes up: a
+// double-click on Review must not land on it.
 
 import { duskWalletChanged, friendlyWalletError } from "./transfer-view.js";
 
@@ -23,8 +25,12 @@ export function sameSigner(review, account) {
     : signer.account === account;
 }
 
-export function createReviewSession() {
+/** How long Confirm ignores clicks once a review or its next step is up, in ms. */
+export const CONFIRM_GUARD_MS = 500;
+
+export function createReviewSession({ now = () => Date.now() } = {}) {
   let open = null;
+  let shownAt = Number.NEGATIVE_INFINITY;
   return Object.freeze({
     /** The review on screen, or null. */
     get current() {
@@ -32,7 +38,19 @@ export function createReviewSession() {
     },
     start(review) {
       open = review;
+      shownAt = now();
       return review;
+    },
+    /** The open review's next step is up: Confirm waits again. */
+    stepShown() {
+      shownAt = now();
+    },
+    /**
+     * Whether Confirm takes a click: not within CONFIRM_GUARD_MS of the review
+     * or its step coming up. It looks as always meanwhile, not turned off.
+     */
+    get confirmable() {
+      return now() - shownAt >= CONFIRM_GUARD_MS;
     },
     end() {
       open = null;

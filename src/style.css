@@ -43,6 +43,12 @@
   --sans: Soehne, "Helvetica Neue", helvetica, arial, sans-serif;
   --mono: "Soehne Mono", ui-monospace, "SF Mono", menlo, consolas, monospace;
   --bar: 60px;
+  /* Motion: feedback and every exit take --motion-fast, anything that
+     arrives or opens --motion-base. */
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-ease: cubic-bezier(0.25, 1, 0.5, 1);
+  --motion-ease-exit: cubic-bezier(0.32, 0, 0.67, 0);
 }
 
 @media (prefers-color-scheme: light) {
@@ -239,7 +245,17 @@ h1 { font-size: 28px; font-weight: 500; letter-spacing: -0.01em; line-height: 1.
 .icon-btn { display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); text-decoration: none; flex: 0 0 auto; }
 .icon-btn svg { width: 15px; height: 15px; }
 .icon-btn:hover { background: var(--surface-2); color: var(--text); }
-.icon-btn.copied { color: var(--text); background: var(--surface-3); }
+/* Copy says it copied on itself: for 1.5 s its icon is a check, or its
+   words say Copied, crossfading over --motion-fast. */
+.copy-swap { display: inline-grid; }
+.copy-swap > * { grid-area: 1 / 1; display: inline-flex; align-items: center; justify-content: center; transition: opacity var(--motion-fast) var(--motion-ease-exit); }
+.copy-swap__to, [data-copied] .copy-swap__from { opacity: 0; }
+[data-copied] .copy-swap__to { opacity: 1; }
+[data-copied] .copy-swap > * { transition-timing-function: var(--motion-ease); }
+/* A wait that shows words: a small ring turns beside them from the first moment. */
+.waiting { display: inline-flex; align-items: center; gap: 8px; }
+.spin { flex: 0 0 auto; width: 13px; height: 13px; border: 1.5px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .icon-btn.round { width: 34px; height: 34px; border-radius: 50%; background: var(--surface-2); }
 
 /* A full address or hash: wraps, and keeps its copy and explorer buttons. */
@@ -256,6 +272,14 @@ h1 { font-size: 28px; font-weight: 500; letter-spacing: -0.01em; line-height: 1.
 .kv .stack { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
 .kv .small { color: var(--text-2); font-size: 12.5px; }
 .kv.total .k, .kv.total .v { color: var(--text); font-weight: 500; }
+
+/* A section (<details>) opens over --motion-base, its height and opacity
+   together, and closes the same way over --motion-fast. Where a browser can't
+   animate to the content's height (interpolate-size), it opens and closes at
+   once. The clip leaves room for a focus ring. */
+details { interpolate-size: allow-keywords; }
+details::details-content { block-size: 0; opacity: 0; overflow: clip; overflow-clip-margin: 4px; transition: block-size var(--motion-fast) var(--motion-ease-exit), opacity var(--motion-fast) var(--motion-ease-exit), content-visibility var(--motion-fast) allow-discrete; }
+details[open]::details-content { block-size: auto; opacity: 1; transition-duration: var(--motion-base); transition-timing-function: var(--motion-ease); }
 
 /* ------------------------------------------------------------------ */
 /* The bridge card: From, a flip, To, the route, one button            */
@@ -327,8 +351,8 @@ h1 { font-size: 28px; font-weight: 500; letter-spacing: -0.01em; line-height: 1.
 .route > summary::-webkit-details-marker { display: none; }
 .route > summary:hover { color: var(--text); }
 .route > summary svg { width: 15px; height: 15px; flex: 0 0 auto; }
-.route > summary .chev { margin-left: auto; transition: transform .15s ease; }
-.route[open] > summary .chev { transform: rotate(180deg); }
+.route > summary .chev { margin-left: auto; transition: transform var(--motion-fast) var(--motion-ease-exit); }
+.route[open] > summary .chev { transform: rotate(180deg); transition-duration: var(--motion-base); transition-timing-function: var(--motion-ease); }
 .route .kvs .kv { padding: 8px 8px; font-size: 13.5px; }
 .route .kvs .kv::before, .route .kvs .kv + .kv::before { left: 8px; right: 8px; }
 .route .pubnote { margin: 6px 8px 12px; color: var(--text-2); font-size: 13px; line-height: 1.5; }
@@ -635,4 +659,8 @@ form.group .l1 { display: block; color: var(--text); font-size: 14px; font-weigh
 
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; transition: none !important; }
+  /* A section opens and closes at once, its content fading in; a wait's ring stands still. */
+  details::details-content { transition: none; }
+  details[open]::details-content { transition: opacity var(--motion-fast) var(--motion-ease); }
+  .spin { animation: none; }
 }

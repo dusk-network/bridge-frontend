@@ -11,6 +11,7 @@ import { entryId, readActivity, recordActivity, saveActivity, updateActivity, us
 import { bridgeRoutes, getBridgeRoute } from "./bridge-routes.js";
 import { cardRoute, choosePair, entryRoutes, flipRoute, followsWallets, fromChoices, handedOverRecipient, primaryButton, routeBetween, toChoices } from "./bridge-card.js";
 import { claimReminder } from "./calendar.js";
+import { showCopied } from "./copied.js";
 import { config } from "./config.js";
 import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
 import { followAfterDiscovery, mergeTransfer, mergeTransfers, partyKey } from "./discovery.js";
@@ -52,6 +53,7 @@ import {
   cardPage,
   cardRegions,
   contractsSheet,
+  copyFaces,
   footer,
   header,
   lookupPage,
@@ -509,7 +511,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     if (route.paused) notice = { html: `${html(notRunning(cfg))}.`, icon: "info" };
     else if (route.signer === "dusk" && phoneOnly)
       notice = {
-        actions: `<div class="btn-row"><button type="button" class="btn sec sm" data-copy="${html(globalThis.location?.href ?? "")}" aria-label="Copy this page's link">Copy link</button>${globalThis.navigator?.share ? '<button type="button" class="btn sec sm" data-action="share">Share link</button>' : ""}</div>`,
+        actions: `<div class="btn-row"><button type="button" class="btn sec sm" data-copy="${html(globalThis.location?.href ?? "")}" aria-label="Copy this page's link">${copyFaces("Copy link", "Copied")}</button>${globalThis.navigator?.share ? '<button type="button" class="btn sec sm" data-action="share">Share link</button>' : ""}</div>`,
         html: "This needs Dusk Wallet on a computer.",
         icon: "laptop",
       };
@@ -769,6 +771,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       groups,
       lede: who.length ? `${who.join(" and ")}.` : "",
       more: more && !discovery.running,
+      syncing: discovery.running,
       syncText,
       // Without a connected Dusk account: follow one by its account or .dusk name.
       watch: duskAccount() ? null : { ...state.watch, following: watching ? watching.name || short(watching.account) : "" },
@@ -1223,6 +1226,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
           // The allowance changed: read it again, with the migration's gas.
           await loadReads();
           renderSheet();
+          reviews.stepShown();
           return;
         }
         const hash = await submitMigration(network, amount, review.destination, { account: review.signer?.account });
@@ -1417,15 +1421,15 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     announce("The calendar file is downloading.");
   }
 
+  // Copy says Copied on its own button (copied.js); a copy refused says so to screen readers.
   async function copy(value, button) {
     try {
       await globalThis.navigator.clipboard.writeText(value);
-      announce("Copied.");
-      button?.classList.add("copied");
-      setTimeout(() => button?.classList.remove("copied"), 1_200);
     } catch {
       announce("Copying isn't allowed here. Select the text instead.");
+      return;
     }
+    showCopied(button, { announce });
   }
 
   // -------------------------------------------------------------------------
@@ -1520,7 +1524,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const actions = {
       calendar: downloadCalendar,
       "close-sheet": closeSheet,
-      confirm: confirmReview,
+      // Not in the moment the review or its next step comes up (review-session.js).
+      confirm: () => (reviews.confirmable ? confirmReview() : undefined),
       "choose-dusk": () => chooseDusk(target.dataset.wallet),
       "connect-dusk": () => connectDusk(target),
       "connect-evm": connectEvm,
