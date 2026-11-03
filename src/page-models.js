@@ -13,6 +13,7 @@ import { transferHref } from "./permalink.js";
 import { buildQuote, routeDuskFees, stepFeeText, withdrawalStepMax } from "./quote.js";
 import { routeTime, routeTimeText } from "./route-times.js";
 import { explorerTxUrl, html, short, transferSubline, transferView } from "./transfer-view.js";
+import { copyButton } from "./views.js";
 
 export const DUSK_WALLET_URL = "https://docs.dusk.network/use/wallets/#dusk-wallet";
 
@@ -147,11 +148,9 @@ function addressHtml(cfg, network, address, label) {
   // An EVM address with its checksum's capitals, as every app writes it.
   const value = /^0x[0-9a-f]{40}$/iu.test(address) ? formatEvmAddress(address) : address;
   const explorer = explorerAddressUrl(cfg, network, value);
-  return `<span class="fullval"><code class="mono">${html(value)}</code><span class="full-actions"><button type="button" class="icon-btn" data-copy="${html(value)}" aria-label="Copy ${html(label)}">${copyIcon}</button>${explorer ? `<a class="icon-btn" href="${html(explorer)}" target="_blank" rel="noreferrer" aria-label="${html(label)} in the explorer (opens in a new tab)">${extIcon}</a>` : ""}</span></span>`;
+  return `<span class="fullval"><code class="mono">${html(value)}</code><span class="full-actions">${copyButton(value, label)}${explorer ? `<a class="icon-btn" href="${html(explorer)}" target="_blank" rel="noreferrer" aria-label="${html(label)} in the explorer (opens in a new tab)">${extIcon}</a>` : ""}</span></span>`;
 }
 
-const copyIcon =
-  '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M9 15H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v3"/></svg>';
 const extIcon =
   '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 6h10v10"/><path d="M18 6 6 18"/></svg>';
 
@@ -309,7 +308,7 @@ export function receiptModel(entry, { cfg, gasPrice = 1n, locale, now = Date.now
 
 function txHtml(cfg, network, hash, label) {
   const href = explorerTxUrl(cfg, network, hash);
-  return `<span class="fullval"><code class="mono">${html(hash)}</code><span class="full-actions"><button type="button" class="icon-btn" data-copy="${html(hash)}" aria-label="Copy the ${html(label)} hash">${copyIcon}</button>${href ? `<a class="icon-btn" href="${html(href)}" target="_blank" rel="noreferrer" aria-label="The ${html(label)} in the explorer (opens in a new tab)">${extIcon}</a>` : ""}</span></span>`;
+  return `<span class="fullval"><code class="mono">${html(hash)}</code><span class="full-actions">${copyButton(hash, `the ${label} hash`)}${href ? `<a class="icon-btn" href="${html(href)}" target="_blank" rel="noreferrer" aria-label="The ${html(label)} in the explorer (opens in a new tab)">${extIcon}</a>` : ""}</span></span>`;
 }
 
 // ---------------------------------------------------------------------------

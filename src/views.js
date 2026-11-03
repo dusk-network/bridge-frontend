@@ -8,8 +8,15 @@
 import { GLYPH, chainMark, icon, pairMark } from "./icons.js";
 import { WALLET_CANCELLED, html, short } from "./transfer-view.js";
 
+/** The faces of a Copy button: its icon or words, then what it shows once it copied (copied.js). */
+export const copyFaces = (face, copied) =>
+  `<span class="copy-swap" aria-hidden="true"><span class="copy-swap__from">${face}</span><span class="copy-swap__to">${copied}</span></span>`;
+
 export const copyButton = (value, label) =>
-  `<button type="button" class="icon-btn" data-copy="${html(value)}" aria-label="Copy ${html(label)}" title="Copy">${icon("copy")}</button>`;
+  `<button type="button" class="icon-btn" data-copy="${html(value)}" aria-label="Copy ${html(label)}" title="Copy">${copyFaces(icon("copy"), icon("check"))}</button>`;
+
+/** A wait's words, with a small ring that turns beside them from the start (still with reduced motion). */
+export const waiting = (text) => `<span class="waiting"><span class="spin" aria-hidden="true"></span><span>${html(text)}</span></span>`;
 
 export const explorerLink = (href, label) =>
   href
@@ -286,7 +293,7 @@ export function reviewSheet(vm) {
       ${step.what ? `<p>${step.what}</p>` : ""}
       ${step.custody ? `<p class="small t2">${html(step.custody)}</p>` : ""}
       <div class="wlh">${html(step.walletName)} will show</div>
-      ${step.lines ? walletLines(step.lines, vm.cfgLinks) : `<p class="small t2">${html(step.linesNote ?? "Preparing…")}</p>`}
+      ${step.lines ? walletLines(step.lines, vm.cfgLinks) : `<p class="small t2">${waiting(step.linesNote ?? "Preparing…")}</p>`}
     </section>`,
     )
     .join("");
@@ -332,7 +339,7 @@ const stateWord = (state) =>
 
 export function receiptPage(vm) {
   if (vm.loading)
-    return `<main class="col" id="main" tabindex="-1"><div class="topbar"><a class="bk" href="#/transfers">${icon("back")}My transfers</a><h1 class="ti">Transfer</h1></div><p class="t2" role="status">${html(vm.loading)}</p></main>`;
+    return `<main class="col" id="main" tabindex="-1"><div class="topbar"><a class="bk" href="#/transfers">${icon("back")}My transfers</a><h1 class="ti">Transfer</h1></div><p class="t2" role="status">${waiting(vm.loading)}</p></main>`;
   if (vm.missing)
     return `<main class="col" id="main" tabindex="-1"><div class="topbar"><a class="bk" href="#/transfers">${icon("back")}My transfers</a><h1 class="ti">Transfer</h1></div><div class="group pad"><p>${html(vm.missing)}</p><p class="small t2"><code class="mono wrap">${html(vm.hash)}</code></p></div><p class="links-row"><a class="lnk" href="#/lookup">Look up another transfer ${icon("search")}</a></p></main>`;
   const view = vm.view;
@@ -433,7 +440,7 @@ export function activityPanel(vm) {
     : `${group("Needs you", vm.groups.needs)}${group("In progress", vm.groups.progress)}${group("Sent to someone else", vm.groups.other ?? [])}${group("Completed", vm.groups.done)}${group("Didn't go through", vm.groups.failed)}`;
   return `<div class="act">
     <div class="act-h"><p class="lede">${vm.lede}</p><a class="btn sec sm" href="#/lookup">${icon("search")}Look up</a></div>
-    <p class="small t2 sync" role="status" aria-live="polite">${html(vm.syncText)}</p>
+    <p class="small t2 sync" role="status" aria-live="polite">${vm.syncing ? waiting(vm.syncText) : html(vm.syncText)}</p>
     ${vm.watch ? watchBlock(vm.watch) : ""}
     ${body}
     ${vm.more ? `<p class="links-row"><button type="button" class="btn sec sm" data-action="discover-more">Look further back</button></p>` : ""}
