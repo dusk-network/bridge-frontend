@@ -16,7 +16,7 @@
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "dev": "vite",
     "preview": "vite preview",
-    "test": "node --test"
+    "test": "node --import ./scripts/test-language.js --test"
   },
   "devDependencies": {
     "vite": "8.3.5"
