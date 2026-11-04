@@ -3,6 +3,7 @@
 // balances, prices and gas estimates come in, so it's the same before and
 // after the wallet opens.
 
+import { normalizeAmount, parseDusk, unclearAmount } from "@dusk-network/app-core/amounts";
 import { beforeProofText, claimAfterProving, claimText } from "@dusk-network/networks/duskevm";
 import { DEPOSIT_GAS, TRANSFER_GAS, WITHDRAWAL_GAS, withdrawalGasLimit as withdrawalStepGas } from "@dusk-network/networks/gas";
 
@@ -11,42 +12,38 @@ import { gasCoin, networkName, routeUnits, tokenName } from "./names.js";
 import { routeTime, routeTimeText } from "./route-times.js";
 
 const WEI_PER_LUX = 1_000_000_000n;
-const DECIMALS = 9;
 
 /**
- * The typed amount without its commas, or why its commas can't be read.
- * Commas group thousands ("1,234.5"); a lone comma with other than three
- * digits after it is a decimal comma ("0,5"). One that could be either
- * ("1,234") is asked about, so what is sent never differs from what was meant.
+ * The typed amount in plain form, or why it can't be read. One that could
+ * mean either of two amounts ("1,234") is asked about, so what is sent never
+ * differs from what was meant.
  */
-function withoutCommas(value) {
-  // Where a comma writes decimals, a point groups thousands, and the same care goes the other way.
-  if (decimalSeparator() === ",") {
-    const point = /^([1-9]\d{0,2})\.(\d{3})$/u.exec(value);
-    if (point) return { error: `Is that ${point[1]}${point[2]} or ${point[1]},${point[2]}? Write it without the point, or with a comma for decimals.` };
-    if (/^[1-9]\d{0,2}(\.\d{3})+,\d*$/u.test(value)) return { value: value.replace(/\./gu, "").replace(",", ".") };
-    if (/^[1-9]\d{0,2}(\.\d{3}){2,}$/u.test(value)) return { value: value.replace(/\./gu, "") };
-    if (/^\d*,\d*$/u.test(value)) return { value: value.replace(",", ".") };
+function plainTyped(value) {
+  const decimal = decimalSeparator();
+  const either = unclearAmount(value, decimal);
+  if (either) {
+    const instead = decimal === "," ? "point, or with a comma for decimals" : "comma";
+    return { error: `Is that ${either.grouped} or ${either.decimal}? Write it without the ${instead}.` };
   }
-  if (!value.includes(",")) return { value };
-  const lone = /^(\d{1,3}),(\d{3})$/u.exec(value);
-  if (lone) return { error: `Is that ${lone[1]}${lone[2]} or ${lone[1]}.${lone[2]}? Write it without the comma.` };
-  if (/^\d{1,3}(,\d{3})+(\.\d*)?$/u.test(value)) return { value: value.replace(/,/gu, "") };
-  if (/^\d+,\d+$/u.test(value)) return { value: value.replace(",", ".") };
-  return { error: decimalSeparator() === "," ? "Use a comma for decimals, like 0,5." : "Use a point for decimals, like 0.5." };
+  const plain = normalizeAmount(value, decimal);
+  if (plain.includes(",")) {
+    return { error: decimal === "," ? "Use a comma for decimals, like 0,5." : "Use a point for decimals, like 0.5." };
+  }
+  return { value: plain };
 }
 
 /** The typed amount in Lux, or why it can't be one. Empty is no error. */
 export function parseAmount(input) {
-  const read = withoutCommas(String(input ?? "").trim());
+  const read = plainTyped(String(input ?? "").trim());
   if (read.error) return { error: read.error, lux: null };
   const { value } = read;
   if (!value) return { error: "", lux: null };
-  const match = /^(\d+)(?:\.(\d*))?$/u.exec(value);
-  if (!match) return { error: `Enter an amount like 25 or 0${decimalSeparator()}5.`, lux: null };
-  const fraction = match[2] ?? "";
-  if (fraction.length > DECIMALS) return { error: "Use at most 9 decimals.", lux: null };
-  const lux = BigInt(match[1]) * 10n ** 9n + BigInt(fraction.padEnd(DECIMALS, "0") || "0");
+  const lux = parseDusk(value);
+  if (lux === null) {
+    return /^\d*\.\d+$/u.test(value)
+      ? { error: "Use at most 9 decimals.", lux: null }
+      : { error: `Enter an amount like 25 or 0${decimalSeparator()}5.`, lux: null };
+  }
   if (lux <= 0n) return { error: "Enter an amount above 0.", lux: null };
   return { error: "", lux };
 }
