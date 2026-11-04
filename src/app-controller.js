@@ -21,7 +21,7 @@ import { createDuskConnection, ensureDuskConnected, sendDuskContractCall, sendDu
 import { submitDuskEvmWithdrawal } from "./duskevm-withdrawal.js";
 import { connectEvmWallet, getEvmState, initializeEvmWallet, subscribeEvmWallet } from "./evm-wallet.js";
 import { createFormReads } from "./form-reads.js";
-import { amountForInput, formatDusk, formatLux, formatUnitsGrouped, plainAmount } from "./format.js";
+import { amountForInput, formatDusk, formatLux, formatUnitsGrouped, formatDuskPlain } from "./format.js";
 import { approveMigration, submitMigration } from "./legacy-migration.js";
 import { bridgeTasks, linkedRoute, networkName, networkNames, notRunning, routeUnits, tokenName } from "./names.js";
 import {
@@ -1283,7 +1283,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       if (route.mode === "migration") {
         const network = cfg.evmNetworks[route.from.id];
         const step = review.steps[review.current];
-        const amount = plainAmount(review.amountLux);
+        const amount = formatDuskPlain(review.amountLux);
         if (step.title.startsWith("Approve")) {
           await approveMigration(network, amount, { account: review.signer?.account });
           review.current += 1;
@@ -1308,7 +1308,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         });
       }
       if (route.mode === "duskevm-withdrawal") {
-        const result = await submitDuskEvmWithdrawal({ account: review.signer?.account, amount: plainAmount(review.amountLux), duskAccount: review.destination });
+        const result = await submitDuskEvmWithdrawal({ account: review.signer?.account, amount: formatDuskPlain(review.amountLux), duskAccount: review.destination });
         return sent({
           amountLux: review.amountLux.toString(),
           destination: result.duskAccount,

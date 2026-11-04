@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
-import { amountForInput, formatLux, plainAmount } from "./format.js";
+import { amountForInput, formatDuskPlain, formatLux } from "./format.js";
 import { buildQuote, parseAmount, routeDuskFees } from "./quote.js";
 
 globalThis.__DUSK_BRIDGE_CONFIG__ = {
@@ -27,7 +27,10 @@ test("amounts take at most 9 decimals and nothing else", () => {
   assert.deepEqual(parseAmount("0,5"), { error: "", lux: DUSK / 2n });
   assert.deepEqual(parseAmount("12,75"), { error: "", lux: 12_750_000_000n });
   assert.equal(parseAmount("1,234").error, "Is that 1234 or 1.234? Write it without the comma.");
-  for (const odd of ["1,2,3", "1,23.4", ",5", "1,234,5"]) assert.equal(parseAmount(odd).error, "Use a point for decimals, like 0.5.", odd);
+  assert.deepEqual(parseAmount(",5"), { error: "", lux: DUSK / 2n });
+  assert.deepEqual(parseAmount("0,123"), { error: "", lux: 123_000_000n });
+  assert.deepEqual(parseAmount("1.000,5"), { error: "", lux: 1_000_500_000_000n });
+  for (const odd of ["1,2,3", "1,23.4", "1,234,5"]) assert.equal(parseAmount(odd).error, "Use a point for decimals, like 0.5.", odd);
   assert.deepEqual(parseAmount("0.000000001"), { error: "", lux: 1n });
   assert.equal(parseAmount("0.0000000001").error, "Use at most 9 decimals.");
   assert.equal(parseAmount("1e3").error, "Enter an amount like 25 or 0.5.");
@@ -157,7 +160,7 @@ test("amounts are read as the browser's language writes them: never as another a
     assert.equal(parseAmount(amountForInput(1_234_000_000n)).lux, 1_234_000_000n);
     assert.equal(formatLux(1_484_923_500_000n), "1.484,9235");
     // What a contract call takes stays plain.
-    assert.equal(plainAmount(1_484_923_500_000n), "1484.9235");
+    assert.equal(formatDuskPlain(1_484_923_500_000n), "1484.9235");
   } finally {
     restore();
   }
