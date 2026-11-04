@@ -117,6 +117,7 @@ export function flipRoute(routes, route) {
 export function primaryButton({
   amountLux = null,
   amountError = "",
+  connectsRecipient = false,
   destination = "",
   destinationError = "",
   duskInstalled = false,
@@ -140,6 +141,9 @@ export function primaryButton({
   if (amountError) return { action: null, enabled: false, label: "Check the amount" };
   if (looking) return { action: null, enabled: false, label: `Looking up ${looking}…` };
   if (destinationError) return { action: null, enabled: false, label: "Fix the recipient" };
-  if (!destination) return { action: null, enabled: false, label: "Add a recipient" };
+  if (!destination)
+    return connectsRecipient
+      ? { action: "connect-evm", enabled: true, label: "Connect EVM wallet" }
+      : { action: null, enabled: false, label: "Add a recipient" };
   return { action: "review", enabled: true, label: "Review bridge" };
 }

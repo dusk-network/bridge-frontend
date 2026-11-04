@@ -47,7 +47,7 @@ import { checkDuskRecipient, checkEvmRecipient, settledEvmRecipient } from "./re
 import { readWatched, saveWatched, watchTarget } from "./watched-account.js";
 import { SIGNER_MOVED, createReviewSession, notSent, sameSigner, sentActionPatch } from "./review-session.js";
 import { createScheduler, takenByAnother } from "./tracking.js";
-import { CONNECT_CANCELLED, actionErrorOf, friendlyWalletError, walletCancelled, html, privacyLine, proverMismatch, short, switchToProver, transferView } from "./transfer-view.js";
+import { CONNECT_CANCELLED, CONTRACT_RECIPIENT, actionErrorOf, friendlyWalletError, walletCancelled, html, privacyLine, proverMismatch, short, switchToProver, transferView } from "./transfer-view.js";
 import {
   activityPanel,
   cardPage,
@@ -408,6 +408,28 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     return typedRecipient(route)?.error ?? "";
   }
 
+  let codeTimer = null;
+  /** An EVM recipient typed is looked at, a moment after typing stops: a contract is said. */
+  function lookUpRecipientCode() {
+    clearTimeout(codeTimer);
+    const form = state.form;
+    const route = formRoute();
+    const address = route?.to.kind === "evm" ? typedRecipient(route)?.address : null;
+    if (!address || !form || form.codes?.[address] !== undefined || !services.evmReads?.hasCode) return;
+    codeTimer = setTimeout(() => {
+      services.evmReads
+        .hasCode(route.to.id, address)
+        .then((contract) => {
+          form.codes = { ...form.codes, [address]: contract };
+          if (state.form === form) refreshForm();
+        })
+        .catch(() => {});
+    }, 300);
+  }
+
+  /** Whether where a route pays is known to be a contract. */
+  const paysContract = (route, destination) => route.to.kind === "evm" && state.form?.codes?.[destination] === true;
+
   let nameTimer = null;
   /** A .dusk name typed as the Dusk recipient is looked up, a moment after typing stops. */
   function lookUpRecipientName() {
@@ -527,6 +549,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       net: netOf(route.to.id),
       placeholder: route.to.kind === "dusk" ? "A Dusk account or .dusk name" : "0x…",
       resolved,
+      contract: paysContract(route, destination),
     };
     let notice = null;
     if (route.paused) notice = { html: `${html(notRunning(cfg))}.`, icon: "info" };
@@ -541,6 +564,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const button = primaryButton({
       amountError: quote.error,
       amountLux: quote.amountLux,
+      connectsRecipient: route.to.kind === "evm" && !evmAccount() && !state.form.recipientInput,
       destination,
       destinationError: toVm.error,
       duskInstalled: duskState().installed,
@@ -858,6 +882,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   // -------------------------------------------------------------------------
 
   function openSheet(kind, opener) {
+    // A step of its own in the history: a phone's Back closes the review, not the page.
+    if (kind === "review" && state.sheet !== "review") globalThis.history?.pushState?.({ reviewSheet: true }, "");
     state.sheet = kind;
     sheetOpener = opener ?? globalThis.document?.activeElement ?? null;
     renderSheet();
@@ -871,6 +897,12 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       first.setAttribute("tabindex", "-1");
       first.focus();
     }
+  }
+
+  /** Closed by hand: the review's step in the history goes too. */
+  function closeByPerson() {
+    closeSheet();
+    if (globalThis.history?.state?.reviewSheet) globalThis.history.back();
   }
 
   function closeSheet() {
@@ -974,9 +1006,11 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       error: "",
       feeRows: quote.rows.filter((row) => !["send", "receive"].includes(row.key)),
       kind: "send",
-      // DUSK paid to another Dusk account than the connected one: said before the steps.
-      notYours:
-        route.to.kind === "dusk" && duskAccount() && destination !== duskAccount()
+      // A contract, or DUSK paid to another Dusk account than the connected one: said before the steps.
+      paysConnected: route.to.kind === "evm" && evmAccount() && destination === checkEvmRecipient(evmAccount()).address ? destination : "",
+      notYours: paysContract(route, destination)
+        ? CONTRACT_RECIPIENT
+        : route.to.kind === "dusk" && duskAccount() && destination !== duskAccount()
           ? `This pays ${typedRecipient(route)?.name ?? short(destination)}${typedRecipient(route)?.name ? ` (${short(destination)})` : ""}, not ${duskName() || "your connected Dusk account"}.`
           : "",
       privacy: privacyLine(route, cfg, {
@@ -1241,6 +1275,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         if (step.title.startsWith("Approve")) {
           await approveMigration(network, amount, { account: review.signer?.account });
           review.current += 1;
+          review.sub = "The first step went through. One step left.";
           review.after = "";
           review.busy = false;
           announce("Approval confirmed. Step 2 is ready.");
@@ -1491,6 +1526,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       refreshForm();
       loadGasSoon();
       lookUpRecipientName();
+      lookUpRecipientCode();
     }
   });
 
@@ -1505,6 +1541,16 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
 
   // Escape closes the network list.
   root.addEventListener("keydown", (event) => {
+    // The network list is a list: arrows move through what can be picked.
+    const list = event.target.closest?.(".netmenu");
+    if (list && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      const options = [...list.querySelectorAll('[role="option"]:not([disabled]):not([aria-disabled="true"])')];
+      const at = options.indexOf(event.target);
+      const next = { ArrowDown: at + 1, ArrowUp: at - 1, End: options.length - 1, Home: 0 }[event.key];
+      event.preventDefault();
+      options[Math.max(0, Math.min(options.length - 1, next))]?.focus();
+      return;
+    }
     if (event.key === "Escape" && state.form?.menu) {
       const side = state.form.menu;
       state.form.menu = null;
@@ -1548,12 +1594,12 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const action = target?.dataset.action;
     if (!action) {
       // A click on the dialog's backdrop closes it.
-      if (event.target === dialog && !reviews.current?.busy) closeSheet();
+      if (event.target === dialog && !reviews.current?.busy) closeByPerson();
       return;
     }
     const actions = {
       calendar: downloadCalendar,
-      "close-sheet": closeSheet,
+      "close-sheet": closeByPerson,
       // Not in the moment the review or its next step comes up (review-session.js).
       confirm: () => (reviews.confirmable ? confirmReview() : undefined),
       "choose-dusk": () => chooseDusk(target.dataset.wallet),
@@ -1595,6 +1641,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         renderMain();
         root.querySelector("#recipient")?.focus();
         lookUpRecipientName();
+        lookUpRecipientCode();
+      lookUpRecipientCode();
         loadGasSoon();
       },
       "recipient-reset": () => {
@@ -1662,6 +1710,10 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   });
 
   globalThis.addEventListener?.("hashchange", navigate);
+  // A phone's Back from a review: its step in the history is gone, so it closes.
+  globalThis.addEventListener?.("popstate", () => {
+    if (state.sheet === "review" && !globalThis.history?.state?.reviewSheet) closeSheet();
+  });
 
   // On a phone, the card's button stays above the keyboard: the height the
   // keyboard covers, from the visual viewport, as the web wallet keeps it.
@@ -1706,6 +1758,13 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         state.evmState = next;
         if (accountChanged) {
           if (next.account) forgetConnectRefusal();
+          // What's reviewed pays the wallet's account as it was: it's stale once that's another.
+          const reviewing = reviews.current;
+          if (reviewing?.paysConnected && String(next.account ?? "").toLowerCase() !== reviewing.paysConnected.toLowerCase()) {
+            reviewing.stale = true;
+            reviewing.error = SIGNER_MOVED.evm;
+            if (state.sheet === "review") renderSheet();
+          }
           if (signerMoved(reviews.current) && state.sheet === "review") renderSheet();
           formReads.reset(["migration", "l2"]);
           discoveryRuns.expire();

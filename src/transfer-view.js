@@ -65,6 +65,9 @@ const ACTION_FAILURE = Object.freeze({
 /** What every page says when you reject a request in your wallet: never in red, it's your choice. */
 export const WALLET_CANCELLED = "You cancelled in your wallet, so nothing was sent.";
 
+/** Under a recipient that's a contract: it may be meant, as a smart wallet, so it's said, not refused. */
+export const CONTRACT_RECIPIENT = "This address is a contract, not an ordinary wallet. Check it can use what's sent, or the tokens may be stuck there.";
+
 /** What it says when you reject connecting, where there's nothing to send. */
 export const CONNECT_CANCELLED = "You cancelled in your wallet.";
 

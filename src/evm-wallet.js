@@ -189,6 +189,9 @@ async function initializeReown() {
     // loads. The adapter reads the option once it has set up its own
     // connectors, after this line.
     appKit.updateOptions({ enableBaseAccount: false });
+    // The page shows no name or avatar from it, so the connected address stays
+    // off WalletConnect's servers.
+    appKit.fetchIdentity = async () => ({ avatar: null, name: null });
     // AppKit's type for the connector the account came through, read again
     // on each connect and provider change: `WALLET_CONNECT` for a session.
     const walletConnect = () => Boolean(provider) && appKit.getWalletProviderType?.() === "WALLET_CONNECT";

@@ -90,6 +90,12 @@ test("the button says what's missing, then Review bridge", () => {
   assert.equal(label({ destination: "", looking: "alice.dusk" }), "Looking up alice.dusk…");
   assert.equal(label({ destination: "", destinationError: "That isn't an EVM address" }), "Fix the recipient");
   assert.equal(label({ destination: "" }), "Add a recipient");
+  // No wallet to pay and none typed: the way to one, where a narrow page has no header button.
+  assert.deepEqual(primaryButton({ ...ready, connectsRecipient: true, destination: "" }), {
+    action: "connect-evm",
+    enabled: true,
+    label: "Connect EVM wallet",
+  });
   assert.deepEqual(primaryButton(ready), { action: "review", enabled: true, label: "Review bridge" });
   assert.equal(primaryButton({ ...ready, amountLux: null }).enabled, false);
 });
