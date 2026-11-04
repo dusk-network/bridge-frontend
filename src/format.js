@@ -7,9 +7,44 @@ import { formatDusk as formatShared, formatTime } from "@dusk-network/networks/f
 
 const LUX_DECIMALS = 9;
 
-const groupDigits = (whole) => whole.replace(/\B(?=(\d{3})+(?!\d))/gu, ",");
+/** The browser's language, in digits a person can type back, and its number format: made once per language. */
+const languages = new Map();
+function numbers() {
+  const language = globalThis.navigator?.language || "en-US";
+  let known = languages.get(language);
+  if (!known) {
+    let locale = "en-US";
+    try {
+      locale = new Intl.Locale(language, { numberingSystem: "latn" }).toString();
+    } catch {
+      // A language Intl can't read: English.
+    }
+    const format = new Intl.NumberFormat(locale);
+    known = { decimal: format.formatToParts(0.5).find((part) => part.type === "decimal")?.value ?? ".", format, locale };
+    languages.set(language, known);
+  }
+  return known;
+}
 
-/** "1,483.92": base units in decimal, trailing zeros dropped. */
+const browserLocale = () => numbers().locale;
+
+/** How that language writes decimals: what an amount field reads too. */
+export const decimalSeparator = () => numbers().decimal;
+
+const groupDigits = (whole) => numbers().format.format(BigInt(whole));
+
+/** Lux as a plain decimal, as a contract call takes it: never as people read it. */
+export function plainAmount(lux) {
+  const units = BigInt(lux);
+  const scale = 10n ** BigInt(LUX_DECIMALS);
+  const fraction = (units % scale).toString().padStart(LUX_DECIMALS, "0").replace(/0+$/u, "");
+  return `${units / scale}${fraction ? `.${fraction}` : ""}`;
+}
+
+/** Lux for an amount field, as the field reads it back. */
+export const amountForInput = (lux) => plainAmount(lux).replace(".", decimalSeparator());
+
+/** "1,483.92", or "1.483,92" on a Dutch browser: base units in decimal, trailing zeros dropped. */
 export function formatUnitsGrouped(value, decimals, maxFraction = decimals) {
   const units = BigInt(value);
   const negative = units < 0n;
@@ -21,7 +56,7 @@ export function formatUnitsGrouped(value, decimals, maxFraction = decimals) {
     .padStart(decimals, "0")
     .slice(0, maxFraction)
     .replace(/0+$/u, "");
-  return `${negative ? "−" : ""}${whole}${fraction ? `.${fraction}` : ""}`;
+  return `${negative ? "−" : ""}${whole}${fraction ? `${decimalSeparator()}${fraction}` : ""}`;
 }
 
 export const formatLux = (lux, maxFraction = LUX_DECIMALS) =>
@@ -49,7 +84,7 @@ export function formatFee(value, decimals = LUX_DECIMALS, { round = "nearest" } 
 }
 
 /** A Dusk fee in the apps' short form: 4 decimals, 2 significant digits under 0.01, the page's separators. */
-const shortFee = (lux, round) => formatShared(lux, { locale: "en-US", round }).text;
+const shortFee = (lux, round) => formatShared(lux, { locale: browserLocale(), round }).text;
 
 /**
  * The most a Dusk fee can be, as Dusk Wallet writes it: rounded up, so it
@@ -62,7 +97,7 @@ export const formatMaxFee = (lux) => (BigInt(lux) > 0n ? shortFee(lux, "up") : "
 export const formatTypicalFee = (lux) => shortFee(lux, "nearest");
 
 /** A Dusk fee paid, exact, as a record keeps it: "0.001986599". */
-export const formatExactFee = (lux) => formatShared(lux, { locale: "en-US", mode: "exact" }).text;
+export const formatExactFee = (lux) => formatShared(lux, { locale: browserLocale(), mode: "exact" }).text;
 
 /**
  * An estimated fee in a coin with `decimals`: "about 0.00021 ETH", or "less
