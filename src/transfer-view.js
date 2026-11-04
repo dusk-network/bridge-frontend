@@ -65,6 +65,12 @@ const ACTION_FAILURE = Object.freeze({
 /** What every page says when you reject a request in your wallet: never in red, it's your choice. */
 export const WALLET_CANCELLED = "You cancelled in your wallet, so nothing was sent.";
 
+/** What it says when you reject connecting, where there's nothing to send. */
+export const CONNECT_CANCELLED = "You cancelled in your wallet.";
+
+/** What it says when you reject a later step: the one before it did go out. */
+export const LATER_STEP_CANCELLED = "You cancelled in your wallet. The step before went through, so it won't ask for that again.";
+
 /** Whether the wallet's user rejected the request (4001), however the wallet wrapped it. */
 export const walletCancelled = (error) =>
   [error?.code, error?.cause?.code, error?.cause?.cause?.code].includes(4001) || error?.name === "UserRejectedRequestError";
@@ -297,9 +303,9 @@ function sourceSteps(entry, route, cfg, { locale, now, timeZone, year }) {
     }),
   );
   const arrived = entry.status === "completed";
-  const verb = route.mode === "duskevm-deposit" ? "Arrived on" : "Paid out on";
+  const verb = "Arrived on";
   steps.push(
-    step("arrived", arrived ? `${verb} ${to}` : route.mode === "duskevm-deposit" ? `Arriving on ${to}` : `Paying out on ${to}`, arrived ? "done" : failed ? "todo" : confirmed ? "now" : "todo", {
+    step("arrived", arrived ? `${verb} ${to}` : `Arriving on ${to}`, arrived ? "done" : failed ? "todo" : confirmed ? "now" : "todo", {
       at: entry.destinationAt ?? null,
       atText: time(entry.destinationAt),
       hash: entry.destinationHash ?? null,
@@ -415,7 +421,8 @@ export function transferView(entry, { account = "", cfg, locale, name = "", now 
         }
       : null,
     amount,
-    amountText: amount === null ? "" : formatDusk(amount),
+    // What arrived, once it has, next to the word that says so.
+    amountText: amount === null ? "" : formatDusk(status === "completed" && route?.mode === "service-transfer" && cfg?.service?.feeLux && amount > BigInt(cfg.service.feeLux) ? amount - BigInt(cfg.service.feeLux) : amount),
     countdown,
     from: { account: entry.sender ?? null, network: fromNetwork },
     late: Boolean(late),
@@ -491,7 +498,7 @@ export function transferSubline(view, entry, route, cfg, { account = "", locale,
   }
   if (view.status === "completed") {
     const at = entry.destinationAt ?? entry.sourceAt;
-    return at ? `${route.mode === "duskevm-deposit" ? "Arrived" : "Paid out"} ${time(at)}` : "Completed";
+    return at ? `Arrived ${time(at)}` : "Completed";
   }
   const sent = entry.sourceAt ? `Sent ${time(entry.sourceAt)}` : "Sent";
   const usual = view.late ? "taking longer than usual" : view.time ? `takes ${aboutTime(view.time.seconds)}` : "";

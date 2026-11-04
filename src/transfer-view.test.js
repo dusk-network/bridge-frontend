@@ -367,3 +367,14 @@ test("a proof or claim you rejected in your wallet says so in grey, as a deposit
   assert.match(sheet(WALLET_CANCELLED), /<div class="sheet-foot"><p class="message" role="status">You cancelled in your wallet, so nothing was sent\.<\/p>/u);
   assert.match(sheet("The Dusk wallet disconnected. Reconnect it and try again."), /<p class="message error" role="alert">The Dusk wallet disconnected/u);
 });
+
+test("a finished transfer out lists what arrived, as the receipt says it, not what was sent", () => {
+  const sent = { amountLux: "3000000000", destination: "0x5a3D8e1B7c2f4A6b9E0d1C3f5a7B9c2D4e6F8a01", hash: "ab".repeat(32), routeId: service.id, status: "pending" };
+  const withFee = { ...cfg, service: { ...cfg.service, feeLux: 1_000_000_000n } };
+  const view = (entry) => transferView(entry, { cfg: withFee, route: service });
+
+  assert.match(view(sent).amountText, /^3\b/u);
+  assert.match(view({ ...sent, destinationAt: 1, status: "completed" }).amountText, /^2\b/u);
+  // What it pays nothing for stays what was sent.
+  assert.match(view({ ...sent, amountLux: "1000000000", destinationAt: 1, status: "completed" }).amountText, /^1\b/u);
+});

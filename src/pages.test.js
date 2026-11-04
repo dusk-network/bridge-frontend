@@ -821,6 +821,7 @@ test("a Dusk recipient handed over in the link reads as Paying, with a way to ch
   assert.equal(line(T.migration, {}), 'to <b class="mono">21n5nc…fMMLNz</b>');
   assert.equal(line(T.migration, { duskName: "alice.dusk", own: true }), "to your account <b>alice.dusk</b>");
   assert.equal(line(T.migration, { resolved: { address: ACCOUNT, name: "bob.dusk" } }), 'to <b>bob.dusk</b> (21n5nc…fMMLNz)');
+  assert.doesNotMatch(recipientLine(T.service ?? { to: { kind: "evm" } }, { destination: "0x5a3D8e1B7c2f4A6b9E0d1C3f5a7B9c2D4e6F8a01", own: true, walletName: "your EVM wallet" }), /your your/u);
   assert.equal(recipientLine(T.migration, {}), "Connect Dusk Wallet, or add a Dusk account");
   assert.equal(recipientLine(T["duskevm-deposit"], { destination: EVM, own: true, walletName: "MetaMask" }), 'to your MetaMask <b class="mono">0xd63b…8df4</b>');
   // The card: the line, then Change.

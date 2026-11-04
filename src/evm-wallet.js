@@ -22,6 +22,9 @@ let reownPicks = false;
 let chainId = null;
 let cleanup = () => {};
 let discoveryStarted = false;
+const RECONNECTING = new Set(["connecting", "reconnecting"]);
+const RECONNECT_WAIT_MS = 5_000;
+
 let appKit = null;
 let appKitPromise = null;
 
@@ -268,9 +271,23 @@ export async function initializeEvmWallet() {
   return refresh();
 }
 
+/**
+ * Waits out AppKit trying a stored connection again. When that fails, as with
+ * a locked wallet on a return visit, AppKit closes its dialog, so a dialog
+ * opened meanwhile vanishes and the press seems to do nothing.
+ */
+async function reconnectSettled(modal) {
+  await modal.ready?.();
+  const giveUpAt = Date.now() + RECONNECT_WAIT_MS;
+  while (RECONNECTING.has(modal.getAccount("eip155")?.status) && Date.now() < giveUpAt) {
+    await new Promise((settle) => setTimeout(settle, 100));
+  }
+}
+
 export async function connectEvmWallet() {
   const modal = await initializeReown();
   if (modal) {
+    await reconnectSettled(modal);
     await modal.open({
       view: modal.getAccount("eip155")?.isConnected ? "Account" : "Connect",
     });

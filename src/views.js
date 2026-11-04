@@ -6,7 +6,7 @@
 // checked, with a copy button and an explorer link, in Söhne Mono.
 
 import { GLYPH, chainMark, icon, pairMark } from "./icons.js";
-import { WALLET_CANCELLED, html, short } from "./transfer-view.js";
+import { CONNECT_CANCELLED, LATER_STEP_CANCELLED, WALLET_CANCELLED, html, short } from "./transfer-view.js";
 
 /** The faces of a Copy button: its icon or words, then what it shows once it copied (copied.js). */
 export const copyFaces = (face, copied) =>
@@ -44,7 +44,7 @@ const statusWord = (status, word) =>
  * your wallet. `live` announces it as it appears, as the review and the card do.
  */
 export const messageLine = (text, { live = true } = {}) =>
-  text === WALLET_CANCELLED
+  [CONNECT_CANCELLED, LATER_STEP_CANCELLED, WALLET_CANCELLED].includes(text)
     ? `<p class="message"${live ? ' role="status"' : ""}>${html(text)}</p>`
     : `<p class="message error"${live ? ' role="alert"' : ""}>${html(text)}</p>`;
 
