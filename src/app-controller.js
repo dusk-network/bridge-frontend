@@ -21,7 +21,7 @@ import { createDuskConnection, ensureDuskConnected, sendDuskContractCall, sendDu
 import { submitDuskEvmWithdrawal } from "./duskevm-withdrawal.js";
 import { connectEvmWallet, getEvmState, initializeEvmWallet, subscribeEvmWallet } from "./evm-wallet.js";
 import { createFormReads } from "./form-reads.js";
-import { formatDusk, formatLux, formatUnitsGrouped } from "./format.js";
+import { amountForInput, formatDusk, formatLux, formatUnitsGrouped, plainAmount } from "./format.js";
 import { approveMigration, submitMigration } from "./legacy-migration.js";
 import { bridgeTasks, linkedRoute, networkName, networkNames, notRunning, routeUnits, tokenName } from "./names.js";
 import {
@@ -1283,7 +1283,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       if (route.mode === "migration") {
         const network = cfg.evmNetworks[route.from.id];
         const step = review.steps[review.current];
-        const amount = formatLux(review.amountLux).replace(/,/gu, "");
+        const amount = plainAmount(review.amountLux);
         if (step.title.startsWith("Approve")) {
           await approveMigration(network, amount, { account: review.signer?.account });
           review.current += 1;
@@ -1308,7 +1308,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         });
       }
       if (route.mode === "duskevm-withdrawal") {
-        const result = await submitDuskEvmWithdrawal({ account: review.signer?.account, amount: formatLux(review.amountLux).replace(/,/gu, ""), duskAccount: review.destination });
+        const result = await submitDuskEvmWithdrawal({ account: review.signer?.account, amount: plainAmount(review.amountLux), duskAccount: review.destination });
         return sent({
           amountLux: review.amountLux.toString(),
           destination: result.duskAccount,
@@ -1622,7 +1622,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         const route = formRoute();
         const quote = quoteFor(route);
         if (quote.maxLux === null || quote.maxLux === undefined) return;
-        state.form.amount = formatLux(quote.maxLux).replace(/,/gu, "");
+        state.form.amount = amountForInput(quote.maxLux);
         const input = root.querySelector("#amount");
         if (input) input.value = state.form.amount;
         refreshForm();

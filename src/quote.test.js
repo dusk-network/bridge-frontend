@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
+import { amountForInput, formatLux, plainAmount } from "./format.js";
 import { buildQuote, parseAmount, routeDuskFees } from "./quote.js";
 
 globalThis.__DUSK_BRIDGE_CONFIG__ = {
@@ -130,4 +132,45 @@ test("a withdrawal quotes its DuskEVM step and the two Dusk steps after it", () 
   // Before outputs can be timed, no date: the wait alone.
   const untimed = { ...read, chain: { withdrawal: { ...read.chain.withdrawal, outputSeconds: null } } };
   assert.equal(rows(buildQuote(routes["duskevm-withdrawal"], "200", { cfg, gasPrice: 1n, timing: untimed })).when, "Claim 7 days after you prove.");
+});
+
+test("amounts are read as the browser's language writes them: never as another amount", () => {
+  const inDutch = () => {
+    const before = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+    Object.defineProperty(globalThis, "navigator", { configurable: true, value: { language: "nl-NL" } });
+    return () => Object.defineProperty(globalThis, "navigator", before);
+  };
+  const restore = inDutch();
+  try {
+    assert.equal(parseAmount("1,5").lux, 1_500_000_000n);
+    assert.equal(parseAmount("1,001").lux, 1_001_000_000n);
+    assert.equal(parseAmount("1.001,5").lux, 1_001_500_000_000n);
+    assert.equal(parseAmount("1.000.000").lux, 1_000_000_000_000_000n);
+    assert.equal(parseAmount("1.5").lux, 1_500_000_000n);
+    assert.equal(parseAmount("0.125").lux, 125_000_000n);
+    // A point before three digits could mean a thousand or one: it's asked.
+    assert.equal(parseAmount("1.001").lux, null);
+    assert.match(parseAmount("1.001").error, /1001 or 1,001/u);
+    // What the page writes is read back as the same amount, or refused.
+    assert.equal(parseAmount(formatLux(1_500_000_000n)).lux, 1_500_000_000n);
+    assert.equal(parseAmount(formatLux(1_001_000_000_000n)).lux, null);
+    assert.equal(parseAmount(amountForInput(1_234_000_000n)).lux, 1_234_000_000n);
+    assert.equal(formatLux(1_484_923_500_000n), "1.484,9235");
+    // What a contract call takes stays plain.
+    assert.equal(plainAmount(1_484_923_500_000n), "1484.9235");
+  } finally {
+    restore();
+  }
+  // In English, as before.
+  assert.equal(parseAmount("1.001").lux, 1_001_000_000n);
+  assert.equal(parseAmount("1,001").lux, null);
+  assert.equal(formatLux(1_484_923_500_000n), "1,484.9235");
+});
+
+test("nothing a transaction takes is read back from a formatted amount: those follow the browser's language", () => {
+  const formatted = /format(?:Lux|Dusk|UnitsGrouped)\([^)]*\)\s*\.replace\(\/,/u;
+  for (const name of readdirSync(new URL(".", import.meta.url))) {
+    if (!name.endsWith(".js") || name.endsWith(".test.js")) continue;
+    assert.doesNotMatch(readFileSync(new URL(name, import.meta.url), "utf8"), formatted, name);
+  }
 });

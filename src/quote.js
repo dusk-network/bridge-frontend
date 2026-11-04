@@ -6,7 +6,7 @@
 import { beforeProofText, claimAfterProving, claimText } from "@dusk-network/networks/duskevm";
 import { DEPOSIT_GAS, TRANSFER_GAS, WITHDRAWAL_GAS, withdrawalGasLimit as withdrawalStepGas } from "@dusk-network/networks/gas";
 
-import { aboutFee, formatDateTime, formatDusk, formatLux, formatMaxFee, formatTypicalFee, formatUnitsGrouped } from "./format.js";
+import { aboutFee, decimalSeparator, formatDateTime, formatDusk, formatLux, formatMaxFee, formatTypicalFee, formatUnitsGrouped } from "./format.js";
 import { gasCoin, networkName, routeUnits, tokenName } from "./names.js";
 import { routeTime, routeTimeText } from "./route-times.js";
 
@@ -20,6 +20,14 @@ const DECIMALS = 9;
  * ("1,234") is asked about, so what is sent never differs from what was meant.
  */
 function withoutCommas(value) {
+  // Where a comma writes decimals, a point groups thousands, and the same care goes the other way.
+  if (decimalSeparator() === ",") {
+    const point = /^([1-9]\d{0,2})\.(\d{3})$/u.exec(value);
+    if (point) return { error: `Is that ${point[1]}${point[2]} or ${point[1]},${point[2]}? Write it without the point, or with a comma for decimals.` };
+    if (/^[1-9]\d{0,2}(\.\d{3})+,\d*$/u.test(value)) return { value: value.replace(/\./gu, "").replace(",", ".") };
+    if (/^[1-9]\d{0,2}(\.\d{3}){2,}$/u.test(value)) return { value: value.replace(/\./gu, "") };
+    if (/^\d*,\d*$/u.test(value)) return { value: value.replace(",", ".") };
+  }
   if (!value.includes(",")) return { value };
   const lone = /^(\d{1,3}),(\d{3})$/u.exec(value);
   if (lone) return { error: `Is that ${lone[1]}${lone[2]} or ${lone[1]}.${lone[2]}? Write it without the comma.` };
