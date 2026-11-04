@@ -33,7 +33,7 @@ function withoutCommas(value) {
   if (lone) return { error: `Is that ${lone[1]}${lone[2]} or ${lone[1]}.${lone[2]}? Write it without the comma.` };
   if (/^\d{1,3}(,\d{3})+(\.\d*)?$/u.test(value)) return { value: value.replace(/,/gu, "") };
   if (/^\d+,\d+$/u.test(value)) return { value: value.replace(",", ".") };
-  return { error: "Use a point for decimals, like 0.5." };
+  return { error: decimalSeparator() === "," ? "Use a comma for decimals, like 0,5." : "Use a point for decimals, like 0.5." };
 }
 
 /** The typed amount in Lux, or why it can't be one. Empty is no error. */
@@ -43,7 +43,7 @@ export function parseAmount(input) {
   const { value } = read;
   if (!value) return { error: "", lux: null };
   const match = /^(\d+)(?:\.(\d*))?$/u.exec(value);
-  if (!match) return { error: "Enter an amount like 25 or 0.5.", lux: null };
+  if (!match) return { error: `Enter an amount like 25 or 0${decimalSeparator()}5.`, lux: null };
   const fraction = match[2] ?? "";
   if (fraction.length > DECIMALS) return { error: "Use at most 9 decimals.", lux: null };
   const lux = BigInt(match[1]) * 10n ** 9n + BigInt(fraction.padEnd(DECIMALS, "0") || "0");
