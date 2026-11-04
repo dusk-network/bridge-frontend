@@ -4,6 +4,8 @@ import { getAddress } from "viem";
 
 import {
   EVM_CHECKSUM_MISMATCH,
+  BRIDGE_CONTRACT_RECIPIENT,
+  ZERO_ADDRESS_RECIPIENT,
   NOT_DUSK_RECIPIENT,
   NOT_EVM_ADDRESS,
   checkDuskRecipient,
@@ -21,6 +23,21 @@ test("an EVM recipient is used checksummed, and wrong capitals are named as such
   assert.deepEqual(checkEvmRecipient(` ${right} `), { address: right });
   assert.deepEqual(checkEvmRecipient(MIXED), { error: EVM_CHECKSUM_MISMATCH, fix: right });
   assert.deepEqual(checkEvmRecipient("0x1234"), { error: NOT_EVM_ADDRESS });
+});
+
+test("an EVM recipient can't be the zero address or the bridge's own contracts, however it's typed", () => {
+  const token = getAddress("0xbcee5c06eda885a6471a0e87f513e7492d411b61");
+  const migration = getAddress("0x93d6e214d07e6a548005ded9a3da589c29f830fe");
+  const bridgeContracts = [token, migration];
+
+  assert.deepEqual(checkEvmRecipient(`0x${"0".repeat(40)}`), { error: ZERO_ADDRESS_RECIPIENT });
+  for (const contract of bridgeContracts) {
+    assert.deepEqual(checkEvmRecipient(contract, { bridgeContracts }), { error: BRIDGE_CONTRACT_RECIPIENT });
+    assert.deepEqual(checkEvmRecipient(contract.toLowerCase(), { bridgeContracts }), { error: BRIDGE_CONTRACT_RECIPIENT });
+  }
+  // A contract of no route's, or with none known, is taken as typed.
+  assert.deepEqual(checkEvmRecipient(token), { address: token });
+  assert.deepEqual(checkEvmRecipient(MIXED.toLowerCase(), { bridgeContracts }), { address: getAddress(MIXED.toLowerCase()) });
 });
 
 test("a .dusk name is a Dusk recipient once its lookup finds a public account", () => {

@@ -242,13 +242,20 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     field.style.height = `${field.scrollHeight + 2}px`;
   }
 
+  let drawn = "";
   function renderMain({ focus = false } = {}) {
+    const next = pageHtml();
+    // A receipt is looked at again every few seconds: when nothing changed, it
+    // stays as it is, with keyboard focus and a screen reader's place in it.
+    if (!focus && next === drawn && state.page.page === "transfer") return;
+    drawn = next;
     const active = globalThis.document?.activeElement;
-    const keep = active && slot("main").contains(active) && active.id ? { id: active.id, start: active.selectionStart, end: active.selectionEnd } : null;
-    slot("main").innerHTML = pageHtml();
+    const selector = active?.id ? `#${active.id}` : active?.dataset?.action ? `[data-action="${active.dataset.action}"]` : "";
+    const keep = active && slot("main").contains(active) && selector ? { selector, start: active.selectionStart, end: active.selectionEnd } : null;
+    slot("main").innerHTML = next;
     for (const field of slot("main").querySelectorAll(".wrap-input")) fitHeight(field);
     if (keep) {
-      const again = slot("main").querySelector(`#${keep.id}`);
+      const again = slot("main").querySelector(keep.selector);
       if (again) {
         again.focus();
         try {
@@ -364,7 +371,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   function typedRecipient(route, form = state.form) {
     const typed = form?.recipientInput?.trim();
     if (!typed) return null;
-    return route.to.kind === "dusk" ? checkDuskRecipient(typed, form.lookups) : checkEvmRecipient(typed);
+    if (route.to.kind === "dusk") return checkDuskRecipient(typed, form.lookups);
+    const network = cfg.evmNetworks[route.to.id];
+    return checkEvmRecipient(typed, { bridgeContracts: [network?.tokenContract, network?.migrationContract] });
   }
 
   /**
