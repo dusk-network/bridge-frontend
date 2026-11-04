@@ -4,25 +4,33 @@
 // is, and what's wrong with one, are Dusk Domains' rules (@duskdomains/sdk).
 
 import { asDuskName, isDuskName, nameProblem, toDuskName } from "@duskdomains/sdk/names";
-import { getAddress, isAddress } from "viem";
+import { getAddress, isAddress, zeroAddress } from "viem";
 
 import { normalizeDuskAddress } from "./validation.js";
 
 export const NOT_EVM_ADDRESS = "That isn't an EVM address: 0x and 40 hex characters.";
 export const EVM_CHECKSUM_MISMATCH =
   "The capital letters don't match this address's checksum, so a character may be wrong. Copy it again from your wallet.";
+export const ZERO_ADDRESS_RECIPIENT = "That's the zero address, not a wallet. Paste the address of the wallet that should receive it.";
+export const BRIDGE_CONTRACT_RECIPIENT =
+  "That's the DUSK token's or the bridge's contract, not a wallet. Paste the address of the wallet that should receive it.";
 export const NOT_DUSK_RECIPIENT =
   "That isn't a Dusk account or a .dusk name. A Dusk account is the long base58 address your Dusk Wallet shows.";
 
 /**
  * `{ address }` in its checksummed form, or `{ error }`. When only the
- * capitals are off, `fix` is the address with its checksum's capitals.
+ * capitals are off, `fix` is the address with its checksum's capitals. What
+ * nobody could spend from is refused: the zero address, and `bridgeContracts`,
+ * the route's own, which are easy to paste from an explorer.
  */
-export function checkEvmRecipient(input) {
+export function checkEvmRecipient(input, { bridgeContracts = [] } = {}) {
   const value = String(input ?? "").trim();
   if (!/^0x[0-9a-f]{40}$/iu.test(value)) return { error: NOT_EVM_ADDRESS };
+  const lower = value.toLowerCase();
+  if (lower === zeroAddress) return { error: ZERO_ADDRESS_RECIPIENT };
+  if (bridgeContracts.some((contract) => contract?.toLowerCase() === lower)) return { error: BRIDGE_CONTRACT_RECIPIENT };
   if (isAddress(value)) return { address: getAddress(value) };
-  return { error: EVM_CHECKSUM_MISMATCH, fix: getAddress(value.toLowerCase()) };
+  return { error: EVM_CHECKSUM_MISMATCH, fix: getAddress(lower) };
 }
 
 /** A typed EVM recipient once it's an address: with its checksum's capitals. Anything else as typed. */

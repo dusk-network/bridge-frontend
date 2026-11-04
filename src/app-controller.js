@@ -242,13 +242,32 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     field.style.height = `${field.scrollHeight + 2}px`;
   }
 
+  /** What finds a control again once the page is drawn anew: its id, or everything its data says. */
+  function controlSelector(control) {
+    if (control?.id) return `[id=${JSON.stringify(control.id)}]`;
+    if (!control?.dataset?.action) return "";
+    return [...control.attributes]
+      .filter(({ name }) => name.startsWith("data-"))
+      .map(({ name, value }) => `[${name}=${JSON.stringify(value)}]`)
+      .join("");
+  }
+
+  let drawn = "";
   function renderMain({ focus = false } = {}) {
+    const next = pageHtml();
+    // A receipt is looked at again every few seconds: when nothing changed, it
+    // stays as it is, with keyboard focus and a screen reader's place in it.
+    if (!focus && next === drawn && state.page.page === "transfer") return;
+    drawn = next;
     const active = globalThis.document?.activeElement;
-    const keep = active && slot("main").contains(active) && active.id ? { id: active.id, start: active.selectionStart, end: active.selectionEnd } : null;
-    slot("main").innerHTML = pageHtml();
+    const selector = controlSelector(active);
+    const keep = active && slot("main").contains(active) && selector ? { selector, start: active.selectionStart, end: active.selectionEnd } : null;
+    slot("main").innerHTML = next;
     for (const field of slot("main").querySelectorAll(".wrap-input")) fitHeight(field);
     if (keep) {
-      const again = slot("main").querySelector(`#${keep.id}`);
+      // Only the same control: another with the same action could do something else.
+      const matches = slot("main").querySelectorAll(keep.selector);
+      const again = matches.length === 1 ? matches[0] : null;
       if (again) {
         again.focus();
         try {
@@ -364,7 +383,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   function typedRecipient(route, form = state.form) {
     const typed = form?.recipientInput?.trim();
     if (!typed) return null;
-    return route.to.kind === "dusk" ? checkDuskRecipient(typed, form.lookups) : checkEvmRecipient(typed);
+    if (route.to.kind === "dusk") return checkDuskRecipient(typed, form.lookups);
+    const network = cfg.evmNetworks[route.to.id];
+    return checkEvmRecipient(typed, { bridgeContracts: [network?.tokenContract, network?.migrationContract] });
   }
 
   /**
