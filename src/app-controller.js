@@ -367,6 +367,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     }
     formReads.reset(["migration", "l2"]);
     void loadReads();
+    lookUpRecipientCode();
   }
 
   /** Before anything was picked or typed, the card follows the wallets as they connect. */
@@ -415,20 +416,28 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const form = state.form;
     const route = formRoute();
     const address = route?.to.kind === "evm" ? typedRecipient(route)?.address : null;
-    if (!address || !form || form.codes?.[address] !== undefined || !services.evmReads?.hasCode) return;
+    const key = `${route?.to.id}:${address}`;
+    if (!address || !form || form.codes?.[key] !== undefined || !services.evmReads?.hasCode) return;
     codeTimer = setTimeout(() => {
       services.evmReads
         .hasCode(route.to.id, address)
         .then((contract) => {
-          form.codes = { ...form.codes, [address]: contract };
-          if (state.form === form) refreshForm();
+          form.codes = { ...form.codes, [key]: contract };
+          if (state.form !== form) return;
+          refreshForm();
+          // A review opened before the answer came: it says so too.
+          const review = reviews.current;
+          if (contract && review?.paysTo === address && state.sheet === "review") {
+            review.notYours = CONTRACT_RECIPIENT;
+            renderSheet();
+          }
         })
         .catch(() => {});
     }, 300);
   }
 
   /** Whether where a route pays is known to be a contract. */
-  const paysContract = (route, destination) => route.to.kind === "evm" && state.form?.codes?.[destination] === true;
+  const paysContract = (route, destination) => route.to.kind === "evm" && state.form?.codes?.[`${route.to.id}:${destination}`] === true;
 
   let nameTimer = null;
   /** A .dusk name typed as the Dusk recipient is looked up, a moment after typing stops. */
@@ -883,7 +892,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
 
   function openSheet(kind, opener) {
     // A step of its own in the history: a phone's Back closes the review, not the page.
-    if (kind === "review" && state.sheet !== "review") globalThis.history?.pushState?.({ reviewSheet: true }, "");
+    if (kind === "review" && state.sheet !== "review" && !globalThis.history?.state?.reviewSheet) {
+      globalThis.history?.pushState?.({ reviewSheet: true }, "");
+    }
     state.sheet = kind;
     sheetOpener = opener ?? globalThis.document?.activeElement ?? null;
     renderSheet();
@@ -1008,6 +1019,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       kind: "send",
       // A contract, or DUSK paid to another Dusk account than the connected one: said before the steps.
       paysConnected: route.to.kind === "evm" && evmAccount() && destination === checkEvmRecipient(evmAccount()).address ? destination : "",
+      paysTo: destination,
       notYours: paysContract(route, destination)
         ? CONTRACT_RECIPIENT
         : route.to.kind === "dusk" && duskAccount() && destination !== duskAccount()
@@ -1632,6 +1644,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         renderMain();
         root.querySelector("#recipient")?.focus();
         loadGasSoon();
+        lookUpRecipientCode();
       },
       // "Did you mean alice.dusk?": the name goes in the field and is looked up.
       "recipient-suggest": () => {
@@ -1642,7 +1655,6 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         root.querySelector("#recipient")?.focus();
         lookUpRecipientName();
         lookUpRecipientCode();
-      lookUpRecipientCode();
         loadGasSoon();
       },
       "recipient-reset": () => {
@@ -1706,7 +1718,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   // Escape closes a sheet; the dialog's own cancel is routed the same way.
   dialog.addEventListener("cancel", (event) => {
     event.preventDefault();
-    closeSheet();
+    closeByPerson();
   });
 
   globalThis.addEventListener?.("hashchange", navigate);
