@@ -242,6 +242,16 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     field.style.height = `${field.scrollHeight + 2}px`;
   }
 
+  /** What finds a control again once the page is drawn anew: its id, or everything its data says. */
+  function controlSelector(control) {
+    if (control?.id) return `[id=${JSON.stringify(control.id)}]`;
+    if (!control?.dataset?.action) return "";
+    return [...control.attributes]
+      .filter(({ name }) => name.startsWith("data-"))
+      .map(({ name, value }) => `[${name}=${JSON.stringify(value)}]`)
+      .join("");
+  }
+
   let drawn = "";
   function renderMain({ focus = false } = {}) {
     const next = pageHtml();
@@ -250,12 +260,14 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     if (!focus && next === drawn && state.page.page === "transfer") return;
     drawn = next;
     const active = globalThis.document?.activeElement;
-    const selector = active?.id ? `#${active.id}` : active?.dataset?.action ? `[data-action="${active.dataset.action}"]` : "";
+    const selector = controlSelector(active);
     const keep = active && slot("main").contains(active) && selector ? { selector, start: active.selectionStart, end: active.selectionEnd } : null;
     slot("main").innerHTML = next;
     for (const field of slot("main").querySelectorAll(".wrap-input")) fitHeight(field);
     if (keep) {
-      const again = slot("main").querySelector(keep.selector);
+      // Only the same control: another with the same action could do something else.
+      const matches = slot("main").querySelectorAll(keep.selector);
+      const again = matches.length === 1 ? matches[0] : null;
       if (again) {
         again.focus();
         try {
