@@ -128,7 +128,8 @@ export function recipientLine(route, { connected = false, destination = "", dusk
     : own && dusk && duskName
       ? `<b>${html(duskName)}</b>`
       : `<b class="mono">${html(short(destination))}</b>`;
-  return own ? `to your ${dusk ? "account" : walletName} ${who}` : `to ${who}`;
+  const yours = dusk ? "your account" : walletName.startsWith("your ") ? walletName : `your ${walletName}`;
+  return own ? `to ${yours} ${who}` : `to ${who}`;
 }
 
 /** A late transfer's note: that it is, and who to ask where the deployment names one. */

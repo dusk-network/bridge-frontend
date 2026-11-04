@@ -47,7 +47,7 @@ import { checkDuskRecipient, checkEvmRecipient, settledEvmRecipient } from "./re
 import { readWatched, saveWatched, watchTarget } from "./watched-account.js";
 import { SIGNER_MOVED, createReviewSession, notSent, sameSigner, sentActionPatch } from "./review-session.js";
 import { createScheduler, takenByAnother } from "./tracking.js";
-import { actionErrorOf, friendlyWalletError, html, privacyLine, proverMismatch, short, switchToProver, transferView } from "./transfer-view.js";
+import { CONNECT_CANCELLED, actionErrorOf, friendlyWalletError, walletCancelled, html, privacyLine, proverMismatch, short, switchToProver, transferView } from "./transfer-view.js";
 import {
   activityPanel,
   cardPage,
@@ -1329,8 +1329,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         return;
       }
       await state.dusk.connect();
+      forgetConnectRefusal();
     } catch (error) {
-      showError(friendlyWalletError(error, "dusk"));
+      showError(connectError(error, "dusk"));
     }
   }
 
@@ -1347,8 +1348,16 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     try {
       state.evmState = await connectEvmWallet();
     } catch (error) {
-      showError(friendlyWalletError(error, "evm"));
+      showError(connectError(error, "evm"));
     }
+  }
+
+  /** Why connecting a wallet didn't: nothing was being sent. */
+  const connectError = (error, wallet) => (walletCancelled(error) ? CONNECT_CANCELLED : friendlyWalletError(error, wallet));
+
+  /** A refusal stops mattering once the wallet connected after all. */
+  function forgetConnectRefusal() {
+    if (state.form?.error === CONNECT_CANCELLED) state.form.error = "";
   }
 
   function showError(message) {
@@ -1696,6 +1705,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         const accountChanged = next.account !== state.evmState.account;
         state.evmState = next;
         if (accountChanged) {
+          if (next.account) forgetConnectRefusal();
           if (signerMoved(reviews.current) && state.sheet === "review") renderSheet();
           formReads.reset(["migration", "l2"]);
           discoveryRuns.expire();

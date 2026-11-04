@@ -7,7 +7,7 @@
 // no click in the moment the review, or its next step, comes up: a
 // double-click on Review must not land on it.
 
-import { duskWalletChanged, friendlyWalletError } from "./transfer-view.js";
+import { LATER_STEP_CANCELLED, duskWalletChanged, friendlyWalletError, walletCancelled } from "./transfer-view.js";
 
 /** What a review says once its wallet switched account: it can't be confirmed. */
 export const SIGNER_MOVED = Object.freeze({
@@ -108,7 +108,9 @@ export function notSent(review, error, { announce, wallet = "dusk" }) {
     ? SIGNER_MOVED[moved]
     : changed
       ? `${changed}, so nothing was sent. Close it and review again.`
-      : friendlyWalletError(error, wallet);
+      : review.current > 0 && walletCancelled(error)
+        ? LATER_STEP_CANCELLED
+        : friendlyWalletError(error, wallet);
   announce(review.error);
   return review;
 }

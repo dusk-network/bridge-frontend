@@ -4,7 +4,7 @@ import test from "node:test";
 import { DuskSdkError } from "@dusk/connect";
 
 import { SIGNER_MOVED, createReviewSession, notSent, sameSigner, sentActionPatch } from "./review-session.js";
-import { WALLET_CANCELLED, friendlyWalletError } from "./transfer-view.js";
+import { LATER_STEP_CANCELLED, WALLET_CANCELLED, friendlyWalletError } from "./transfer-view.js";
 
 test("a request prepared for a closed review never fills the next one, even on the same route", async () => {
   const reviews = createReviewSession();
@@ -79,6 +79,9 @@ test("a request that wasn't sent says why on the review and in the page's live r
   const announce = (text) => said.push(text);
   const deposit = notSent({ busy: true }, { code: 4001, message: "User rejected the request." }, { announce });
   assert.deepEqual([deposit.busy, deposit.error, deposit.stale], [false, WALLET_CANCELLED, undefined]);
+  // Refused after an earlier step went out: that step stands, as it says.
+  const later = notSent({ busy: true, current: 1 }, { code: 4001 }, { announce: () => {} });
+  assert.equal(later.error, LATER_STEP_CANCELLED);
   // The wallet came back as another account: the review can't be confirmed.
   const moved = notSent({ busy: true }, { code: "DUSK_ACCOUNT_CHANGED" }, { announce });
   assert.deepEqual([moved.error, moved.stale], [SIGNER_MOVED.dusk, true]);
