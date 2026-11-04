@@ -243,6 +243,7 @@ export function receiptModel(entry, { cfg, gasPrice = 1n, locale, now = Date.now
   if (view.status === "completed") {
     const at = entry.destinationAt ?? entry.claimAt;
     caption = at ? `Arrived ${time(at)}.` : "Completed.";
+    if (route.mode === "migration") caption += " It's in the public balance on Dusk.";
   } else if (view.status === "failed") caption = view.note;
   else if (view.time) caption = `Takes ${routeTimeText(view.time)}`;
 

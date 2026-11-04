@@ -93,5 +93,11 @@ export function createEvmReads({ cfg, rpc, rpcBatch }) {
     return { balanceWei: big(balance), gas, gasPriceWei: big(price) };
   }
 
-  return Object.freeze({ migrationGas, migrationState, withdrawalState });
+  /** Whether an address on a chain holds code: a contract, not an ordinary wallet. */
+  async function hasCode(network, address) {
+    const code = await rpc(network, "eth_getCode", [address, "latest"]);
+    return Boolean(code) && code !== "0x";
+  }
+
+  return Object.freeze({ hasCode, migrationGas, migrationState, withdrawalState });
 }

@@ -6,7 +6,7 @@
 // checked, with a copy button and an explorer link, in Söhne Mono.
 
 import { GLYPH, chainMark, icon, pairMark } from "./icons.js";
-import { CONNECT_CANCELLED, LATER_STEP_CANCELLED, WALLET_CANCELLED, html, short } from "./transfer-view.js";
+import { CONNECT_CANCELLED, CONTRACT_RECIPIENT, LATER_STEP_CANCELLED, WALLET_CANCELLED, html, short } from "./transfer-view.js";
 
 /** The faces of a Copy button: its icon or words, then what it shows once it copied (copied.js). */
 export const copyFaces = (face, copied) =>
@@ -138,6 +138,7 @@ function recipientNote(to) {
   if (to.looking) return `Looking up ${html(to.looking)}…`;
   if (to.fix) return `<button type="button" class="linkish" data-action="recipient-fix">If every character is right, fix the capitals</button>`;
   if (to.suggest) return `<button type="button" class="linkish" data-action="recipient-suggest">Did you mean ${html(to.suggest)}?</button>`;
+  if (to.contract) return CONTRACT_RECIPIENT;
   return "";
 }
 
@@ -207,7 +208,7 @@ export function cardPage(vm) {
   const from = `<div class="panel"><div class="panel-h"><span class="panel-l">From</span><div class="netsel">${netButton("from", vm.from.net, vm.menu === "from")}${vm.menu === "from" ? netMenu("from", vm.fromChoices) : ""}</div></div>
       <div class="amt-row"><input id="amount" name="amount" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="0" value="${html(vm.amount)}" aria-label="Amount, in ${html(vm.unit)}" aria-describedby="amount-help amount-error"${vm.amountError ? ' aria-invalid="true"' : ""}><span class="token">${chainMark(vm.from.net.id)}${html(vm.unit)}</span></div>
       <div class="panel-f" id="amount-help" data-region="from-foot">${regions["from-foot"]}</div>
-      <p class="field-error" id="amount-error" role="alert">${html(vm.amountError ?? "")}</p>
+      <p class="field-error" id="amount-error" role="status">${html(vm.amountError ?? "")}</p>
     </div>`;
   const flip = `<div class="flip-row"><button type="button" class="flip" data-action="flip" aria-label="Swap From and To"${vm.canFlip ? "" : ' disabled title="No route back"'}>${icon("arrow-d")}</button></div>`;
   // Under the field: what a typed name points to, the lookup, or the capitals' fix.
