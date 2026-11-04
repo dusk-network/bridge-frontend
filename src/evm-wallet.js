@@ -277,10 +277,12 @@ export async function initializeEvmWallet() {
  * opened meanwhile vanishes and the press seems to do nothing.
  */
 async function reconnectSettled(modal) {
-  await modal.ready?.();
   const giveUpAt = Date.now() + RECONNECT_WAIT_MS;
+  const pause = (ms) => new Promise((settle) => setTimeout(settle, ms));
+  // However AppKit's start goes, the press opens the dialog in the end.
+  await Promise.race([Promise.resolve(modal.ready?.()).catch(() => {}), pause(RECONNECT_WAIT_MS)]);
   while (RECONNECTING.has(modal.getAccount("eip155")?.status) && Date.now() < giveUpAt) {
-    await new Promise((settle) => setTimeout(settle, 100));
+    await pause(100);
   }
 }
 
