@@ -333,6 +333,8 @@ export function receiptModel(entry, { cfg, gasPrice = 1n, locale, now = Date.now
   if (view.countdown) view.steps = view.steps.map((item) => (item.key === "claim" ? { ...item, detail: "" } : item));
   return {
     actionFee: view.action ? `Network fee up to ${formatMaxFee(stepMax)} DUSK, from your public balance` : "",
+    // It comes by itself, so there's something to be told of. A withdrawal comes when you claim it.
+    arrives: view.status === "pending" && route.mode !== "duskevm-withdrawal",
     caption,
     details,
     fromTo: `From ${fromAccount} to ${toAccount}`,

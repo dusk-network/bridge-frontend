@@ -484,6 +484,22 @@ test("gas a migration paid is rounded as wallets write it, with the rest on hove
   assert.ok(receiptPage(model).includes('<span class="num" title="0.00004700500075208 ETH">0.000047 ETH</span>'));
 });
 
+test("a receipt on its way offers to tell you when it arrives, and says what happens where that's refused", () => {
+  const url = "https://bridge.example.org/#/transfer/n";
+  const sent = { amountLux: "25000000000", destination: EVM, hash: "0e".repeat(32), id: "n", routeId: "dusk-to-dusk-evm", sender: ACCOUNT, status: "pending" };
+  const page = (entry, route, notice) => receiptPage({ ...receiptModel(entry, { cfg: testnet, route, url }), notice });
+  const deposit = T["duskevm-deposit"];
+  assert.match(page(sent, deposit, "offer"), /<button type="button" class="linkish" data-action="notify-on">Tell me when it arrives<\/button>/u);
+  assert.match(page(sent, deposit, "on"), /You&#039;ll get a notification when it arrives\. <button type="button" class="linkish" data-action="notify-off">Turn off<\/button>/u);
+  assert.match(page(sent, deposit, "refused"), /Notifications aren&#039;t allowed for this site, so this tab&#039;s title will say when it arrives\./u);
+  assert.match(page(sent, deposit, "unavailable"), /This tab&#039;s title will say when it arrives\./u);
+  assert.doesNotMatch(page(sent, deposit, "refused"), /data-action="notify/u);
+  // Nothing to be told once it ended, and a withdrawal comes when you claim it.
+  assert.doesNotMatch(page({ ...sent, status: "completed" }, deposit, "offer"), /id="notify"/u);
+  assert.doesNotMatch(page({ ...sent, status: "failed" }, deposit, "offer"), /id="notify"/u);
+  assert.doesNotMatch(page({ ...sent, routeId: "dusk-evm-to-dusk", stage: "submitted" }, T["duskevm-withdrawal"], "offer"), /id="notify"/u);
+});
+
 test("a claim's fee maximum on the receipt uses the withdrawal's own gas once it's known", () => {
   const ready = { amountLux: "1000000000", hash: `0x${"0c".repeat(32)}`, id: "w", routeId: "dusk-evm-to-dusk", stage: "ready_to_finalize", status: "pending" };
   const url = "https://bridge.example.org/#/transfer/w";

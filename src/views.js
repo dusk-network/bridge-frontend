@@ -5,6 +5,7 @@
 // for Mainnet). Addresses and hashes are shown in full where they're
 // checked, with a copy button and an explorer link, in Söhne Mono.
 
+import { NOTICE_WORDS } from "./arrival-notice.js";
 import { GLYPH, chainMark, icon, pairMark } from "./icons.js";
 import { CONNECT_CANCELLED, CONTRACT_RECIPIENT, LATER_STEP_CANCELLED, WALLET_CANCELLED, html, short } from "./transfer-view.js";
 
@@ -341,6 +342,14 @@ function stepList(steps) {
 const stateWord = (state) =>
   ({ done: "done", failed: "failed", now: "in progress", todo: "not yet", turn: "your turn" })[state] ?? state;
 
+/** On a receipt whose transfer is on its way: being told when it arrives, as far as this browser can. */
+const arrivalNotice = (state) =>
+  `<p class="small t2 notify" id="notify" tabindex="-1">${
+    state === "offer"
+      ? '<button type="button" class="linkish" data-action="notify-on">Tell me when it arrives</button>'
+      : `${html(NOTICE_WORDS[state])}${state === "on" ? ' <button type="button" class="linkish" data-action="notify-off">Turn off</button>' : ""}`
+  }</p>`;
+
 export function receiptPage(vm) {
   if (vm.loading)
     return `<main class="col" id="main" tabindex="-1"><div class="topbar"><a class="bk" href="#/transfers">${icon("back")}My transfers</a><h1 class="ti">Transfer</h1></div><p class="t2" role="status">${waiting(vm.loading)}</p></main>`;
@@ -378,7 +387,7 @@ export function receiptPage(vm) {
         <div class="pl" role="status">${statusPill(view.status, view.statusWord)}<span class="cap">${html(vm.caption)}</span></div>
       </div>
       ${countdown}
-      <section aria-labelledby="progress-h"><h2 class="gh" id="progress-h">Progress</h2><div class="group pad">${stepList(view.steps)}</div>${action}</section>
+      <section aria-labelledby="progress-h"><h2 class="gh" id="progress-h">Progress</h2><div class="group pad">${stepList(view.steps)}</div>${action}${vm.arrives && vm.notice ? arrivalNotice(vm.notice) : ""}</section>
       ${notes}
       <div class="lk"><span>${icon("link")}Receipt link</span><code class="mono">${html(vm.url)}</code>${copyButton(vm.url, "receipt link")}</div>
       <p class="small t2">Anyone with the link can see this transfer.</p>

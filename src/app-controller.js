@@ -8,6 +8,7 @@ import { topGap } from "@dusk-network/app-core/history";
 import { toDuskName } from "@duskdomains/sdk/names";
 
 import { entryId, readActivity, recordActivity, saveActivity, updateActivity, useActivityNetwork } from "./activity.js";
+import { NOTICE_WORDS, createArrivalNotice } from "./arrival-notice.js";
 import { bridgeRoutes, getBridgeRoute } from "./bridge-routes.js";
 import { cardRoute, choosePair, entryRoutes, flipRoute, followsWallets, fromChoices, handedOverRecipient, primaryButton, routeBetween, toChoices } from "./bridge-card.js";
 import { claimReminder } from "./calendar.js";
@@ -142,6 +143,13 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   const duskGasPrice = () => formReads.reads.gasPrice ?? 1n;
   /** Reads the gas price again; the page is drawn again where it moved. */
   const refreshPrice = () => formReads.price();
+  // Says when a transfer ends to whoever isn't looking. A phone's browser can't notify from a page.
+  const arrivals = createArrivalNotice({
+    available: () => !isPhone(),
+    onOpen: (href) => {
+      globalThis.location.hash = href;
+    },
+  });
   // How the card's route is doing. It's only said: nothing waits for it.
   const routeStatus = createRouteStatus({ onChange: () => refreshForm(), read: (route) => services.status(route) });
   // The review on screen; a request prepared for it fills nothing else.
@@ -714,7 +722,11 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       const previous = before.get(entry.id);
       if (previous && previous !== entry.status && entry.status !== "pending") {
         const route = routeOf(entry.routeId);
-        if (route) announce(`${transferView(entry, { cfg, route }).title}.`);
+        if (route) {
+          const { title } = transferView(entry, { cfg, route });
+          announce(`${title}.`);
+          arrivals.ended({ href: transferHref(entry.hash), id: entry.id, title });
+        }
       }
     }
   }
@@ -895,7 +907,17 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     return receiptPage({
       ...receiptModel(entry, { cfg, gasPrice: duskGasPrice(), own: { account: duskAccount(), name: duskName() }, owner: listedDusk(), route, submitter: proofSubmitterFor(duskAccount()), timing: timing(), url: receiptUrl(entry.hash) }),
       canAct: duskState().installed,
+      notice: arrivals.state(),
     });
+  }
+
+  /** Draws the receipt's line about being told again, with focus on what took the press's place. */
+  function showNotice() {
+    renderMain();
+    const line = root.querySelector("#notify");
+    (line?.querySelector("button") ?? line)?.focus();
+    const words = NOTICE_WORDS[arrivals.state()];
+    if (words) announce(words);
   }
 
   // -------------------------------------------------------------------------
@@ -1671,6 +1693,14 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         refreshForm();
         loadGasSoon();
       },
+      "notify-off": () => {
+        arrivals.stop();
+        showNotice();
+      },
+      "notify-on": async () => {
+        await arrivals.choose();
+        showNotice();
+      },
       "open-about": () => openSheet("contracts", target),
       "open-contracts": () => openSheet("contracts", target),
       "open-network": () => openSheet("network", target),
@@ -1784,6 +1814,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
 
   return {
     async start() {
+      // First of all: a transfer can end as the page opens, before the wallets answer.
+      globalThis.addEventListener?.("focus", arrivals.seen);
+      globalThis.document?.addEventListener("visibilitychange", arrivals.seen);
       if (isCardPage()) ensureCard();
       render();
       for (const entry of state.activity) if (entry.status === "pending" || !entry.status) track(entry.id);

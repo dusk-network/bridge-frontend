@@ -524,6 +524,8 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 .count .s { margin-top: 2px; color: var(--text-2); font-size: 13px; }
 .gh { margin: 0 0 10px; color: var(--text-2); font-size: 13px; font-weight: 500; }
 .action-box { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; }
+.notify { margin-top: 10px; }
+.notify:focus { outline: none; }
 .lk { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; color: var(--text-2); font-size: 13px; }
 .lk > span { grid-row: 1; display: inline-flex; align-items: center; gap: 6px; }
 .lk > .icon-btn { grid-row: 1; grid-column: 2; }
