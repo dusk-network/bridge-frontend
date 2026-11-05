@@ -1,16 +1,16 @@
 // One name per chain per network. Dusk and DuskEVM keep their names on both
-// networks, next to the network badge; Ethereum and BNB Smart Chain name
-// their testnet in brackets. Wallet chain names (config `chainName`) are
-// separate: they're what a wallet lists, not what this page says.
+// networks, next to the network badge. Ethereum and BNB Smart Chain go by what
+// the network's file calls them on this network, as the web wallet, the
+// extension and a wallet adding the chain do: "BSC test chain" and "Sepolia"
+// on testnet.
 
 export function networkNames(cfg) {
-  const testnet = cfg.profile === "testnet";
   return Object.freeze({
-    badge: testnet ? "Testnet" : "Mainnet",
-    bsc: testnet ? "BNB Smart Chain (testnet)" : "BNB Smart Chain",
+    badge: cfg.profile === "testnet" ? "Testnet" : "Mainnet",
+    bsc: cfg.evmNetworks?.bsc?.chainName ?? "BNB Smart Chain",
     dusk: "Dusk",
     "dusk-evm": "DuskEVM",
-    ethereum: testnet ? "Ethereum (Sepolia)" : "Ethereum",
+    ethereum: cfg.evmNetworks?.ethereum?.chainName ?? "Ethereum",
   });
 }
 

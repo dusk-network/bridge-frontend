@@ -12,6 +12,7 @@ import {
   clockChangeNote,
   formatDateTime,
   formatDusk,
+  formatShort,
   formatShortDay,
 } from "./format.js";
 import { networkName, tokenName } from "./names.js";
@@ -399,6 +400,8 @@ export function transferView(entry, { account = "", cfg, locale, name = "", now 
 
   const sentAt = entry.sourceAt ?? (entry.createdAt ? Date.parse(entry.createdAt) : null);
   const lateAfter = lateAfterSeconds(route, time);
+  // What arrived, once it has, next to the word that says so.
+  const shown = amount === null ? null : formatShort(status === "completed" && route?.mode === "service-transfer" && cfg?.service?.feeLux && amount > BigInt(cfg.service.feeLux) ? amount - BigInt(cfg.service.feeLux) : amount);
   const late =
     status === "pending" &&
     sentAt &&
@@ -424,8 +427,9 @@ export function transferView(entry, { account = "", cfg, locale, name = "", now 
         }
       : null,
     amount,
-    // What arrived, once it has, next to the word that says so.
-    amountText: amount === null ? "" : formatDusk(status === "completed" && route?.mode === "service-transfer" && cfg?.service?.feeLux && amount > BigInt(cfg.service.feeLux) ? amount - BigInt(cfg.service.feeLux) : amount),
+    // As a list writes it, and in full for whoever asks.
+    amountExact: shown ? `${shown.exact} DUSK` : "",
+    amountText: shown ? `${shown.text} DUSK` : "",
     countdown,
     from: { account: entry.sender ?? null, network: fromNetwork },
     late: Boolean(late),

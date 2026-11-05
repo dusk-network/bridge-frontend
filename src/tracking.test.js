@@ -264,7 +264,7 @@ test("a migration is pending until Messina pays it out on Dusk", async () => {
 
   const waiting = await tracking.refresh(entry, ROUTES.migration);
   assert.equal(waiting.status, "pending");
-  assert.equal(waiting.note, "Waiting for Ethereum (Sepolia).");
+  assert.equal(waiting.note, "Waiting for Sepolia.");
   // Rebuilt from the hash alone: the amount and recipient come from the call.
   assert.equal(waiting.amountLux, "3000000000");
   assert.equal(waiting.destination, SENDER);
@@ -279,6 +279,8 @@ test("a migration is pending until Messina pays it out on Dusk", async () => {
   assert.equal(paid.status, "completed");
   assert.equal(paid.destinationHash, "ef".repeat(32));
   assert.equal(paid.destinationAt, 1_792_990_000_000);
+  // What arrived, for its receipt.
+  assert.equal(paid.receivedLux, "3000000000");
 
   // Found by its payout, with no sender yet: the migration's own transaction names it.
   const found = await tracking.refresh({ ...entry, amountLux: "3000000000", destination: SENDER }, ROUTES.migration);
@@ -425,8 +427,12 @@ test("a Dusk → BNB Smart Chain transfer completes when the bridge pays the mem
   tx = duskTx({ json: { receiver: BSC_SERVICE.account, sender: SENDER, value: 2_000_000_000 }, memo: hex(` ${RECIPIENT}`) });
   const spaced = await tracking.refresh(entry, ROUTES.service);
   assert.deepEqual([spaced.status, spaced.note], ["failed", "The memo isn't an EVM address, so the bridge can't pay it out."]);
+  // The DUSK moved, and nothing comes of it: said as what was received.
+  assert.equal(spaced.receivedLux, "0");
   tx = duskTx({ json: { receiver: BSC_SERVICE.account, value: 1_000_000_000 } });
-  assert.match((await tracking.refresh(entry, ROUTES.service)).note, /didn't exceed the bridge fee/u);
+  const underFee = await tracking.refresh(entry, ROUTES.service);
+  assert.match(underFee.note, /didn't exceed the bridge fee/u);
+  assert.equal(underFee.receivedLux, "0");
   tx = duskTx({ error: "Panic" });
   assert.equal((await tracking.refresh(entry, ROUTES.service)).status, "failed");
 });

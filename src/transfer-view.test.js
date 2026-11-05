@@ -19,7 +19,7 @@ import { receiptPage, reviewSheet, transferRow } from "./views.js";
 const cfg = {
   dusk: { explorerUrl: "https://explorer.testnet.dusk.network/" },
   duskEvm: { depositSeconds: 60, explorerUrl: "https://explorer.testnet.evm.dusk.network" },
-  evmNetworks: { ethereum: { explorerUrl: "https://sepolia.etherscan.io", migrationSeconds: 3_600 } },
+  evmNetworks: { ethereum: { chainName: "Sepolia", explorerUrl: "https://sepolia.etherscan.io", migrationSeconds: 3_600 } },
   profile: "testnet",
   service: { delaySeconds: 3_600, feeLux: 1_000_000_000n, network: "ethereum" },
 };
@@ -98,13 +98,13 @@ test("a deposit shows Pending with its steps, then Completed with both transacti
 
 test("a payout to another chain says what arrives after the bridge fee", () => {
   const view = transferView({ amountLux: "50000000000", hash: DUSK_HASH, sourceAt: Date.UTC(2026, 9, 26, 9, 12), status: "pending" }, { cfg, now: Date.UTC(2026, 9, 26, 9, 30), route: service, locale: GB, timeZone: AMS });
-  assert.equal(view.title, "Sending 50 DUSK to Ethereum (Sepolia)");
+  assert.equal(view.title, "Sending 50 DUSK to Sepolia");
   assert.equal(
     transferSubline(view, { sourceAt: Date.UTC(2026, 9, 26, 9, 12) }, service, cfg, { locale: GB, now: Date.UTC(2026, 9, 26, 9, 30), timeZone: AMS }),
     "Sent Today, 10:12 CET · takes ~1 hour",
   );
   const done = transferView({ amountLux: "50000000000", hash: DUSK_HASH, status: "completed" }, { cfg, route: service });
-  assert.equal(done.title, "49 DUSK arrived on Ethereum (Sepolia)");
+  assert.equal(done.title, "49 DUSK arrived on Sepolia");
   assert.equal(transferView({ amountLux: "1000000000000", hash: L2_HASH, status: "pending" }, { cfg, route: migration }).title, "Moving 1,000 ERC20 DUSK to Dusk");
 });
 
@@ -250,9 +250,9 @@ test("what becomes public names the accounts themselves, not a label", () => {
   // From the sending side to the paid one, on both networks.
   assert.equal(
     privacyLine(migration, cfg, { dusk: ACCOUNT, evm: EVM }),
-    "Public on Ethereum (Sepolia) and Dusk, and linked: 0x3E5B…a11d, the Dusk account 21n5nc…fMMLNz and the amount.",
+    "Public on Sepolia and Dusk, and linked: 0x3E5B…a11d, the Dusk account 21n5nc…fMMLNz and the amount.",
   );
-  assert.equal(privacyLine(service, cfg, {}), "Public on Dusk and Ethereum (Sepolia), and linked: your Dusk account, your EVM address and the amount.");
+  assert.equal(privacyLine(service, cfg, {}), "Public on Dusk and Sepolia, and linked: your Dusk account, your EVM address and the amount.");
 });
 
 test("wallet errors say what happened, naming the wallet", () => {

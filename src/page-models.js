@@ -2,13 +2,14 @@
 // checked without a browser. The controller fetches and stores; views.js
 // writes the HTML.
 
+import { transferLedger } from "@dusk-network/app-core/bridge";
 import { claimAfterProving, proveNowText } from "@dusk-network/networks/duskevm";
 import { formatEvmAddress } from "@dusk-network/networks/format";
 
 import { explorerAddressUrl } from "./contracts.js";
 import { groupTransfers, shownFor } from "./discovery.js";
-import { aboutFee, formatDateTime, formatDusk, formatExactFee, formatLux, formatMaxFee, formatUnitsGrouped } from "./format.js";
-import { gasCoin, networkName, routeTitle, tokenName } from "./names.js";
+import { aboutFee, formatDateTime, formatDusk, formatLux, formatMaxFee, formatShort, formatUnitsGrouped } from "./format.js";
+import { gasCoin, networkName, routeTitle, routeUnits, tokenName } from "./names.js";
 import { transferHref } from "./permalink.js";
 import { buildQuote, routeDuskFees, stepFeeText, withdrawalStepMax } from "./quote.js";
 import { routeTime, routeTimeText } from "./route-times.js";
@@ -57,7 +58,7 @@ export function routeSteps(route, quote = null) {
 
 /**
  * Facts the review checks before any wallet opens, each true or not:
- * balances, gas, and where the payout goes.
+ * balances, to the Lux as what it sends is, gas, and where the payout goes.
  */
 export function reviewChecks(route, { cfg, destination, duskAccount, evm, quote, reads }) {
   const checks = [];
@@ -68,7 +69,7 @@ export function reviewChecks(route, { cfg, destination, duskAccount, evm, quote,
     const balance = reads.duskBalance;
     if (balance !== null && balance !== undefined)
       checks.push({
-        html: `You have <b class="num">${html(formatDusk(balance, 4))}</b> in your public balance, enough for ${html(formatDusk(lux))} and the network fee`,
+        html: `You have <b class="num">${html(formatDusk(balance))}</b> in your public balance, enough for ${html(formatDusk(lux))} and the network fee`,
         ok: quote.maxLux !== null && lux <= quote.maxLux,
       });
     checks.push({
@@ -85,12 +86,12 @@ export function reviewChecks(route, { cfg, destination, duskAccount, evm, quote,
     const migration = reads.migration ?? {};
     if (migration.balanceWei !== null && migration.balanceWei !== undefined)
       checks.push({
-        html: `You have <b class="num">${html(formatUnitsGrouped(migration.balanceWei, 18, 4))} ${html(tokenName(route.from.id))}</b> at <code class="mono">${html(short(evm?.account))}</code> on ${html(from)}`,
+        html: `You have <b class="num">${html(formatUnitsGrouped(migration.balanceWei, 18, 9))} ${html(tokenName(route.from.id))}</b> at <code class="mono">${html(short(evm?.account))}</code> on ${html(from)}`,
         ok: lux * WEI_PER_LUX <= migration.balanceWei,
       });
     if (migration.gasCoinWei !== null && migration.gasCoinWei !== undefined)
       checks.push({
-        html: `You have <b class="num">${html(formatUnitsGrouped(migration.gasCoinWei, 18, 4))} ${html(coin)}</b> for the network fee${quote.evmFeeWei ? `, ${html(aboutFee(quote.evmFeeWei, 18, coin))} needed for ${quote.steps === 2 ? "both steps" : "the step"}` : ""}`,
+        html: `You have <b class="num">${html(formatShort(migration.gasCoinWei, 18).text)} ${html(coin)}</b> for the network fee${quote.evmFeeWei ? `, ${html(aboutFee(quote.evmFeeWei, 18, coin))} needed for ${quote.steps === 2 ? "both steps" : "the step"}` : ""}`,
         ok: quote.evmFeeWei ? migration.gasCoinWei >= quote.evmFeeWei : migration.gasCoinWei > 0n,
       });
     checks.push({
@@ -102,7 +103,7 @@ export function reviewChecks(route, { cfg, destination, duskAccount, evm, quote,
   const l2 = reads.l2 ?? {};
   if (l2.balanceWei !== null && l2.balanceWei !== undefined)
     checks.push({
-      html: `You have <b class="num">${html(formatUnitsGrouped(l2.balanceWei, 18, 4))} DUSK</b> on ${html(from)}, enough for ${html(formatDusk(lux))} and its network fee`,
+      html: `You have <b class="num">${html(formatUnitsGrouped(l2.balanceWei, 18, 9))} DUSK</b> on ${html(from)}, enough for ${html(formatDusk(lux))} and its network fee`,
       ok: quote.maxLux !== null && lux <= quote.maxLux,
     });
   checks.push({
@@ -169,6 +170,17 @@ export function pricedReview(route, { amount, cfg, destination, duskAccount, evm
 }
 
 /**
+ * What the source of `route` holds, as the form's balance line writes it, and
+ * in full for whoever asks: Lux on Dusk, wei on an EVM chain. Empty until it's read.
+ */
+export function balanceLine(route, holdings) {
+  if (holdings === null || holdings === undefined) return { exact: "", text: "" };
+  const { exact, text } = formatShort(holdings, route.signer === "dusk" ? 9 : 18);
+  const { send: unit } = routeUnits(route);
+  return { exact: `${exact} ${unit}`, text: `${text} ${unit}` };
+}
+
+/**
  * What the form offers to send, in the one number format of the form: up to
  * 4 decimals, trimmed, as the balance above it. Max leaves the network fee
  * where it comes from the same balance.
@@ -226,6 +238,47 @@ export function actionLead(kind, entry, { account = "", amountLux = null, claim 
 }
 
 /**
+ * Whether a failed transfer failed on its own chain, so that nothing moved. One
+ * the bridge didn't pay out left the account all the same. Records kept before
+ * this was noted say so in their note.
+ */
+const failedAtSource = (entry) =>
+  entry.sourceFailed === true || /^The (transfer failed on|migration failed on|Dusk transaction failed)/u.test(entry.note ?? "");
+
+/**
+ * A transfer's amounts on its receipt, the same in every Dusk app
+ * (`transferLedger`): what was sent, the bridge's fee, the network's, what was
+ * received, each to the Lux, and gas as wallets write it, with the rest on
+ * hover. What failed on its own chain moved nothing, so its fee stands alone.
+ */
+function ledgerRows(entry, { cfg, from, locale, route, status }) {
+  const ledger = transferLedger({
+    failed: status === "failed" && failedAtSource(entry),
+    gasWei: entry.feeWei,
+    locale,
+    network: cfg.network,
+    networkFee: [entry.feeLux, entry.proveFeeLux, entry.claimFeeLux],
+    received: entry.receivedLux,
+    route: route.id,
+    sent: entry.amountLux,
+  });
+  if (!ledger) return [];
+  const label = (line) =>
+    ({
+      bridgeFee: "Bridge fee",
+      gas: ledger.networkFee ? `Fee on ${from}` : "Network fee",
+      networkFee: "Network fee",
+      received: line.expected && status !== "completed" ? "You receive" : "You received",
+      sent: "You sent",
+    })[line.key];
+  return ledger.lines.map((line) =>
+    line.key === "gas"
+      ? { exact: `${line.exact} ${line.coin}`, label: label(line), value: `${line.text} ${line.coin}` }
+      : { label: label(line), value: `${line.exact} ${line.coin}` },
+  );
+}
+
+/**
  * The receipt of one transfer. No balances: the link may be shared. `owner`
  * is the Dusk account the page is for, Dusk Wallet's (`own`) or a followed one.
  */
@@ -249,17 +302,7 @@ export function receiptModel(entry, { cfg, gasPrice = 1n, locale, now = Date.now
 
   const sourceNetwork = route.from.kind === "dusk" ? "dusk" : route.from.id;
   const destinationNetwork = route.to.kind === "dusk" ? "dusk" : route.to.id;
-  const details = [];
-  if (view.amount !== null) details.push({ label: route.mode === "migration" ? "You sent" : "Amount", value: route.mode === "migration" ? `${formatLux(view.amount)} ${tokenName(route.from.id)}` : formatDusk(view.amount) });
-  if (route.mode === "service-transfer" && view.amount !== null) {
-    details.push({ label: "Bridge fee", value: formatDusk(cfg.service.feeLux) });
-    details.push({ label: "You receive", value: formatDusk(view.amount - BigInt(cfg.service.feeLux) > 0n ? view.amount - BigInt(cfg.service.feeLux) : 0n) });
-  }
-  // The record: each fee as it was paid, to the last decimal.
-  if (entry.feeLux) details.push({ label: "Fee paid", value: `${formatExactFee(BigInt(entry.feeLux))} DUSK on ${from}` });
-  if (entry.feeWei) details.push({ label: "Fee paid", value: `${formatUnitsGrouped(BigInt(entry.feeWei), 18)} ${gasCoin(cfg, route.from.id)} on ${from}` });
-  if (entry.proveFeeLux) details.push({ label: "Proof fee paid", value: `${formatExactFee(BigInt(entry.proveFeeLux))} DUSK on Dusk` });
-  if (entry.claimFeeLux) details.push({ label: "Claim fee paid", value: `${formatExactFee(BigInt(entry.claimFeeLux))} DUSK on Dusk` });
+  const details = ledgerRows(entry, { cfg, from, locale, route, status: view.status });
   if (entry.sender) details.push({ html: addressHtml(cfg, sourceNetwork, entry.sender, `sender on ${from}`), label: `From, on ${from}` });
   if (entry.destination) details.push({ html: addressHtml(cfg, destinationNetwork, entry.destination, `recipient on ${to}`), label: `To, on ${to}` });
   details.push({ html: txHtml(cfg, sourceNetwork, entry.hash, `${from} transaction`), label: `${from} transaction` });
@@ -298,6 +341,8 @@ export function receiptModel(entry, { cfg, gasPrice = 1n, locale, now = Date.now
   if (view.countdown) view.steps = view.steps.map((item) => (item.key === "claim" ? { ...item, detail: "" } : item));
   return {
     actionFee: view.action ? `Network fee up to ${formatMaxFee(stepMax)} DUSK, from your public balance` : "",
+    // It comes by itself, so there's something to be told of. A withdrawal comes when you claim it.
+    arrives: view.status === "pending" && route.mode !== "duskevm-withdrawal",
     caption,
     details,
     fromTo: `From ${fromAccount} to ${toAccount}`,
@@ -330,6 +375,7 @@ export function transfersModel(entries, { account = "", accounts, cfg, locale, n
     const view = transferView(entry, { account, cfg, locale, name, now, owner, route, submitter, timeZone, timing });
     return {
       action: view.action,
+      amountExact: view.amountExact,
       amountText: view.amountText,
       // Its transaction, as the receipt and Look up know it.
       hash: short(entry.hash),

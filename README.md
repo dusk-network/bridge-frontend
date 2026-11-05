@@ -34,15 +34,15 @@ stays on that network's counterparts. There are three routes:
 | --- | --- |
 | BNB Smart Chain → Dusk | |
 | Dusk → BNB Smart Chain | |
-| Ethereum → Dusk | Ethereum (Sepolia) → Dusk, not running |
-| | Dusk → Ethereum (Sepolia), not running |
+| Ethereum → Dusk | Sepolia → Dusk, not running |
+| | Dusk → Sepolia, not running |
 | Dusk → DuskEVM, once DuskEVM is on mainnet | Dusk → DuskEVM |
 | DuskEVM → Dusk, once DuskEVM is on mainnet | DuskEVM → Dusk |
 
 Each chain has one name per network: Dusk and DuskEVM keep theirs next to the
-network badge, and Ethereum and BNB Smart Chain name their testnet in
-brackets. DUSK on them is named by its token standard: ERC20 DUSK and BEP20
-DUSK.
+network badge, and Ethereum and BNB Smart Chain go by what the network's file
+calls them there, as the web wallet and the extension do. DUSK on them is named
+by its token standard: ERC20 DUSK and BEP20 DUSK.
 
 The routes, and everything they use, come from the network's file in
 [`@dusk-network/networks`](https://www.npmjs.com/package/@dusk-network/networks),
@@ -77,7 +77,14 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   BNB Smart Chain, a link per chain that opens its route to Dusk.
 - **A task**: the amount, where it goes, and the quote: what you send, the
   network fee as a maximum and its usual cost, the bridge fee, what you
-  receive and when. One line says what becomes public.
+  receive and when. One line says what becomes public. With the EVM wallet on
+  another chain than the route sends from, as the wallet itself says, the
+  button offers to switch it, here and on the review. Nothing goes out from
+  another chain. Under the route, how it's doing, read once as its card opens
+  and kept 10 minutes (`bridgeStatus`): "Paying out. Last payout 12 minutes
+  ago.", what it can pay where a balance limits that, and that it doesn't know
+  where it can't read that. It's only said: nothing waits for it, and nothing
+  it says stops anyone from sending.
 - **Review**: what moves and what becomes public, the checked facts
   (balances, gas, where the payout goes), then each wallet step with the
   lines its window will show, in its order and words, raw values decoded
@@ -87,8 +94,15 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   the one Dusk Wallet prints (older versions show a bridge call only as its
   bytes), and the reviewed request is what is sent.
 - **Receipt**, at `#/transfer/<hash>`: the steps with times, explorer links
-  and hashes, both transactions in full, the fees paid and the receipt link.
-  It shows no balances: the link is safe to share. A withdrawal waiting for
+  and hashes, both transactions in full, the receipt link, and its amounts as
+  every Dusk app says them (`transferLedger`): what you sent, the bridge fee,
+  the network fee and what you received, to the Lux, and gas as wallets write
+  it. It shows no balances: the link is safe to share. While a transfer is on
+  its way, "Tell me when it arrives" asks the browser for a notification, only
+  then, and it stays chosen on this device. Whoever isn't looking at the page
+  when one ends gets that, and the tab's title says so until they're back; where
+  notifications are refused or a page can't send them, as on most phones, it's
+  the title alone, and the receipt says so. A withdrawal waiting for
   its claim counts down, says when a clock change falls inside the wait, and
   offers an .ics file made in the browser ("Add to calendar").
 - **My transfers**: the connected accounts' transfers, read from the networks
@@ -255,8 +269,11 @@ The page writes times, IDs and fees as every Dusk app does
 clock, with the zone ("Today, 14:05 CET", records in full: "Wed 28 Oct
 2026, 14:05 CET"); Dusk contract IDs without 0x and EVM addresses with their
 checksum, shortened as 6…6 for Dusk IDs, accounts and hashes and as 0x and
-4…4 for EVM addresses and transactions; the most a fee can be rounded up,
-and the fee a transfer paid exact in its receipt's details.
+4…4 for EVM addresses and transactions; the most a fee can be rounded up.
+Amounts go by `@dusk-network/app-core/amounts`, as most wallets write them: a
+row in My transfers and the form's balance line up to 4 decimals, rounded down,
+with every digit on hover; Max, the review and the receipt to the Lux, gas
+paid as a row writes it.
 
 The footer and About this page link the Terms of use and Privacy policy the
 network's file names, as the explorer does. A deployment can link its own
@@ -299,8 +316,9 @@ doesn't run it.
 - The browser talks directly to configured Dusk and EVM RPC endpoints.
 - Data drivers run only when they match their pinned SHA-256.
 - Local storage contains transaction metadata, what was read for My
-  transfers and the chains' times, per network and account; no keys and no
-  balances. Where the browser denies the page storage, they're kept in
-  memory while the page is open.
+  transfers, the chains' times, how each route was doing, per network and
+  account, and whether this device was asked to notify; no keys and none of
+  your balances. Where the browser denies the
+  page storage, they're kept in memory while the page is open.
 - Contract IDs, RPC endpoints and this site's origin are deployment trust
   inputs. Review them before publishing.

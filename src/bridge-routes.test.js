@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildRoutes } from "./bridge-routes.js";
+import { networks, routes as networkRoutes } from "@dusk-network/networks";
+
+import { buildRoutes, deployedNetwork } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 
 globalThis.__DUSK_BRIDGE_CONFIG__ = {
@@ -37,3 +39,13 @@ test("routes can be selected by their stable identifier", () => {
   assert.equal(routes.find(({ id }) => id === "dusk-to-ethereum")?.to.id, "ethereum");
   assert.equal(routes.find(({ id }) => id === "unsupported"), undefined);
 });
+
+test("the network's routes run as this deployment says, for what's read about them", () => {
+  const all = networkRoutes(deployedNetwork({ network: networks.testnet, pausedRoutes: [] }));
+  assert.ok(all.length > 0 && all.every((route) => route.running));
+  const [first] = all;
+  const stopped = networkRoutes(deployedNetwork({ network: networks.testnet, pausedRoutes: [first.id] }));
+  assert.equal(stopped.find((route) => route.id === first.id).running, false);
+  assert.ok(stopped.filter((route) => route.id !== first.id).every((route) => route.running));
+});
+

@@ -63,7 +63,7 @@ test("the bridge fee comes off what arrives, and a send at or under it is refuse
   assert.equal(short.insufficient, true);
   assert.equal(buildQuote(routes["service-transfer"], "5", { balance: 10_000_000_000n, cfg, gasPrice: 1n }).insufficient, undefined);
   // Paid out as the chain's own DUSK token.
-  assert.equal(rows(quote).receive, "49 ERC20 DUSK on Ethereum (Sepolia)");
+  assert.equal(rows(quote).receive, "49 ERC20 DUSK on Sepolia");
   assert.equal(rows(quote).fee, "up to 0.0025 DUSK | usually about 0.0019 DUSK");
   // No time is known for this testnet payout, so none is quoted.
   assert.equal(rows(quote).arrives, undefined);

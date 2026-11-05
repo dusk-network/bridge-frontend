@@ -1,8 +1,10 @@
+import { bridgeStatus } from "@dusk-network/app-core/bridge";
 import { createArchive } from "@dusk-network/app-core/history";
 import { evmAddressOf } from "@dusk-network/networks/duskevm";
 import { createMulticallFetch } from "@hdauven/dusk-multicall";
 import { createPublicClient, http } from "viem";
 
+import { deployedNetwork } from "./bridge-routes.js";
 import { config } from "./config.js";
 import { createChainTimes, readDepositLag } from "./chain-times.js";
 import { createDriverLoader } from "./data-driver.js";
@@ -11,6 +13,7 @@ import { createDuskNames } from "./dusk-names.js";
 import { createDuskNode } from "./dusk-node.js";
 import { getDuskWallet } from "./dusk-wallet.js";
 import { createEvmReads } from "./evm-reads.js";
+import { pageStorage } from "./page-storage.js";
 import { resolveTransfer } from "./resolve.js";
 import { createTracking } from "./tracking.js";
 import { createPageWithdrawals } from "./withdrawals.js";
@@ -142,6 +145,17 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
       })
     : null;
 
+  // What a route's status read: kept past a reload, so a later read asks only for what's new.
+  const statusKept = {
+    get: (key) => pageStorage().getItem(`dusk-bridge:${key}`),
+    set: (key, value) => {
+      try {
+        pageStorage().setItem(`dusk-bridge:${key}`, value);
+      } catch {}
+    },
+  };
+
+  const statusNetwork = deployedNetwork(cfg);
   return Object.freeze({
     discovery,
     evmReads,
@@ -151,6 +165,16 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
     resolve: (hash) => resolveTransfer(hash, { cfg, node, rpc }),
     rpc,
     rpcBatch,
+    /** How a route is doing before someone sends: from this deployment's own endpoints. */
+    status: (route) =>
+      bridgeStatus({
+        archive,
+        cache: statusKept,
+        network: statusNetwork,
+        nodeUrl: cfg.dusk.nodeUrl,
+        route: route.id,
+        rpcUrl: urls[route.to.kind === "evm" ? route.to.id : route.from.id],
+      }),
     times,
     tracking,
     withdrawals,

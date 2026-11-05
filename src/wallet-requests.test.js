@@ -31,7 +31,7 @@ const { serviceTransferRequest } = await import("./service-transfer.js");
 const { decodeBridgeCall } = await import("@dusk-network/networks/duskevm");
 const { depositRequest } = await import("./dusk-deposit.js");
 const { submitDuskEvmWithdrawal } = await import("./duskevm-withdrawal.js");
-const { connectEvmWallet, heldAccount, initializeEvmWallet } = await import("./evm-wallet.js");
+const { connectEvmWallet, getEvmState, heldAccount, initializeEvmWallet } = await import("./evm-wallet.js");
 const { approveMigration, submitMigration } = await import("./legacy-migration.js");
 
 // What the review prepares and then sends, as the account it was reviewed for.
@@ -170,9 +170,10 @@ const DUSK = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFv
  * An EIP-1193 wallet stand-in on the reviewed account, in lower case as
  * wallets give it. It signs as the account it has selected, whatever the
  * request's `from` says, or, as a WalletConnect session, as `from`; and
- * `onSwitch` runs while its chain-switch dialog is open.
+ * `onSwitch` runs while its chain-switch dialog is open. `onAccounts` runs as
+ * it's asked for its accounts, as it is right before a request goes out.
  */
-function fakeEvmWallet({ onSwitch = () => {}, signsFrom = false } = {}) {
+function fakeEvmWallet({ onAccounts = () => {}, onSwitch = () => {}, signsFrom = false } = {}) {
   const listeners = new Map();
   const wallet = {
     accounts: [REVIEWED.toLowerCase()],
@@ -181,7 +182,10 @@ function fakeEvmWallet({ onSwitch = () => {}, signsFrom = false } = {}) {
     on: (event, listener) => listeners.set(event, [...(listeners.get(event) ?? []), listener]),
     removeListener: (event, listener) => listeners.set(event, (listeners.get(event) ?? []).filter((other) => other !== listener)),
     async request({ method, params }) {
-      if (method === "eth_accounts") return wallet.accounts;
+      if (method === "eth_accounts") {
+        await onAccounts(wallet);
+        return wallet.accounts;
+      }
       if (method === "eth_chainId") return `0x${wallet.chainId.toString(16)}`;
       if (method === "wallet_switchEthereumChain") {
         wallet.chainId = Number.parseInt(params[0].chainId, 16);
@@ -259,6 +263,32 @@ test("an EVM withdrawal, approval or migration goes out from the account it was 
   delete globalThis.ethereum;
 });
 
+test("an EVM withdrawal, approval or migration isn't sent on another chain than its own", async () => {
+  for (const [name, send] of Object.entries(sends)) {
+    // The wallet says yes to the switch, and stays where it is.
+    const stays = await useEvmWallet({
+      onSwitch: (wallet) => {
+        wallet.chainId = 1;
+      },
+    });
+    await assert.rejects(send(REVIEWED), /still on another chain/u, `${name}, stays`);
+    assert.deepEqual(stays.sent, [], `${name}, stays`);
+    // It switches as asked, then moves away again before the request goes out.
+    let asked = false;
+    const moves = await useEvmWallet({
+      onAccounts: (wallet) => {
+        if (asked) wallet.chainId = 1;
+      },
+      onSwitch: () => {
+        asked = true;
+      },
+    });
+    await assert.rejects(send(REVIEWED), /chain/u, `${name}, moves`);
+    assert.deepEqual(moves.sent, [], `${name}, moves`);
+  }
+  delete globalThis.ethereum;
+});
+
 test("where Reown picks the EVM account, the reviewed one may be any the wallet lists; otherwise it's the wallet's first", () => {
   const listed = [OTHER, REVIEWED.toLowerCase()];
   assert.equal(heldAccount(listed, REVIEWED, { reownPicks: true }), REVIEWED.toLowerCase());
@@ -270,8 +300,13 @@ test("where Reown picks the EVM account, the reviewed one may be any the wallet 
 
 /** Reown's AppKit stand-in, connected to the reviewed account through `wallet`, by a connector of `type`. */
 function fakeAppKit() {
-  const subscribers = { account: [], providers: [] };
+  const subscribers = { account: [], network: [], providers: [] };
   const appKit = {
+    // AppKit's own idea of the network: it can be one it saved, whatever the wallet is on.
+    network(chainId) {
+      appKit.getChainId = () => chainId;
+      subscribers.network.forEach((listener) => listener({ chainId }));
+    },
     connect(wallet, type) {
       appKit.connection = { type, wallet };
       subscribers.providers.forEach((listener) => listener({ eip155: wallet }));
@@ -285,7 +320,7 @@ function fakeAppKit() {
     getWalletProviderType: () => appKit.connection?.type,
     open: async () => {},
     subscribeAccount: (listener) => subscribers.account.push(listener),
-    subscribeNetwork: () => {},
+    subscribeNetwork: (listener) => subscribers.network.push(listener),
     subscribeProviders: (listener) => subscribers.providers.push(listener),
     updateOptions: (options) => Object.assign(appKit.options, options),
   };
@@ -317,6 +352,42 @@ test("through Reown's modal, a browser wallet that selected another account and 
   // Neither Coinbase Wallet nor Base Account: their SDKs call Coinbase as they load.
   assert.equal(globalThis.reownAppKit.options.enableCoinbase, false);
   assert.equal(globalThis.reownAppKit.options.enableBaseAccount, false);
+});
+
+test("through Reown, the page's chain is the one the wallet says, whatever AppKit saved or guessed", async () => {
+  const kit = globalThis.reownAppKit;
+  // AppKit's own sheet for a chain it doesn't know can't be closed: the card offers the switch.
+  assert.equal(kit.options.allowUnsupportedChain, true);
+  const answered = () => new Promise(setImmediate);
+
+  // The wallet's on Ethereum; AppKit starts with the test chain it saved.
+  const wallet = fakeEvmWallet();
+  wallet.chainId = 1;
+  kit.connect(wallet, "INJECTED");
+  kit.network(745_745);
+  await answered();
+  assert.equal(getEvmState().chainId, 1);
+
+  // The other way round: the wallet's where it should be, and AppKit still has the chain it saved.
+  wallet.chainId = 745_745;
+  wallet.emit("chainChanged", "0xb6111");
+  kit.network(1);
+  await answered();
+  assert.equal(getEvmState().chainId, 745_745);
+
+  // A slow answer doesn't overwrite what the wallet said since.
+  let answer;
+  const slow = fakeEvmWallet();
+  slow.chainId = 1;
+  kit.connect(slow, "INJECTED");
+  await answered();
+  const request = slow.request;
+  slow.request = (ask) => (ask.method === "eth_chainId" ? new Promise((settle) => (answer = () => settle("0x1"))) : request(ask));
+  kit.network(1);
+  slow.emit("chainChanged", "0xb6111");
+  answer();
+  await answered();
+  assert.equal(getEvmState().chainId, 745_745);
 });
 
 test("through Reown, a WalletConnect session sends from the reviewed account wherever the wallet lists it", async () => {

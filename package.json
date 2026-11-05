@@ -22,7 +22,7 @@
     "vite": "8.3.5"
   },
   "dependencies": {
-    "@dusk-network/app-core": "0.6.0",
+    "@dusk-network/app-core": "0.7.0",
     "@dusk-network/networks": "0.3.2",
     "@dusk/connect": "npm:@jsr/dusk__connect@0.3.0",
     "@dusk/evm-sdk": "npm:@jsr/dusk__evm-sdk@0.1.0-beta.3",

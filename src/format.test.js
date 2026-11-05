@@ -7,7 +7,6 @@ import {
   clockChangeNote,
   formatDateTime,
   formatDusk,
-  formatExactFee,
   formatFee,
   formatLux,
   formatMaxFee,
@@ -56,7 +55,6 @@ test("Dusk fees are rounded up where they're the most a step costs, to the neare
   // Under 0.01 DUSK, two significant digits.
   assert.equal(formatMaxFee(49_999n), "0.00005");
   assert.deepEqual([1_850_000n, 1_986_599n, 2_209_505n].map(formatTypicalFee), ["0.0019", "0.002", "0.0022"]);
-  assert.deepEqual([1_986_599n, 51_000_000n, 1_000_000_000_000n].map(formatExactFee), ["0.001986599", "0.051", "1,000"]);
 });
 
 test("seven days across the October clock change say so", () => {

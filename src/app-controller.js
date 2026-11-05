@@ -8,6 +8,7 @@ import { topGap } from "@dusk-network/app-core/history";
 import { toDuskName } from "@duskdomains/sdk/names";
 
 import { entryId, readActivity, recordActivity, saveActivity, updateActivity, useActivityNetwork } from "./activity.js";
+import { NOTICE_WORDS, createArrivalNotice } from "./arrival-notice.js";
 import { bridgeRoutes, getBridgeRoute } from "./bridge-routes.js";
 import { cardRoute, choosePair, entryRoutes, flipRoute, followsWallets, fromChoices, handedOverRecipient, primaryButton, routeBetween, toChoices } from "./bridge-card.js";
 import { claimReminder } from "./calendar.js";
@@ -18,15 +19,16 @@ import { followAfterDiscovery, mergeTransfer, mergeTransfers, partyKey } from ".
 import { createDiscoveryRuns } from "./discovery-runs.js";
 import { depositRequest } from "./dusk-deposit.js";
 import { createDuskConnection, ensureDuskConnected, sendDuskContractCall, sendDuskTransfer } from "./dusk-wallet.js";
-import { submitDuskEvmWithdrawal } from "./duskevm-withdrawal.js";
-import { connectEvmWallet, getEvmState, initializeEvmWallet, subscribeEvmWallet } from "./evm-wallet.js";
+import { duskEvmNetwork, submitDuskEvmWithdrawal } from "./duskevm-withdrawal.js";
+import { connectEvmWallet, ensureEvmChain, getEvmState, initializeEvmWallet, subscribeEvmWallet } from "./evm-wallet.js";
 import { createFormReads } from "./form-reads.js";
-import { amountForInput, formatDusk, formatLux, formatUnitsGrouped, formatDuskPlain } from "./format.js";
+import { amountForInput, formatLux, formatDuskPlain } from "./format.js";
 import { approveMigration, submitMigration } from "./legacy-migration.js";
 import { bridgeTasks, linkedRoute, networkName, networkNames, notRunning, routeUnits, tokenName } from "./names.js";
 import {
   actionLead,
   actionPrivacy,
+  balanceLine,
   pricedReview,
   recipientLine,
   DUSK_WALLET_URL,
@@ -43,6 +45,7 @@ import { serviceTransferRequest } from "./service-transfer.js";
 import { createServices, proofSubmitterFor } from "./services.js";
 import { createLookupFlow } from "./lookup-flow.js";
 import { createReceiptLookups } from "./receipt-lookups.js";
+import { createRouteStatus, statusLine } from "./route-status.js";
 import { checkDuskRecipient, checkEvmRecipient, settledEvmRecipient } from "./recipient.js";
 import { readWatched, saveWatched, watchTarget } from "./watched-account.js";
 import { SIGNER_MOVED, createReviewSession, notSent, sameSigner, sentActionPatch } from "./review-session.js";
@@ -140,6 +143,15 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   const duskGasPrice = () => formReads.reads.gasPrice ?? 1n;
   /** Reads the gas price again; the page is drawn again where it moved. */
   const refreshPrice = () => formReads.price();
+  // Says when a transfer ends to whoever isn't looking. A phone's browser can't notify from a page.
+  const arrivals = createArrivalNotice({
+    available: () => !isPhone(),
+    onOpen: (href) => {
+      globalThis.location.hash = href;
+    },
+  });
+  // How the card's route is doing. It's only said: nothing waits for it.
+  const routeStatus = createRouteStatus({ onChange: () => refreshForm(), read: (route) => services.status(route) });
   // The review on screen; a request prepared for it fills nothing else.
   const reviews = createReviewSession();
   // How long each route takes on this network: what the chains said, and
@@ -495,6 +507,15 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     return route.signer === "dusk" ? Boolean(duskAccount()) : Boolean(evmAccount());
   }
 
+  /** The chain an EVM wallet signs `route` on. */
+  const signingChain = (route) => (route.from.id === "dusk-evm" ? duskEvmNetwork() : cfg.evmNetworks[route.from.id]);
+
+  /** The chain to switch to: where the wallet that signs `route` says it's on another. Else "". */
+  function switchTo(route) {
+    const on = state.evmState.chainId;
+    return route.signer === "evm" && evmAccount() && on && on !== signingChain(route)?.chainId ? networkName(cfg, route.from.id) : "";
+  }
+
   const netOf = (id) => ({ id, name: networkName(cfg, id) });
 
   /** The card's networks to choose from, with DuskEVM shown as not live yet where it isn't. */
@@ -522,12 +543,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const { receive: receiveUnit, send: unit } = routeUnits(route);
     // What the source holds: the public balance on Dusk, the wallet's on an EVM chain.
     const holdings = route.signer === "dusk" ? reads.duskBalance : route.mode === "migration" ? reads.migration?.balanceWei : reads.l2?.balanceWei;
-    const balance =
-      holdings === null || holdings === undefined
-        ? ""
-        : route.signer === "dusk"
-          ? formatDusk(holdings, 4)
-          : `${formatUnitsGrouped(holdings, 18, 4)} ${unit}`;
+    const balance = balanceLine(route, holdings);
     const destination = destinationFor(route);
     const typed = typedRecipient(route);
     // A typed .dusk name, once its lookup found the account it points to.
@@ -582,6 +598,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       phoneOnly,
       route,
       signerConnected: signerReady(route),
+      switchTo: switchTo(route),
+      switching: Boolean(state.form.switching),
       unit,
     });
     return {
@@ -593,7 +611,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       // DUSK on Ethereum or BNB Smart Chain, for whoever doesn't know to pick it as From.
       entry: entryRoutes(routes, route).map((item) => ({ href: moveHref(item.id), name: networkName(cfg, item.from.id) })),
       error: state.form.error,
-      from: { balance, balanceLabel: route.signer === "dusk" ? "Public balance" : "Balance", net: netOf(route.from.id) },
+      from: { balance: balance.text, balanceExact: balance.exact, balanceLabel: route.signer === "dusk" ? "Public balance" : "Balance", net: netOf(route.from.id) },
       fromChoices: state.form.menu === "from" ? networkChoices("from", route) : [],
       menu: state.form.menu,
       needsCount: transfersVm().needs,
@@ -608,6 +626,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       receiveUnit,
       routeLine: routeLine(route, cfg, { gasPrice: duskGasPrice(), timing: timing() }),
       routeOpen: state.form.routeOpen,
+      status: statusLine(routeStatus.get(route), { amountLux: quote.amountLux }),
       steps: routeSteps(route, quote),
       tab: "bridge",
       to: toVm,
@@ -659,6 +678,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   function loadReads() {
     const route = formRoute();
     if (!route) return undefined;
+    routeStatus.open(route);
     return formReads.load({ dusk: duskAccount(), evm: evmAccount(), gas: gasInputs(route), route });
   }
 
@@ -702,7 +722,11 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       const previous = before.get(entry.id);
       if (previous && previous !== entry.status && entry.status !== "pending") {
         const route = routeOf(entry.routeId);
-        if (route) announce(`${transferView(entry, { cfg, route }).title}.`);
+        if (route) {
+          const { title } = transferView(entry, { cfg, route });
+          announce(`${title}.`);
+          arrivals.ended({ href: transferHref(entry.hash), id: entry.id, title });
+        }
       }
     }
   }
@@ -883,7 +907,17 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     return receiptPage({
       ...receiptModel(entry, { cfg, gasPrice: duskGasPrice(), own: { account: duskAccount(), name: duskName() }, owner: listedDusk(), route, submitter: proofSubmitterFor(duskAccount()), timing: timing(), url: receiptUrl(entry.hash) }),
       canAct: duskState().installed,
+      notice: arrivals.state(),
     });
+  }
+
+  /** Draws the receipt's line about being told again, with focus on what took the press's place. */
+  function showNotice() {
+    renderMain();
+    const line = root.querySelector("#notify");
+    (line?.querySelector("button") ?? line)?.focus();
+    const words = NOTICE_WORDS[arrivals.state()];
+    if (words) announce(words);
   }
 
   // -------------------------------------------------------------------------
@@ -982,7 +1016,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       canConfirm: !review.busy && !review.stale && Boolean(step?.lines) && review.checks.every((check) => check.ok),
       cfgLinks: explorerFor,
       checks: review.checks,
-      confirmLabel: review.busy ? `Waiting for ${walletName}…` : step?.confirmLabel ?? "Confirm",
+      // On another chain, it's asked for first, as the card does.
+      confirmLabel: review.busy ? `Waiting for ${walletName}…` : (review.kind === "send" && switchTo(route) ? `Switch to ${switchTo(route)}` : step?.confirmLabel) ?? "Confirm",
       error: review.error,
       feeRows: review.feeRows,
       lead: review.lead ?? null,
@@ -1265,6 +1300,13 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     review.error = "";
     renderSheet();
     try {
+      if (review.kind === "send" && switchTo(route)) {
+        await ensureEvmChain(signingChain(route));
+        review.busy = false;
+        reviews.stepShown();
+        renderSheet();
+        return;
+      }
       if (review.kind === "prove" || review.kind === "finalize") {
         const { hash } = await sendDuskContractCall(review.request, { account: review.signer?.account });
         const entry = state.activity.find((item) => item.id === review.entryId);
@@ -1397,6 +1439,29 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     } catch (error) {
       showError(connectError(error, "evm"));
     }
+  }
+
+  /** Asks the EVM wallet for the chain the card's route sends from. Nothing is sent. */
+  async function switchChain() {
+    const form = state.form;
+    const route = formRoute();
+    if (!route || form.switching) return;
+    form.switching = true;
+    form.error = "";
+    refreshForm();
+    try {
+      await ensureEvmChain(signingChain(route));
+    } catch (error) {
+      form.error = connectError(error, "evm");
+      form.switchError = form.error;
+    }
+    form.switching = false;
+    if (state.form === form) refreshForm();
+  }
+
+  /** Why a switch didn't go stops mattering once the wallet's chain moved after all. */
+  function forgetSwitchError() {
+    if (state.form?.error && state.form.error === state.form.switchError) state.form.error = "";
   }
 
   /** Why connecting a wallet didn't: nothing was being sent. */
@@ -1628,6 +1693,14 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         refreshForm();
         loadGasSoon();
       },
+      "notify-off": () => {
+        arrivals.stop();
+        showNotice();
+      },
+      "notify-on": async () => {
+        await arrivals.choose();
+        showNotice();
+      },
       "open-about": () => openSheet("contracts", target),
       "open-contracts": () => openSheet("contracts", target),
       "open-network": () => openSheet("network", target),
@@ -1672,6 +1745,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         renderMain();
       },
       skip: () => slot("main").querySelector("#main")?.focus(),
+      "switch-chain": switchChain,
       // The card: its network lists, the flip, and the recipient and gas.
       "open-menu": () => {
         const side = target.dataset.side;
@@ -1740,6 +1814,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
 
   return {
     async start() {
+      // First of all: a transfer can end as the page opens, before the wallets answer.
+      globalThis.addEventListener?.("focus", arrivals.seen);
+      globalThis.document?.addEventListener("visibilitychange", arrivals.seen);
       if (isCardPage()) ensureCard();
       render();
       for (const entry of state.activity) if (entry.status === "pending" || !entry.status) track(entry.id);
@@ -1765,8 +1842,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         if (changed || !isCardPage()) renderMain();
       });
       subscribeEvmWallet((next) => {
-        const changed = next.account !== state.evmState.account || next.chainId !== state.evmState.chainId;
+        const chainChanged = next.chainId !== state.evmState.chainId;
         const accountChanged = next.account !== state.evmState.account;
+        const changed = accountChanged || chainChanged;
         state.evmState = next;
         if (accountChanged) {
           if (next.account) forgetConnectRefusal();
@@ -1784,9 +1862,15 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         }
         renderChrome();
         if (accountChanged) followWallets();
+        if (chainChanged) forgetSwitchError();
         if (changed) {
           renderMain();
           if (isCardPage()) void loadReads();
+        }
+        // The review's button follows the wallet's chain; a double-click doesn't land on what it became.
+        if (chainChanged && state.sheet === "review" && reviews.current) {
+          reviews.stepShown();
+          renderSheet();
         }
       });
       const refreshDusk = () => {

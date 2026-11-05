@@ -100,6 +100,18 @@ test("the button says what's missing, then Review bridge", () => {
   assert.equal(primaryButton({ ...ready, amountLux: null }).enabled, false);
 });
 
+test("a wallet on another chain than its route's is offered the switch, before anything else it can do", () => {
+  const route = routeBetween(buildRoutes(running), "ethereum", "dusk");
+  const ready = { amountLux: 1_000_000_000n, destination: "x", route, signerConnected: true, switchTo: "Sepolia" };
+  assert.deepEqual(primaryButton(ready), { action: "switch-chain", enabled: true, label: "Switch to Sepolia" });
+  assert.deepEqual(primaryButton({ ...ready, amountLux: null }), { action: "switch-chain", enabled: true, label: "Switch to Sepolia" });
+  // Asked: pressing again would only ask again.
+  assert.deepEqual(primaryButton({ ...ready, switching: true }), { action: null, enabled: false, label: "Switching to Sepolia…" });
+  // Without the wallet, or on a route that isn't running, there's nothing to switch.
+  assert.equal(primaryButton({ ...ready, signerConnected: false }).action, "connect-evm");
+  assert.equal(primaryButton({ ...ready, route: { ...route, paused: true } }).action, null);
+});
+
 test("a link to a task this network doesn't have opens no route, never another transfer", () => {
   const routes = buildRoutes(mainnet);
   const tasks = bridgeTasks(mainnet, routes);
