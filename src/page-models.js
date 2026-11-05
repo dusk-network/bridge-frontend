@@ -7,7 +7,7 @@ import { formatEvmAddress } from "@dusk-network/networks/format";
 
 import { explorerAddressUrl } from "./contracts.js";
 import { groupTransfers, shownFor } from "./discovery.js";
-import { aboutFee, formatDateTime, formatDusk, formatExactFee, formatLux, formatMaxFee, formatUnitsGrouped } from "./format.js";
+import { aboutFee, formatDateTime, formatDusk, formatExactFee, formatLux, formatMaxFee, formatUnitsGrouped, formatWei } from "./format.js";
 import { gasCoin, networkName, routeTitle, tokenName } from "./names.js";
 import { transferHref } from "./permalink.js";
 import { buildQuote, routeDuskFees, stepFeeText, withdrawalStepMax } from "./quote.js";
@@ -257,7 +257,12 @@ export function receiptModel(entry, { cfg, gasPrice = 1n, locale, now = Date.now
   }
   // The record: each fee as it was paid, to the last decimal.
   if (entry.feeLux) details.push({ label: "Fee paid", value: `${formatExactFee(BigInt(entry.feeLux))} DUSK on ${from}` });
-  if (entry.feeWei) details.push({ label: "Fee paid", value: `${formatUnitsGrouped(BigInt(entry.feeWei), 18)} ${gasCoin(cfg, route.from.id)} on ${from}` });
+  // Gas, as wallets write it: nobody reads 18 decimals. The rest shows on hover.
+  if (entry.feeWei) {
+    const paid = formatWei(entry.feeWei);
+    const coin = gasCoin(cfg, route.from.id);
+    details.push({ exact: `${paid.exact} ${coin} on ${from}`, label: "Fee paid", value: `${paid.text} ${coin} on ${from}` });
+  }
   if (entry.proveFeeLux) details.push({ label: "Proof fee paid", value: `${formatExactFee(BigInt(entry.proveFeeLux))} DUSK on Dusk` });
   if (entry.claimFeeLux) details.push({ label: "Claim fee paid", value: `${formatExactFee(BigInt(entry.claimFeeLux))} DUSK on Dusk` });
   if (entry.sender) details.push({ html: addressHtml(cfg, sourceNetwork, entry.sender, `sender on ${from}`), label: `From, on ${from}` });

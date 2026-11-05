@@ -98,8 +98,8 @@ test("the testnet profile stays on Dusk testnet, Sepolia and DuskEVM testnet", (
   assert.deepEqual(
     routes.map((route) => `${route.from.label} → ${route.to.label}`),
     [
-      "Ethereum (Sepolia) → Dusk",
-      "Dusk → Ethereum (Sepolia)",
+      "Sepolia → Dusk",
+      "Dusk → Sepolia",
       "Dusk → DuskEVM",
       "DuskEVM → Dusk",
     ],

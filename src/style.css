@@ -655,6 +655,16 @@ form.group .l1 { display: block; color: var(--text); font-size: 14px; font-weigh
   .act .trs .tr { grid-template-columns: 76px minmax(0, 1fr); padding: 12px 4px; }
   .act .trs .pair .cm { width: 26px; height: 26px; }
   .act-h { flex-direction: column; }
+  /* Everything a thumb presses is 44 px each way, as in the web wallet. */
+  .skip, .hdr-r .net, .hdr-r .wpill, .tab, .netbtn, .btn.sm, .btn.xs { height: 44px; }
+  .panel-f .mini { min-width: 44px; height: 44px; }
+  .brand { min-width: 44px; }
+  .bcard-top .icon-btn, .icon-btn, .icon-btn.round { width: 44px; height: 44px; }
+  .flip { width: 44px; height: 44px; margin: -22px 0 0 -22px; }
+  .amt-row input { min-height: 44px; }
+  .linkish, .lnk, .topbar .bk, .foot a, .about-links a, .entry a, .note a, .strip a { display: inline-flex; align-items: center; min-height: 44px; }
+  .route > summary { min-height: 44px; }
+  .wl-more > summary { padding: 13px 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

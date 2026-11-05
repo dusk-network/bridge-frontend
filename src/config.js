@@ -78,7 +78,7 @@ function evmNetwork(net, id) {
   const migration = net.routes.migrations.find((route) => route.chain === id);
   const network = {
     chainId: positiveInteger(`VITE_${prefix}_CHAIN_ID`, chain.chainId),
-    // The name wallets list; the page says its own (names.js).
+    // The chain's one name: what wallets list, and what the page says (names.js).
     chainName: value(`VITE_${prefix}_CHAIN_NAME`, chain.name),
     currency: chain.currency,
     explorerUrl: value(`VITE_${prefix}_EXPLORER_URL`, chain.explorerUrl),

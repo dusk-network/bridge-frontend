@@ -34,15 +34,15 @@ stays on that network's counterparts. There are three routes:
 | --- | --- |
 | BNB Smart Chain → Dusk | |
 | Dusk → BNB Smart Chain | |
-| Ethereum → Dusk | Ethereum (Sepolia) → Dusk, not running |
-| | Dusk → Ethereum (Sepolia), not running |
+| Ethereum → Dusk | Sepolia → Dusk, not running |
+| | Dusk → Sepolia, not running |
 | Dusk → DuskEVM, once DuskEVM is on mainnet | Dusk → DuskEVM |
 | DuskEVM → Dusk, once DuskEVM is on mainnet | DuskEVM → Dusk |
 
 Each chain has one name per network: Dusk and DuskEVM keep theirs next to the
-network badge, and Ethereum and BNB Smart Chain name their testnet in
-brackets. DUSK on them is named by its token standard: ERC20 DUSK and BEP20
-DUSK.
+network badge, and Ethereum and BNB Smart Chain go by what the network's file
+calls them there, as the web wallet and the extension do. DUSK on them is named
+by its token standard: ERC20 DUSK and BEP20 DUSK.
 
 The routes, and everything they use, come from the network's file in
 [`@dusk-network/networks`](https://www.npmjs.com/package/@dusk-network/networks),

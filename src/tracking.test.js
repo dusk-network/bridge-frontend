@@ -264,7 +264,7 @@ test("a migration is pending until Messina pays it out on Dusk", async () => {
 
   const waiting = await tracking.refresh(entry, ROUTES.migration);
   assert.equal(waiting.status, "pending");
-  assert.equal(waiting.note, "Waiting for Ethereum (Sepolia).");
+  assert.equal(waiting.note, "Waiting for Sepolia.");
   // Rebuilt from the hash alone: the amount and recipient come from the call.
   assert.equal(waiting.amountLux, "3000000000");
   assert.equal(waiting.destination, SENDER);

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { networks } from "@dusk-network/networks";
+
 import { contractGroups } from "./contracts.js";
 import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
@@ -28,24 +30,27 @@ test("each chain has one name per network", () => {
   );
   assert.deepEqual(
     { ...networkNames(profile("testnet")) },
-    {
-      badge: "Testnet",
-      bsc: "BNB Smart Chain (testnet)",
-      dusk: "Dusk",
-      "dusk-evm": "DuskEVM",
-      ethereum: "Ethereum (Sepolia)",
-    },
+    { badge: "Testnet", bsc: "BNB Smart Chain", dusk: "Dusk", "dusk-evm": "DuskEVM", ethereum: "Sepolia" },
   );
+});
+
+test("a chain goes by what the network's file calls it, as the web wallet and the extension do", () => {
+  // As testnet's file names its test chain, and a deployment's own name for one.
+  assert.equal(networkName({ evmNetworks: { bsc: { chainName: "BSC test chain" } }, profile: "testnet" }, "bsc"), "BSC test chain");
+  assert.equal(networkName(profile("mainnet", { VITE_BSC_CHAIN_NAME: "BSC" }), "bsc"), "BSC");
+  for (const cfg of [profile("mainnet"), profile("testnet", DUSKEVM)])
+    for (const route of buildRoutes(cfg).filter((each) => each.from.id !== "dusk" && each.from.id !== "dusk-evm"))
+      assert.equal(route.from.label, networks[cfg.profile].routes.chains[route.from.id].name);
 });
 
 test("routes and tasks use the same names everywhere", () => {
   const cfg = profile("testnet", DUSKEVM);
   const routes = buildRoutes(cfg);
   const labels = new Set(routes.flatMap((route) => [route.from.label, route.to.label]));
-  assert.deepEqual([...labels].sort(), ["Dusk", "DuskEVM", "Ethereum (Sepolia)"]);
+  assert.deepEqual([...labels].sort(), ["Dusk", "DuskEVM", "Sepolia"]);
   assert.deepEqual(
     routes.map((route) => routeTitle(cfg, route)),
-    ["Ethereum (Sepolia) to Dusk", "Dusk to Ethereum (Sepolia)", "Dusk to DuskEVM", "DuskEVM to Dusk"],
+    ["Sepolia to Dusk", "Dusk to Sepolia", "Dusk to DuskEVM", "DuskEVM to Dusk"],
   );
   assert.equal(networkName(profile("mainnet"), "dusk-evm"), "DuskEVM");
 });
@@ -65,7 +70,7 @@ test("the bridge has three routes: BSC both ways, Ethereum one way, and DuskEVM"
   const withDuskEvm = profile("testnet", DUSKEVM);
   assert.deepEqual(
     bridgeTasks(withDuskEvm, buildRoutes(withDuskEvm)).map((task) => task.title),
-    ["Ethereum (Sepolia) ↔ Dusk", "Dusk ↔ DuskEVM"],
+    ["Sepolia ↔ Dusk", "Dusk ↔ DuskEVM"],
   );
   // A link names a route by its ID, as one of the three routes, or as earlier links did.
   const opens = (name) => linkedRoute(name, tasks, routes)?.id ?? null;
@@ -98,10 +103,10 @@ test("DUSK on an EVM chain is named by its token standard, never old", () => {
   assert.ok(labels.includes("BEP20 DUSK") && labels.includes("ERC20 DUSK"), labels.join(" | "));
 });
 
-test("no label says Testnet, L1 or Sepolia on its own", () => {
+test("no label says Testnet or L1", () => {
   for (const cfg of [profile("testnet", DUSKEVM), profile("mainnet")])
     for (const route of buildRoutes(cfg))
       for (const label of [route.from.label, route.to.label]) {
-        assert.doesNotMatch(label, /Testnet|L1|^Sepolia/u);
+        assert.doesNotMatch(label, /Testnet|L1/u);
       }
 });

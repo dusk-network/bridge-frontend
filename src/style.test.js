@@ -62,6 +62,25 @@ test("the amount's error clears the swap button, on a phone and a computer", () 
   assert.ok(clearance >= overhang, `${clearance}px under the error, ${overhang}px of button`);
 });
 
+test("at phone width, everything a thumb presses is 44 px each way", () => {
+  // The phone's rules, by each selector they name.
+  const phone = css.slice(css.indexOf("@media (max-width: 767px)"), css.indexOf("@media (prefers-reduced-motion"));
+  const rules = [...phone.matchAll(/^ {2}([^{}@/]+?) \{([^}]*)\}/gmu)].flatMap(([, selectors, body]) => selectors.split(",").map((selector) => [selector.trim(), body]));
+  const size = (selector, ...properties) =>
+    Math.max(
+      ...rules
+        .filter(([named]) => named === selector)
+        .flatMap(([, body]) => properties.map((property) => Number.parseFloat(new RegExp(`(?:^|;)\\s*${property}:\\s*([\\d.]+)px`, "u").exec(body)?.[1] ?? 0))),
+      0,
+    );
+  const tall = [".hdr-r .net", ".hdr-r .wpill", ".tab", ".netbtn", ".btn.sm", ".btn.xs", ".panel-f .mini", ".bcard-top .icon-btn", ".icon-btn", ".icon-btn.round", ".flip", ".amt-row input", ".linkish", ".lnk", ".topbar .bk", ".foot a", ".about-links a", ".entry a", ".route > summary"];
+  for (const selector of tall) assert.ok(size(selector, "height", "min-height") >= 44, `${selector} is ${size(selector, "height", "min-height")} px tall`);
+  for (const selector of [".brand", ".panel-f .mini", ".bcard-top .icon-btn", ".icon-btn", ".icon-btn.round", ".flip"]) assert.ok(size(selector, "width", "min-width") >= 44, `${selector} is ${size(selector, "width", "min-width")} px wide`);
+  // The swap button, half over the From panel on a phone too, still clears the amount's error.
+  const clearance = 12 + 10;
+  assert.ok(size(".flip", "height") / 2 - 3 <= clearance);
+});
+
 test("addresses render without ligatures or contextual alternates, so 0x stays 0x", () => {
   assert.match(css, /\.mono, code \{[^}]*font-variant-ligatures: none;[^}]*font-feature-settings: "liga" 0, "calt" 0;/u);
   assert.match(css, /\.mono-input \{[^}]*font-variant-ligatures: none;/u);
