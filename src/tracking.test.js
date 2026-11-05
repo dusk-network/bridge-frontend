@@ -806,6 +806,33 @@ test("the scheduler checks an entry until it ends", async () => {
   assert.deepEqual(seen, ["a", "a", "a"]);
 });
 
+test("a transfer looked out for now is checked every 5 seconds, any other every 15", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const checks = { due: 0, other: 0 };
+  const scheduler = createScheduler({
+    check: async (id) => {
+      checks[id] += 1;
+      return { id, status: "pending" };
+    },
+    // As a receipt on screen waits for its transfer, around when it usually arrives.
+    due: (entry) => entry.id === "due",
+  });
+  // Each check's answer, and the next check it sets, before time moves on.
+  const answered = () => new Promise((resolve) => setImmediate(resolve));
+  scheduler.track("due");
+  scheduler.track("other");
+  t.mock.timers.tick(0);
+  await answered();
+  assert.deepEqual(checks, { due: 1, other: 1 });
+  // Fifteen seconds on, 5 at a time.
+  for (let step = 0; step < 3; step += 1) {
+    t.mock.timers.tick(5_000);
+    await answered();
+  }
+  assert.deepEqual(checks, { due: 4, other: 2 });
+  scheduler.stop();
+});
+
 test("tracking an entry again while it's being checked keeps one loop", async () => {
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const calls = [];

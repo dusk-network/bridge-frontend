@@ -46,6 +46,7 @@ import { createServices, proofSubmitterFor } from "./services.js";
 import { createLookupFlow } from "./lookup-flow.js";
 import { createReceiptLookups } from "./receipt-lookups.js";
 import { createRouteStatus, statusLine } from "./route-status.js";
+import { arrivalDue, routeTime } from "./route-times.js";
 import { checkDuskRecipient, checkEvmRecipient, settledEvmRecipient } from "./recipient.js";
 import { readWatched, saveWatched, watchTarget } from "./watched-account.js";
 import { SIGNER_MOVED, createReviewSession, notSent, sameSigner, sentActionPatch } from "./review-session.js";
@@ -745,7 +746,15 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     if (state.page.page === "transfers" || (state.page.page === "transfer" && canonicalHash(entry.hash) === state.page.hash)) renderMain();
     return state.activity.find((item) => item.id === id) ?? null;
   }
-  const scheduler = createScheduler({ check: checkEntry });
+  const scheduler = createScheduler({
+    check: checkEntry,
+    // Its receipt on screen, around when it usually arrives: checked every 5
+    // seconds, so the receipt says it arrived soon after it did.
+    due: (entry) => {
+      const route = routeOf(entry.routeId);
+      return state.page.page === "transfer" && canonicalHash(entry.hash) === state.page.hash && Boolean(route) && arrivalDue(route, routeTime(route, cfg, timing()), entry);
+    },
+  });
 
   function track(id, { delay = 0 } = {}) {
     if (delay) setTimeout(() => scheduler.track(id), delay);

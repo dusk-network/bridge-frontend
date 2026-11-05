@@ -151,7 +151,10 @@ account so the next visit asks only for what is new.
 Every entry is rebuilt from its route and source transaction hash, so a
 receipt link or a looked-up hash opens the same transfer on any device.
 Which payout or credit is a transfer's comes from
-`@dusk-network/app-core/bridge`.
+`@dusk-network/app-core/bridge`. A transfer on its way is checked every 15
+seconds, every minute while the page is in the background, and every 5
+seconds while its receipt is open around when it usually arrives: from a
+minute before its usual time until five minutes after.
 
 - **Migrations** complete when the Dusk payout appears: Messina pays out the
   migrated amount with the migration's transaction hash as the memo

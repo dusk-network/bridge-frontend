@@ -444,11 +444,12 @@ export function createTracking(deps) {
 }
 
 /**
- * Re-checks pending entries until they end: often while an action waits,
- * less when the page is hidden.
+ * Re-checks pending entries until they end: often while an action waits, or
+ * while `due` says an entry's arrival is looked out for now, less when the
+ * page is hidden.
  */
-export function createScheduler({ check, intervals = {} }) {
-  const delays = { action: 5_000, active: 15_000, hidden: 60_000, ...intervals };
+export function createScheduler({ check, due = () => false, intervals = {} }) {
+  const delays = { action: 5_000, active: 15_000, due: 5_000, hidden: 60_000, ...intervals };
   const timers = new Map();
   // Entries being checked now. Tracking one again then asks for one more
   // check right after it, so each entry has one loop and its patches land in
@@ -458,9 +459,8 @@ export function createScheduler({ check, intervals = {} }) {
 
   function delayFor(entry) {
     if (entry?.pendingAction) return delays.action;
-    return globalThis.document?.visibilityState === "hidden"
-      ? delays.hidden
-      : delays.active;
+    if (globalThis.document?.visibilityState === "hidden") return delays.hidden;
+    return entry && due(entry) ? delays.due : delays.active;
   }
 
   async function run(id) {
