@@ -465,6 +465,11 @@ test("a receipt says the transfer's amounts as every Dusk app does, to the Lux",
   // Failed on Dusk: nothing moved, and its fee stands alone.
   assert.deepEqual(rows({ amountLux: "2053082083", feeLux: "1859281", note: "The Dusk transaction failed.", status: "failed" }, T["duskevm-deposit"]), [["Network fee", "0.001859281 DUSK"]]);
   // Went through and pays nothing out: the DUSK moved, and nothing came of it.
+  // A failure past its own chain still moved what was sent; one on its own chain moved nothing.
+  const sentOf = (entry) => rows({ amountLux: "2053082083", feeLux: "1859281", status: "failed", ...entry }, service).some(([label]) => label === "You sent");
+  assert.equal(sentOf({ note: "The memo isn't an EVM address, so the bridge won't pay it out." }), true);
+  assert.equal(sentOf({ sourceFailed: true }), false);
+  assert.equal(sentOf({ note: "The transfer failed on Dusk." }), false);
   assert.deepEqual(rows({ amountLux: "500000000", feeLux: "1859281", receivedLux: "0", status: "failed" }, service).filter(([label]) => label !== "Bridge fee"), [
     ["You sent", "0.5 DUSK"],
     ["Network fee", "0.001859281 DUSK"],

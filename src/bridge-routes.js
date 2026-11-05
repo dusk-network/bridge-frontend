@@ -20,6 +20,20 @@ const MODES = Object.freeze({
  * marked `paused`: it's shown as not running, and the transfers on it are
  * still followed.
  */
+/**
+ * The network as this deployment runs it: routes it pauses or starts, by
+ * `pausedRoutes`, in place of what the network's file says.
+ */
+export function deployedNetwork(cfg) {
+  const paused = new Set(cfg.pausedRoutes ?? []);
+  const set = (list) => list?.map((route) => ({ ...route, running: !paused.has(route.id) }));
+  const { routes } = cfg.network;
+  return {
+    ...cfg.network,
+    routes: { ...routes, duskEvm: set(routes.duskEvm), migrations: set(routes.migrations), services: set(routes.services) },
+  };
+}
+
 export function buildRoutes(cfg) {
   const paused = new Set(cfg.pausedRoutes ?? []);
   const all = networkRoutes(cfg.network);

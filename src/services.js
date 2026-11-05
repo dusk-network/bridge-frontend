@@ -4,6 +4,7 @@ import { evmAddressOf } from "@dusk-network/networks/duskevm";
 import { createMulticallFetch } from "@hdauven/dusk-multicall";
 import { createPublicClient, http } from "viem";
 
+import { deployedNetwork } from "./bridge-routes.js";
 import { config } from "./config.js";
 import { createChainTimes, readDepositLag } from "./chain-times.js";
 import { createDriverLoader } from "./data-driver.js";
@@ -154,6 +155,7 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
     },
   };
 
+  const statusNetwork = deployedNetwork(cfg);
   return Object.freeze({
     discovery,
     evmReads,
@@ -168,7 +170,7 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
       bridgeStatus({
         archive,
         cache: statusKept,
-        network: cfg.network,
+        network: statusNetwork,
         nodeUrl: cfg.dusk.nodeUrl,
         route: route.id,
         rpcUrl: urls[route.to.kind === "evm" ? route.to.id : route.from.id],

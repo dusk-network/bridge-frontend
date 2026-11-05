@@ -238,6 +238,14 @@ export function actionLead(kind, entry, { account = "", amountLux = null, claim 
 }
 
 /**
+ * Whether a failed transfer failed on its own chain, so that nothing moved. One
+ * the bridge didn't pay out left the account all the same. Records kept before
+ * this was noted say so in their note.
+ */
+const failedAtSource = (entry) =>
+  entry.sourceFailed === true || /^The (transfer failed on|migration failed on|Dusk transaction failed)/u.test(entry.note ?? "");
+
+/**
  * A transfer's amounts on its receipt, the same in every Dusk app
  * (`transferLedger`): what was sent, the bridge's fee, the network's, what was
  * received, each to the Lux, and gas as wallets write it, with the rest on
@@ -245,7 +253,7 @@ export function actionLead(kind, entry, { account = "", amountLux = null, claim 
  */
 function ledgerRows(entry, { cfg, from, locale, route, status }) {
   const ledger = transferLedger({
-    failed: status === "failed" && entry.receivedLux === undefined,
+    failed: status === "failed" && failedAtSource(entry),
     gasWei: entry.feeWei,
     locale,
     network: cfg.network,
