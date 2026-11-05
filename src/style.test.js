@@ -56,10 +56,14 @@ test("the amount's error clears the swap button, on a phone and a computer", () 
   };
   // The button sits on the row between From and To, half of it over the
   // From panel; the error is that panel's last line.
-  const overhang = px(".flip", "height") / 2 - px(".flip-row", "height") / 2;
   const clearance = px(".panel", "padding", 2) + px(".panel > .field-error", "margin-bottom");
-  assert.ok(overhang > 0);
-  assert.ok(clearance >= overhang, `${clearance}px under the error, ${overhang}px of button`);
+  // On a phone it's a thumb's size.
+  const phone = Number.parseFloat(/\n {2}\.flip \{[^}]*height: ([\d.]+)px/u.exec(css.slice(css.indexOf("@media (max-width: 767px)")))?.[1]);
+  for (const height of [px(".flip", "height"), phone]) {
+    const overhang = height / 2 - px(".flip-row", "height") / 2;
+    assert.ok(overhang > 0);
+    assert.ok(clearance >= overhang, `${clearance}px under the error, ${overhang}px of button`);
+  }
 });
 
 test("at phone width, everything a thumb presses is 44 px each way", () => {
@@ -76,9 +80,6 @@ test("at phone width, everything a thumb presses is 44 px each way", () => {
   const tall = [".hdr-r .net", ".hdr-r .wpill", ".tab", ".netbtn", ".btn.sm", ".btn.xs", ".panel-f .mini", ".bcard-top .icon-btn", ".icon-btn", ".icon-btn.round", ".flip", ".amt-row input", ".linkish", ".lnk", ".topbar .bk", ".foot a", ".about-links a", ".entry a", ".route > summary"];
   for (const selector of tall) assert.ok(size(selector, "height", "min-height") >= 44, `${selector} is ${size(selector, "height", "min-height")} px tall`);
   for (const selector of [".brand", ".panel-f .mini", ".bcard-top .icon-btn", ".icon-btn", ".icon-btn.round", ".flip"]) assert.ok(size(selector, "width", "min-width") >= 44, `${selector} is ${size(selector, "width", "min-width")} px wide`);
-  // The swap button, half over the From panel on a phone too, still clears the amount's error.
-  const clearance = 12 + 10;
-  assert.ok(size(".flip", "height") / 2 - 3 <= clearance);
 });
 
 test("addresses render without ligatures or contextual alternates, so 0x stays 0x", () => {
