@@ -77,7 +77,10 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   BNB Smart Chain, a link per chain that opens its route to Dusk.
 - **A task**: the amount, where it goes, and the quote: what you send, the
   network fee as a maximum and its usual cost, the bridge fee, what you
-  receive and when. One line says what becomes public.
+  receive and when. One line says what becomes public. With the EVM wallet on
+  another chain than the route sends from, as the wallet itself says, the
+  button offers to switch it, here and on the review. Nothing goes out from
+  another chain.
 - **Review**: what moves and what becomes public, the checked facts
   (balances, gas, where the payout goes), then each wallet step with the
   lines its window will show, in its order and words, raw values decoded

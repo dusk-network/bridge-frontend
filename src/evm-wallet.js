@@ -20,6 +20,7 @@ let account = null;
 // picks it itself, its first; so does one whose connector AppKit doesn't name.
 let reownPicks = false;
 let chainId = null;
+let chainAsked = 0;
 let cleanup = () => {};
 let discoveryStarted = false;
 const RECONNECTING = new Set(["connecting", "reconnecting"]);
@@ -108,6 +109,35 @@ function parseChainId(value) {
   return null;
 }
 
+/**
+ * What the wallet says it's on, from now: an answer asked for before it comes
+ * too late to count.
+ */
+function setChain(value) {
+  chainAsked += 1;
+  chainId = value;
+}
+
+/**
+ * Asks the wallet which chain it's on. AppKit's own network can't say: it can
+ * be what AppKit saved on an earlier visit, or the first it knows, wherever
+ * the wallet is.
+ */
+async function readWalletChain() {
+  const wallet = provider;
+  if (!wallet) return;
+  chainAsked += 1;
+  const asked = chainAsked;
+  try {
+    const answer = parseChainId(await wallet.request({ method: "eth_chainId" }));
+    if (asked !== chainAsked || wallet !== provider) return;
+    chainId = answer;
+    publish();
+  } catch {
+    // No answer: what it said last stands.
+  }
+}
+
 async function initializeReown() {
   if (appKit || !config.reown.projectId) return appKit;
   if (appKitPromise) return appKitPromise;
@@ -161,6 +191,9 @@ async function initializeReown() {
     const origin = globalThis.location?.origin ?? "https://bridge.dusk.network";
     appKit = createAppKit({
       adapters: [adapter],
+      // AppKit's own sheet for a chain it doesn't know can't be closed, and
+      // what it saves opens it on later visits: the card offers the switch.
+      allowUnsupportedChain: true,
       enableBaseAccount: false,
       enableCoinbase: false,
       features: {
@@ -199,27 +232,30 @@ async function initializeReown() {
     provider = connected?.isConnected ? appKit.getWalletProvider() : null;
     reownPicks = walletConnect();
     account = connected?.isConnected ? (connected.address ?? null) : null;
-    chainId = connected?.isConnected ? parseChainId(appKit.getChainId()) : null;
-    if (provider) watch(provider);
+    setChain(null);
+    if (provider) {
+      watch(provider);
+      void readWalletChain();
+    }
     appKit.subscribeProviders((providers) => {
       provider = providers.eip155 ?? null;
       reownPicks = walletConnect();
-      if (provider) watch(provider);
+      if (provider) {
+        watch(provider);
+        void readWalletChain();
+      }
       publish();
     });
     appKit.subscribeAccount(({ address, isConnected }) => {
       account = isConnected ? (address ?? null) : null;
       if (!isConnected) {
         provider = null;
-        chainId = null;
+        setChain(null);
       }
       reownPicks = walletConnect();
       publish();
     }, "eip155");
-    appKit.subscribeNetwork(({ chainId: nextChainId }) => {
-      chainId = parseChainId(nextChainId);
-      publish();
-    });
+    appKit.subscribeNetwork(() => void readWalletChain());
     return appKit;
   });
   return appKitPromise;
@@ -232,7 +268,7 @@ async function refresh() {
     provider.request({ method: "eth_chainId" }),
   ]);
   account = accounts?.[0] ?? null;
-  chainId = parseChainId(currentChain);
+  setChain(parseChainId(currentChain));
   publish();
   return state();
 }
@@ -244,7 +280,7 @@ function watch(nextProvider) {
     publish();
   };
   const chainChanged = (next) => {
-    chainId = parseChainId(next);
+    setChain(parseChainId(next));
     publish();
   };
   const disconnected = () => {
@@ -306,7 +342,7 @@ export async function connectEvmWallet() {
   const accounts = await provider.request({ method: "eth_requestAccounts" });
   account = accounts?.[0] ?? null;
   if (!account) throw new Error("The EVM wallet did not expose an account.");
-  chainId = parseChainId(await provider.request({ method: "eth_chainId" }));
+  setChain(parseChainId(await provider.request({ method: "eth_chainId" })));
   publish();
   return state();
 }
@@ -319,7 +355,6 @@ export async function ensureEvmChain(network) {
       method: "wallet_switchEthereumChain",
       params: [{ chainId: hexChainId }],
     });
-  let added = false;
   try {
     await select();
   } catch (error) {
@@ -344,10 +379,9 @@ export async function ensureEvmChain(network) {
     });
     // Adding a chain needn't select it.
     await select();
-    added = true;
   }
-  // Once added, the chain the wallet says it's on, not the one asked for.
-  chainId = added ? parseChainId(await provider.request({ method: "eth_chainId" })) : network.chainId;
+  // The chain the wallet says it's on, not the one asked for: it can say yes and stay.
+  setChain(parseChainId(await provider.request({ method: "eth_chainId" })));
   publish();
   if (chainId !== network.chainId)
     throw new Error(`Your wallet is still on another chain. Switch it to ${network.chainName ?? network.name} and try again.`);

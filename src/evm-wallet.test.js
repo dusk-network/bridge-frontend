@@ -46,6 +46,7 @@ test("discovers and connects to an EIP-6963 provider", async () => {
 
 test("requests the route's EVM source chain", async () => {
   const requests = [];
+  let chain = "0x1";
   globalThis.ethereum = {
     on() {},
     removeListener() {},
@@ -53,8 +54,11 @@ test("requests the route's EVM source chain", async () => {
       requests.push(request);
       if (request.method === "eth_accounts")
         return ["0x0000000000000000000000000000000000000001"];
-      if (request.method === "eth_chainId") return "0x1";
-      if (request.method === "wallet_switchEthereumChain") return null;
+      if (request.method === "eth_chainId") return chain;
+      if (request.method === "wallet_switchEthereumChain") {
+        chain = request.params[0].chainId;
+        return null;
+      }
       throw new Error(`Unexpected method: ${request.method}`);
     },
   };
@@ -125,5 +129,24 @@ test("a chain the wallet adds is selected too, and the page shows the chain the 
   await assert.rejects(wallet.ensureEvmChain({ chainId: 11_155_111, chainName: "Sepolia", rpcUrl: "https://ethereum-sepolia-rpc.publicnode.com" }), /Sepolia/u);
   assert.equal(shown.at(-1), await walletChain());
   assert.equal(shown.at(-1), 745);
+  delete globalThis.ethereum;
+});
+
+test("a wallet that says yes to a switch and stays where it is doesn't count as switched", async () => {
+  globalThis.ethereum = {
+    on() {},
+    removeListener() {},
+    async request({ method }) {
+      if (method === "eth_accounts") return ["0x0000000000000000000000000000000000000001"];
+      if (method === "eth_chainId") return "0x1";
+      if (method === "wallet_switchEthereumChain") return null;
+      throw new Error(`Unexpected method: ${method}`);
+    },
+  };
+  const wallet = await import(`./evm-wallet.js?stays=${Date.now()}`);
+  await wallet.initializeEvmWallet();
+
+  await assert.rejects(wallet.ensureEvmChain({ chainId: 745_745, chainName: "BSC test chain", rpcUrl: "https://anvil.testnet.dusk.network" }), /still on another chain\. Switch it to BSC test chain/u);
+  assert.equal(wallet.getEvmState().chainId, 1);
   delete globalThis.ethereum;
 });

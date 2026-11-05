@@ -110,9 +110,10 @@ export function flipRoute(routes, route) {
 
 /**
  * The card's one button, as the state stands: what it says, whether it can
- * be pressed, and what it does then ("review", "connect-dusk",
- * "connect-evm", or "get-dusk", a link to Dusk Wallet). A paused route
- * sends nothing.
+ * be pressed, and what it does then ("review", "connect-dusk", "connect-evm",
+ * "switch-chain", or "get-dusk", a link to Dusk Wallet). A paused route sends
+ * nothing. `switchTo` names the chain a route sends from, where the wallet
+ * that signs it is on another, and `switching` says the wallet was asked.
  */
 export function primaryButton({
   amountLux = null,
@@ -126,6 +127,8 @@ export function primaryButton({
   phoneOnly = false,
   route,
   signerConnected = false,
+  switchTo = "",
+  switching = false,
   unit = "DUSK",
 }) {
   if (route.paused) return { action: null, enabled: false, label: "Not running right now" };
@@ -136,6 +139,7 @@ export function primaryButton({
       ? { action: null, enabled: false, label: "Send from a computer" }
       : { action: "get-dusk", enabled: true, label: "Get Dusk Wallet" };
   }
+  if (switchTo) return switching ? { action: null, enabled: false, label: `Switching to ${switchTo}…` } : { action: "switch-chain", enabled: true, label: `Switch to ${switchTo}` };
   if (amountLux === null) return { action: null, enabled: false, label: amountError ? "Enter a valid amount" : "Enter an amount" };
   if (insufficient) return { action: null, enabled: false, label: `Not enough ${unit}` };
   if (amountError) return { action: null, enabled: false, label: "Check the amount" };
