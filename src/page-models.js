@@ -2,12 +2,13 @@
 // checked without a browser. The controller fetches and stores; views.js
 // writes the HTML.
 
+import { transferLedger } from "@dusk-network/app-core/bridge";
 import { claimAfterProving, proveNowText } from "@dusk-network/networks/duskevm";
 import { formatEvmAddress } from "@dusk-network/networks/format";
 
 import { explorerAddressUrl } from "./contracts.js";
 import { groupTransfers, shownFor } from "./discovery.js";
-import { aboutFee, formatDateTime, formatDusk, formatExactFee, formatLux, formatMaxFee, formatShort, formatUnitsGrouped, formatWei } from "./format.js";
+import { aboutFee, formatDateTime, formatDusk, formatLux, formatMaxFee, formatShort, formatUnitsGrouped } from "./format.js";
 import { gasCoin, networkName, routeTitle, routeUnits, tokenName } from "./names.js";
 import { transferHref } from "./permalink.js";
 import { buildQuote, routeDuskFees, stepFeeText, withdrawalStepMax } from "./quote.js";
@@ -237,6 +238,39 @@ export function actionLead(kind, entry, { account = "", amountLux = null, claim 
 }
 
 /**
+ * A transfer's amounts on its receipt, the same in every Dusk app
+ * (`transferLedger`): what was sent, the bridge's fee, the network's, what was
+ * received, each to the Lux, and gas as wallets write it, with the rest on
+ * hover. What failed on its own chain moved nothing, so its fee stands alone.
+ */
+function ledgerRows(entry, { cfg, from, locale, route, status }) {
+  const ledger = transferLedger({
+    failed: status === "failed" && entry.receivedLux === undefined,
+    gasWei: entry.feeWei,
+    locale,
+    network: cfg.network,
+    networkFee: [entry.feeLux, entry.proveFeeLux, entry.claimFeeLux],
+    received: entry.receivedLux,
+    route: route.id,
+    sent: entry.amountLux,
+  });
+  if (!ledger) return [];
+  const label = (line) =>
+    ({
+      bridgeFee: "Bridge fee",
+      gas: ledger.networkFee ? `Fee on ${from}` : "Network fee",
+      networkFee: "Network fee",
+      received: line.expected && status !== "completed" ? "You receive" : "You received",
+      sent: "You sent",
+    })[line.key];
+  return ledger.lines.map((line) =>
+    line.key === "gas"
+      ? { exact: `${line.exact} ${line.coin}`, label: label(line), value: `${line.text} ${line.coin}` }
+      : { label: label(line), value: `${line.exact} ${line.coin}` },
+  );
+}
+
+/**
  * The receipt of one transfer. No balances: the link may be shared. `owner`
  * is the Dusk account the page is for, Dusk Wallet's (`own`) or a followed one.
  */
@@ -260,22 +294,7 @@ export function receiptModel(entry, { cfg, gasPrice = 1n, locale, now = Date.now
 
   const sourceNetwork = route.from.kind === "dusk" ? "dusk" : route.from.id;
   const destinationNetwork = route.to.kind === "dusk" ? "dusk" : route.to.id;
-  const details = [];
-  if (view.amount !== null) details.push({ label: route.mode === "migration" ? "You sent" : "Amount", value: route.mode === "migration" ? `${formatLux(view.amount)} ${tokenName(route.from.id)}` : formatDusk(view.amount) });
-  if (route.mode === "service-transfer" && view.amount !== null) {
-    details.push({ label: "Bridge fee", value: formatDusk(cfg.service.feeLux) });
-    details.push({ label: "You receive", value: formatDusk(view.amount - BigInt(cfg.service.feeLux) > 0n ? view.amount - BigInt(cfg.service.feeLux) : 0n) });
-  }
-  // The record: each fee as it was paid, to the last decimal.
-  if (entry.feeLux) details.push({ label: "Fee paid", value: `${formatExactFee(BigInt(entry.feeLux))} DUSK on ${from}` });
-  // Gas, as wallets write it: nobody reads 18 decimals. The rest shows on hover.
-  if (entry.feeWei) {
-    const paid = formatWei(entry.feeWei);
-    const coin = gasCoin(cfg, route.from.id);
-    details.push({ exact: `${paid.exact} ${coin} on ${from}`, label: "Fee paid", value: `${paid.text} ${coin} on ${from}` });
-  }
-  if (entry.proveFeeLux) details.push({ label: "Proof fee paid", value: `${formatExactFee(BigInt(entry.proveFeeLux))} DUSK on Dusk` });
-  if (entry.claimFeeLux) details.push({ label: "Claim fee paid", value: `${formatExactFee(BigInt(entry.claimFeeLux))} DUSK on Dusk` });
+  const details = ledgerRows(entry, { cfg, from, locale, route, status: view.status });
   if (entry.sender) details.push({ html: addressHtml(cfg, sourceNetwork, entry.sender, `sender on ${from}`), label: `From, on ${from}` });
   if (entry.destination) details.push({ html: addressHtml(cfg, destinationNetwork, entry.destination, `recipient on ${to}`), label: `To, on ${to}` });
   details.push({ html: txHtml(cfg, sourceNetwork, entry.hash, `${from} transaction`), label: `${from} transaction` });

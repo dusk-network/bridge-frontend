@@ -67,9 +67,6 @@ export function formatFee(value, decimals = LUX_DECIMALS, { round = "nearest" } 
  */
 export const formatShort = (units, decimals = LUX_DECIMALS) => formatAmount(units, { decimals, locale: amountLocale(), round: "down" });
 
-/** Gas paid, in a coin with 18 decimals, in the same form, to the nearest. */
-export const formatWei = (wei) => formatAmount(wei, { decimals: 18, locale: amountLocale(), round: "nearest" });
-
 /** A Dusk fee in the apps' short form: 4 decimals, 2 significant digits under 0.01, the page's separators. */
 const shortFee = (lux, round) => formatShared(lux, { locale: amountLocale(), round }).text;
 
@@ -82,9 +79,6 @@ export const formatMaxFee = (lux) => (BigInt(lux) > 0n ? shortFee(lux, "up") : "
 
 /** What a Dusk fee usually comes to, to the nearest: "0.002". */
 export const formatTypicalFee = (lux) => shortFee(lux, "nearest");
-
-/** A Dusk fee paid, exact, as a record keeps it: "0.001986599". */
-export const formatExactFee = (lux) => formatShared(lux, { locale: amountLocale(), mode: "exact" }).text;
 
 /**
  * An estimated fee in a coin with `decimals`: "about 0.00021 ETH", or "less

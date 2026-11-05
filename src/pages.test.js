@@ -371,9 +371,9 @@ test("a receipt is a record without balances, with both hashes and its own link"
   const model = receiptModel(entry, { cfg: testnet, locale: "en-GB", route: T["duskevm-deposit"], timeZone: "Europe/Amsterdam", url });
   assert.equal(model.view.title, "25 DUSK arrived on DuskEVM");
   assert.equal(model.caption, "Arrived Mon 26 Oct 2026, 10:31 CET.");
-  assert.deepEqual(model.details.map((row) => row.label), ["Amount", "Fee paid", "From, on Dusk", "To, on DuskEVM", "Dusk transaction", "DuskEVM transaction", "Sent"]);
+  assert.deepEqual(model.details.map((row) => row.label), ["You sent", "Network fee", "You received", "From, on Dusk", "To, on DuskEVM", "Dusk transaction", "DuskEVM transaction", "Sent"]);
   // A record: the fee as paid, to the last decimal.
-  assert.equal(model.details[1].value, "0.001986599 DUSK on Dusk");
+  assert.equal(model.details[1].value, "0.001986599 DUSK");
   const html = receiptPage(model);
   assert.ok(html.includes(`<code class="mono">${"38".repeat(32)}</code>`));
   assert.ok(html.includes(`<code class="mono">0x${"a1".repeat(32)}</code>`));
@@ -427,13 +427,47 @@ test("the review checks a balance to the Lux, as what it sends: 0.09 can't pay f
   assert.match(fromEvm[0].html, /<b class="num">2\.123456789 DUSK<\/b>/u);
 });
 
+test("a receipt says the transfer's amounts as every Dusk app does, to the Lux", () => {
+  const url = "https://bridge.example.org/#/transfer/m";
+  const rows = (entry, route) => receiptModel({ hash: `0x${"0d".repeat(32)}`, id: "m", routeId: route.id, ...entry }, { cfg: testnet, route, url }).details.filter((row) => !row.html && row.label !== "Sent").map((row) => [row.label, row.value]);
+  const service = T["service-transfer"];
+  // Before it arrives: what will, worked out from what was sent.
+  assert.deepEqual(rows({ amountLux: "2053082083", feeLux: "1859281", status: "pending" }, service), [
+    ["You sent", "2.053082083 DUSK"],
+    ["Bridge fee", "1 DUSK"],
+    ["Network fee", "0.001859281 DUSK"],
+    ["You receive", "1.053082083 ERC20 DUSK"],
+  ]);
+  // Once it has: what did.
+  assert.deepEqual(rows({ amountLux: "2053082083", feeLux: "1859281", receivedLux: "1053082083", status: "completed" }, service).at(-1), ["You received", "1.053082083 ERC20 DUSK"]);
+  // An older entry, kept before what arrived was: worked out, and said as arrived.
+  assert.deepEqual(rows({ amountLux: "2053082083", status: "completed" }, service).at(-1), ["You received", "1.053082083 ERC20 DUSK"]);
+  // A proof's and a claim's fees are one network fee.
+  assert.deepEqual(rows({ amountLux: "1008000000000", claimFeeLux: "2000001", proveFeeLux: "1000000", status: "completed", stage: "finalized" }, T["duskevm-withdrawal"]), [
+    ["You sent", "1,008 DUSK"],
+    ["Network fee", "0.003000001 DUSK"],
+    ["You received", "1,008 DUSK"],
+  ]);
+  // Failed on Dusk: nothing moved, and its fee stands alone.
+  assert.deepEqual(rows({ amountLux: "2053082083", feeLux: "1859281", note: "The Dusk transaction failed.", status: "failed" }, T["duskevm-deposit"]), [["Network fee", "0.001859281 DUSK"]]);
+  // Went through and pays nothing out: the DUSK moved, and nothing came of it.
+  assert.deepEqual(rows({ amountLux: "500000000", feeLux: "1859281", receivedLux: "0", status: "failed" }, service).filter(([label]) => label !== "Bridge fee"), [
+    ["You sent", "0.5 DUSK"],
+    ["Network fee", "0.001859281 DUSK"],
+    ["You received", "0 ERC20 DUSK"],
+  ]);
+});
+
 test("gas a migration paid is rounded as wallets write it, with the rest on hover", () => {
-  const entry = { amountLux: "1000000000", destination: ACCOUNT, feeWei: "47005000752080", hash: `0x${"0d".repeat(32)}`, id: "m", routeId: "ethereum-to-dusk", sender: EVM, status: "pending" };
+  const entry = { amountLux: "1000000000", destination: ACCOUNT, feeWei: "47005000752080", hash: `0x${"0d".repeat(32)}`, id: "m", receivedLux: "1000000000", routeId: "ethereum-to-dusk", sender: EVM, status: "completed" };
   const model = receiptModel(entry, { cfg: testnet, route: T.migration, url: "https://bridge.example.org/#/transfer/m" });
-  const fee = model.details.find((row) => row.label === "Fee paid");
-  assert.equal(fee.value, "0.000047 ETH on Sepolia");
-  assert.equal(fee.exact, "0.00004700500075208 ETH on Sepolia");
-  assert.ok(receiptPage(model).includes('<span class="num" title="0.00004700500075208 ETH on Sepolia">0.000047 ETH on Sepolia</span>'));
+  assert.deepEqual(model.details.slice(0, 3).map((row) => [row.label, row.value]), [
+    ["You sent", "1 ERC20 DUSK"],
+    ["You received", "1 DUSK"],
+    ["Network fee", "0.000047 ETH"],
+  ]);
+  assert.equal(model.details[2].exact, "0.00004700500075208 ETH");
+  assert.ok(receiptPage(model).includes('<span class="num" title="0.00004700500075208 ETH">0.000047 ETH</span>'));
 });
 
 test("a claim's fee maximum on the receipt uses the withdrawal's own gas once it's known", () => {

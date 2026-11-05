@@ -90,8 +90,10 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   the one Dusk Wallet prints (older versions show a bridge call only as its
   bytes), and the reviewed request is what is sent.
 - **Receipt**, at `#/transfer/<hash>`: the steps with times, explorer links
-  and hashes, both transactions in full, the fees paid and the receipt link.
-  It shows no balances: the link is safe to share. A withdrawal waiting for
+  and hashes, both transactions in full, the receipt link, and its amounts as
+  every Dusk app says them (`transferLedger`): what you sent, the bridge fee,
+  the network fee and what you received, to the Lux, and gas as wallets write
+  it. It shows no balances: the link is safe to share. A withdrawal waiting for
   its claim counts down, says when a clock change falls inside the wait, and
   offers an .ics file made in the browser ("Add to calendar").
 - **My transfers**: the connected accounts' transfers, read from the networks
@@ -261,7 +263,8 @@ checksum, shortened as 6…6 for Dusk IDs, accounts and hashes and as 0x and
 4…4 for EVM addresses and transactions; the most a fee can be rounded up.
 Amounts go by `@dusk-network/app-core/amounts`, as most wallets write them: a
 row in My transfers and the form's balance line up to 4 decimals, rounded down,
-with every digit on hover; Max, the review and the receipt to the Lux.
+with every digit on hover; Max, the review and the receipt to the Lux, gas
+paid as a row writes it.
 
 The footer and About this page link the Terms of use and Privacy policy the
 network's file names, as the explorer does. A deployment can link its own

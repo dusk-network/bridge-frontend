@@ -32,6 +32,9 @@ const NO_PAYOUT = Object.freeze({
   "under-fee": "The amount didn't exceed the bridge fee, so nothing is paid out.",
 });
 
+/** A transfer that went through and pays nothing out: it's a failure, though the DUSK moved. */
+const PAID_NOTHING = Object.freeze({ receivedLux: "0" });
+
 const UNSURE_DEPOSIT =
   "An equal deposit to the same address was sent just before this one, so its credit can't be told apart. Check the address on the DuskEVM explorer.";
 // "late": its window closed without a credit, as when the sender's history can't be read.
@@ -58,9 +61,9 @@ const completed = (extra = {}) => ({ ...extra, note: "", status: "completed" });
  */
 function outcome(arrival, patch, waiting, unsure = waiting, late = unsure) {
   if (arrival.state === "arrived")
-    return completed({ ...patch, destinationAt: arrival.at, destinationHash: arrival.hash });
+    return completed({ ...patch, destinationAt: arrival.at, destinationHash: arrival.hash, receivedLux: arrival.amount.toString() });
   if (arrival.reason === "error") throw new Error(arrival.error);
-  if (arrival.reason === "no-payout") return failed(NO_PAYOUT[arrival.problem], patch);
+  if (arrival.reason === "no-payout") return failed(NO_PAYOUT[arrival.problem], { ...patch, ...PAID_NOTHING });
   return pending(arrival.reason === "unsure" ? unsure : arrival.reason === "late" ? late : waiting, { ...patch, scan: arrival.scan });
 }
 
@@ -204,12 +207,12 @@ export function createTracking(deps) {
       sender: tx.json?.sender,
       sourceAt,
     };
-    if (tx.json?.receiver !== service.account) return failed(NO_PAYOUT.elsewhere, patch);
-    if (value <= service.feeLux) return failed(NO_PAYOUT["under-fee"], patch);
+    if (tx.json?.receiver !== service.account) return failed(NO_PAYOUT.elsewhere, { ...patch, ...PAID_NOTHING });
+    if (value <= service.feeLux) return failed(NO_PAYOUT["under-fee"], { ...patch, ...PAID_NOTHING });
     try {
       normalizeEvmAddress(recipient);
     } catch {
-      return failed(NO_PAYOUT["no-address"], patch);
+      return failed(NO_PAYOUT["no-address"], { ...patch, ...PAID_NOTHING });
     }
     // The DUSK token's transfer from the route's payout address to the memo's.
     const peers = waitingAlike(entry, others, (other) => sameAddress(other.destination, recipient) && String(other.amountLux) === patch.amountLux);
