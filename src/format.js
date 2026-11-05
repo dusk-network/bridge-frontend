@@ -61,10 +61,14 @@ export function formatFee(value, decimals = LUX_DECIMALS, { round = "nearest" } 
 }
 
 /**
- * An amount of a coin with 18 decimals as most wallets write it, `text`, and in
- * full, `exact`, for whoever asks for it: gas paid, to the nearest.
+ * An amount in a list or a balance line, as most wallets write it, `text`: up
+ * to 4 decimals, rounded down so it's never more than there is, and never 0 for
+ * an amount that isn't. In full, `exact`, for whoever asks for it.
  */
-export const formatWei = (wei, { round = "nearest" } = {}) => formatAmount(wei, { decimals: 18, locale: amountLocale(), round });
+export const formatShort = (units, decimals = LUX_DECIMALS) => formatAmount(units, { decimals, locale: amountLocale(), round: "down" });
+
+/** Gas paid, in a coin with 18 decimals, in the same form, to the nearest. */
+export const formatWei = (wei) => formatAmount(wei, { decimals: 18, locale: amountLocale(), round: "nearest" });
 
 /** A Dusk fee in the apps' short form: 4 decimals, 2 significant digits under 0.01, the page's separators. */
 const shortFee = (lux, round) => formatShared(lux, { locale: amountLocale(), round }).text;

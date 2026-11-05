@@ -9,7 +9,7 @@ import { releaseFor } from "@duskdomains/sdk/releases";
 import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
-import { actionLead, actionPrivacy, availableLine, pricedReview, receiptModel, recipientLine, reviewChecks, routeLine, transfersModel } from "./page-models.js";
+import { actionLead, actionPrivacy, availableLine, balanceLine, pricedReview, receiptModel, recipientLine, reviewChecks, routeLine, transfersModel } from "./page-models.js";
 import { buildQuote, withdrawalStepMax } from "./quote.js";
 import { activityPanel, cardPage, cardRegions, contractsSheet, footer, header, networkSheet, receiptPage, reviewSheet, walletLines, walletsSheet } from "./views.js";
 import { formatDateTime } from "./format.js";
@@ -395,6 +395,38 @@ test("a receipt is a record without balances, with both hashes and its own link"
   assert.match(withSupport.notes.at(-1).html, /Contact <a href="https:\/\/support\.example\.org" target="_blank" rel="noreferrer">Dusk support<\/a> with the receipt link\./u);
 });
 
+test("the form's balance line writes what's held as wallets do, with every digit on hover", () => {
+  const way = (id) => buildRoutes(mainnet).find((route) => route.id === id);
+  // Wei on an EVM chain: what Max fills in is the same amount, in full.
+  assert.deepEqual(balanceLine(way("bsc-to-dusk"), 90_082_082_000_000_000n), { exact: "0.090082082 BEP20 DUSK", text: "0.09 BEP20 DUSK" });
+  assert.deepEqual(balanceLine(way("dusk-to-bsc"), 174_003_712_345n), { exact: "174.003712345 DUSK", text: "174.0037 DUSK" });
+  // Rounded down, never to more than there is, and never to 0 where there's something.
+  assert.equal(balanceLine(way("dusk-to-bsc"), 999_999_999n).text, "0.9999 DUSK");
+  assert.equal(balanceLine(way("dusk-to-bsc"), 1n).text, "0.000000001 DUSK");
+  assert.equal(balanceLine(way("bsc-to-dusk"), 10_000_000_000_000n).text, "0.00001 BEP20 DUSK");
+  assert.deepEqual(balanceLine(way("dusk-to-bsc"), null), { exact: "", text: "" });
+  const held = cardRegions(cardVmFor({ from: { balance: "0.09 BEP20 DUSK", balanceExact: "0.090082082 BEP20 DUSK", balanceLabel: "Balance", net: { id: "bsc", name: "BNB Smart Chain" } } }))["from-foot"];
+  assert.ok(held.includes('<span class="num" title="0.090082082 BEP20 DUSK">0.09 BEP20 DUSK</span>'), held);
+  // Nothing left out, nothing on hover.
+  assert.ok(cardRegions(cardVmFor({ from: { balance: "25 DUSK", balanceExact: "25 DUSK", balanceLabel: "Balance", net: { id: "dusk", name: "Dusk" } } }))["from-foot"].includes('<span class="num">25 DUSK</span>'));
+});
+
+test("the review checks a balance to the Lux, as what it sends: 0.09 can't pay for 0.090082082", () => {
+  const route = T.migration;
+  const reads = { migration: { balanceWei: 90_082_082_000_000_000n, gasCoinWei: 10_000_000_000_000n } };
+  const quote = buildQuote(route, "0.090082082", { balance: reads.migration.balanceWei, cfg: testnet });
+  const checks = reviewChecks(route, { cfg: testnet, destination: ACCOUNT, duskAccount: ACCOUNT, evm: { account: EVM }, quote, reads });
+  assert.match(checks[0].html, /<b class="num">0\.090082082 ERC20 DUSK<\/b>/u);
+  // Gas in the short form, where 4 decimals alone would say it has none.
+  assert.match(checks[1].html, /<b class="num">0\.00001 ETH<\/b>/u);
+  const deposit = T["duskevm-deposit"];
+  const fromDusk = reviewChecks(deposit, { cfg: testnet, destination: EVM, evm: {}, quote: buildQuote(deposit, "1", { balance: 2_123_456_789n, cfg: testnet }), reads: { duskBalance: 2_123_456_789n } });
+  assert.match(fromDusk[0].html, /<b class="num">2\.123456789 DUSK<\/b>/u);
+  const withdrawal = T["duskevm-withdrawal"];
+  const fromEvm = reviewChecks(withdrawal, { cfg: testnet, destination: ACCOUNT, evm: {}, quote: buildQuote(withdrawal, "1", { balance: 2_123_456_789_999_999_999n, cfg: testnet }), reads: { l2: { balanceWei: 2_123_456_789_999_999_999n } } });
+  assert.match(fromEvm[0].html, /<b class="num">2\.123456789 DUSK<\/b>/u);
+});
+
 test("gas a migration paid is rounded as wallets write it, with the rest on hover", () => {
   const entry = { amountLux: "1000000000", destination: ACCOUNT, feeWei: "47005000752080", hash: `0x${"0d".repeat(32)}`, id: "m", routeId: "ethereum-to-dusk", sender: EVM, status: "pending" };
   const model = receiptModel(entry, { cfg: testnet, route: T.migration, url: "https://bridge.example.org/#/transfer/m" });
@@ -414,6 +446,22 @@ test("a claim's fee maximum on the receipt uses the withdrawal's own gas once it
     receiptModel({ ...ready, withdrawalGas: "9000000" }, { cfg: testnet, route: T["duskevm-withdrawal"], url }).actionFee,
     "Network fee up to 0.059 DUSK, from your public balance",
   );
+});
+
+test("a row in My transfers writes its amount as wallets do, with every digit on hover", () => {
+  const routeOf = (id) => buildRoutes(testnet).find((route) => route.id === id);
+  const shown = (amountLux, patch = {}) =>
+    transfersModel([{ amountLux, hash: "0a".repeat(32), id: "a", parties: [ACCOUNT], routeId: "dusk-to-dusk-evm", status: "pending", ...patch }], { accounts: [ACCOUNT], cfg: testnet, routeOf }).groups.progress[0];
+  assert.deepEqual((({ amountExact, amountText }) => ({ amountExact, amountText }))(shown("53082083")), { amountExact: "0.053082083 DUSK", amountText: "0.053 DUSK" });
+  // Rounded down, and an amount that isn't 0 never reads 0.
+  assert.equal(shown("999999999").amountText, "0.9999 DUSK");
+  assert.equal(shown("1").amountText, "0.000000001 DUSK");
+  const row = activityPanel({ empty: "", groups: { done: [], failed: [], needs: [], progress: [{ ...shown("53082083"), href: "#/t" }] }, lede: "", more: false, syncText: "", watch: null });
+  assert.ok(row.includes('<span class="am num" title="0.053082083 DUSK">0.053 DUSK</span>'), row);
+  // The receipt is its detail: in full.
+  const model = receiptModel({ amountLux: "53082083", hash: "0a".repeat(32), id: "a", routeId: "dusk-to-dusk-evm", status: "pending" }, { cfg: testnet, route: T["duskevm-deposit"], url: "https://bridge.example.org/#/transfer/a" });
+  assert.equal(model.view.title, "Sending 0.053082083 DUSK to DuskEVM");
+  assert.equal(model.details[0].value, "0.053082083 DUSK");
 });
 
 test("My transfers groups the connected accounts' transfers and offers the next action", () => {

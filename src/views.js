@@ -15,6 +15,9 @@ export const copyFaces = (face, copied) =>
 export const copyButton = (value, label) =>
   `<button type="button" class="icon-btn" data-copy="${html(value)}" aria-label="Copy ${html(label)}" title="Copy">${copyFaces(icon("copy"), icon("check"))}</button>`;
 
+/** Where a short amount leaves digits out, all of them, on hover. */
+const exactTitle = (exact, text) => (exact && exact !== text ? ` title="${html(exact)}"` : "");
+
 /** A wait's words, with a small ring that turns beside them from the start (still with reduced motion). */
 export const waiting = (text) => `<span class="waiting"><span class="spin" aria-hidden="true"></span><span>${html(text)}</span></span>`;
 
@@ -175,7 +178,7 @@ export function cardRegions(vm) {
     : "";
   return {
     cta: `${vm.error ? messageLine(vm.error) : ""}${primaryControl(vm.button)}`,
-    "from-foot": `<span>${html(vm.from.balanceLabel)}</span><span class="bal">${vm.from.balance ? `<span class="num">${html(vm.from.balance)}</span>` : ""}${vm.canMax ? '<button type="button" class="mini" data-action="max">Max</button>' : ""}</span>`,
+    "from-foot": `<span>${html(vm.from.balanceLabel)}</span><span class="bal">${vm.from.balance ? `<span class="num"${exactTitle(vm.from.balanceExact, vm.from.balance)}>${html(vm.from.balance)}</span>` : ""}${vm.canMax ? '<button type="button" class="mini" data-action="max">Max</button>' : ""}</span>`,
     receive: html(vm.receive || "0"),
     "recipient-note": recipientNote(vm.to),
     route: `<summary>${icon("clock")}<span>${html(vm.routeLine)}</span>${icon("chev-d", "chev")}</summary>
@@ -360,7 +363,7 @@ export function receiptPage(vm) {
         : `<div class="action-box">${view.action.failure ? messageLine(view.action.failure, { live: false }) : ""}<button type="button" class="btn ${view.action.quiet ? "sec" : "pri"}" data-action="withdrawal-${view.action.kind}" data-id="${html(vm.id)}">${html(view.action.label)}</button><span class="small t2">${html(vm.actionFee ?? "")}</span></div>`
     : "";
   const details = vm.details
-    .map((row) => `<div class="kv"><dt class="k">${html(row.label)}</dt><dd class="v">${row.html ?? `<span class="num"${row.exact && row.exact !== row.value ? ` title="${html(row.exact)}"` : ""}>${html(row.value)}</span>`}</dd></div>`)
+    .map((row) => `<div class="kv"><dt class="k">${html(row.label)}</dt><dd class="v">${row.html ?? `<span class="num"${exactTitle(row.exact, row.value)}>${html(row.value)}</span>`}</dd></div>`)
     .join("");
   const notes = vm.notes.map((note) => `<p class="note">${icon(note.icon ?? "info")}<span>${note.html}</span></p>`).join("");
   // The transfer and its steps on the left; its details in a panel beside
@@ -412,7 +415,7 @@ export function transferRow(row, { canAct = true } = {}) {
   // Whom it pays and its transaction, so equal transfers are told apart.
   const to = row.to ? `To ${row.to.name ? html(row.to.name) : `<code class="mono">${html(row.to.address)}</code>`}` : "";
   const meta = [to, row.hash ? `<code class="mono">${html(row.hash)}</code>` : ""].filter(Boolean).join(" · ");
-  return `<li class="tr" data-status="${html(row.status)}"><a class="tr-link" href="${html(row.href)}" aria-label="${html(row.title)}, ${html(row.amountText)}, ${html(row.statusWord)}. Open the receipt"></a>${pairMark(row.pair[0], row.pair[1])}<div class="tr-main"><div class="t1">${html(row.title)}</div><div class="t2">${html(row.subline)}</div>${meta ? `<div class="t3">${meta}</div>` : ""}${trackerBars(row.tracker)}</div><div class="rt"><span class="am num">${html(row.amountText)}</span>${right}</div></li>`;
+  return `<li class="tr" data-status="${html(row.status)}"><a class="tr-link" href="${html(row.href)}" aria-label="${html(row.title)}, ${html(row.amountText)}, ${html(row.statusWord)}. Open the receipt"></a>${pairMark(row.pair[0], row.pair[1])}<div class="tr-main"><div class="t1">${html(row.title)}</div><div class="t2">${html(row.subline)}</div>${meta ? `<div class="t3">${meta}</div>` : ""}${trackerBars(row.tracker)}</div><div class="rt"><span class="am num"${exactTitle(row.amountExact, row.amountText)}>${html(row.amountText)}</span>${right}</div></li>`;
 }
 
 /**

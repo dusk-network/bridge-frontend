@@ -7,8 +7,8 @@ import { formatEvmAddress } from "@dusk-network/networks/format";
 
 import { explorerAddressUrl } from "./contracts.js";
 import { groupTransfers, shownFor } from "./discovery.js";
-import { aboutFee, formatDateTime, formatDusk, formatExactFee, formatLux, formatMaxFee, formatUnitsGrouped, formatWei } from "./format.js";
-import { gasCoin, networkName, routeTitle, tokenName } from "./names.js";
+import { aboutFee, formatDateTime, formatDusk, formatExactFee, formatLux, formatMaxFee, formatShort, formatUnitsGrouped, formatWei } from "./format.js";
+import { gasCoin, networkName, routeTitle, routeUnits, tokenName } from "./names.js";
 import { transferHref } from "./permalink.js";
 import { buildQuote, routeDuskFees, stepFeeText, withdrawalStepMax } from "./quote.js";
 import { routeTime, routeTimeText } from "./route-times.js";
@@ -57,7 +57,7 @@ export function routeSteps(route, quote = null) {
 
 /**
  * Facts the review checks before any wallet opens, each true or not:
- * balances, gas, and where the payout goes.
+ * balances, to the Lux as what it sends is, gas, and where the payout goes.
  */
 export function reviewChecks(route, { cfg, destination, duskAccount, evm, quote, reads }) {
   const checks = [];
@@ -68,7 +68,7 @@ export function reviewChecks(route, { cfg, destination, duskAccount, evm, quote,
     const balance = reads.duskBalance;
     if (balance !== null && balance !== undefined)
       checks.push({
-        html: `You have <b class="num">${html(formatDusk(balance, 4))}</b> in your public balance, enough for ${html(formatDusk(lux))} and the network fee`,
+        html: `You have <b class="num">${html(formatDusk(balance))}</b> in your public balance, enough for ${html(formatDusk(lux))} and the network fee`,
         ok: quote.maxLux !== null && lux <= quote.maxLux,
       });
     checks.push({
@@ -85,12 +85,12 @@ export function reviewChecks(route, { cfg, destination, duskAccount, evm, quote,
     const migration = reads.migration ?? {};
     if (migration.balanceWei !== null && migration.balanceWei !== undefined)
       checks.push({
-        html: `You have <b class="num">${html(formatUnitsGrouped(migration.balanceWei, 18, 4))} ${html(tokenName(route.from.id))}</b> at <code class="mono">${html(short(evm?.account))}</code> on ${html(from)}`,
+        html: `You have <b class="num">${html(formatUnitsGrouped(migration.balanceWei, 18, 9))} ${html(tokenName(route.from.id))}</b> at <code class="mono">${html(short(evm?.account))}</code> on ${html(from)}`,
         ok: lux * WEI_PER_LUX <= migration.balanceWei,
       });
     if (migration.gasCoinWei !== null && migration.gasCoinWei !== undefined)
       checks.push({
-        html: `You have <b class="num">${html(formatUnitsGrouped(migration.gasCoinWei, 18, 4))} ${html(coin)}</b> for the network fee${quote.evmFeeWei ? `, ${html(aboutFee(quote.evmFeeWei, 18, coin))} needed for ${quote.steps === 2 ? "both steps" : "the step"}` : ""}`,
+        html: `You have <b class="num">${html(formatShort(migration.gasCoinWei, 18).text)} ${html(coin)}</b> for the network fee${quote.evmFeeWei ? `, ${html(aboutFee(quote.evmFeeWei, 18, coin))} needed for ${quote.steps === 2 ? "both steps" : "the step"}` : ""}`,
         ok: quote.evmFeeWei ? migration.gasCoinWei >= quote.evmFeeWei : migration.gasCoinWei > 0n,
       });
     checks.push({
@@ -102,7 +102,7 @@ export function reviewChecks(route, { cfg, destination, duskAccount, evm, quote,
   const l2 = reads.l2 ?? {};
   if (l2.balanceWei !== null && l2.balanceWei !== undefined)
     checks.push({
-      html: `You have <b class="num">${html(formatUnitsGrouped(l2.balanceWei, 18, 4))} DUSK</b> on ${html(from)}, enough for ${html(formatDusk(lux))} and its network fee`,
+      html: `You have <b class="num">${html(formatUnitsGrouped(l2.balanceWei, 18, 9))} DUSK</b> on ${html(from)}, enough for ${html(formatDusk(lux))} and its network fee`,
       ok: quote.maxLux !== null && lux <= quote.maxLux,
     });
   checks.push({
@@ -166,6 +166,17 @@ export function pricedReview(route, { amount, cfg, destination, duskAccount, evm
     checks: reviewChecks(route, { cfg, destination, duskAccount, evm, quote, reads }),
     feeRows: quote.rows.filter((row) => !["send", "receive"].includes(row.key)),
   };
+}
+
+/**
+ * What the source of `route` holds, as the form's balance line writes it, and
+ * in full for whoever asks: Lux on Dusk, wei on an EVM chain. Empty until it's read.
+ */
+export function balanceLine(route, holdings) {
+  if (holdings === null || holdings === undefined) return { exact: "", text: "" };
+  const { exact, text } = formatShort(holdings, route.signer === "dusk" ? 9 : 18);
+  const { send: unit } = routeUnits(route);
+  return { exact: `${exact} ${unit}`, text: `${text} ${unit}` };
 }
 
 /**
@@ -335,6 +346,7 @@ export function transfersModel(entries, { account = "", accounts, cfg, locale, n
     const view = transferView(entry, { account, cfg, locale, name, now, owner, route, submitter, timeZone, timing });
     return {
       action: view.action,
+      amountExact: view.amountExact,
       amountText: view.amountText,
       // Its transaction, as the receipt and Look up know it.
       hash: short(entry.hash),

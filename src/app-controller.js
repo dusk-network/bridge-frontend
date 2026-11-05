@@ -21,12 +21,13 @@ import { createDuskConnection, ensureDuskConnected, sendDuskContractCall, sendDu
 import { duskEvmNetwork, submitDuskEvmWithdrawal } from "./duskevm-withdrawal.js";
 import { connectEvmWallet, ensureEvmChain, getEvmState, initializeEvmWallet, subscribeEvmWallet } from "./evm-wallet.js";
 import { createFormReads } from "./form-reads.js";
-import { amountForInput, formatDusk, formatLux, formatUnitsGrouped, formatDuskPlain } from "./format.js";
+import { amountForInput, formatLux, formatDuskPlain } from "./format.js";
 import { approveMigration, submitMigration } from "./legacy-migration.js";
 import { bridgeTasks, linkedRoute, networkName, networkNames, notRunning, routeUnits, tokenName } from "./names.js";
 import {
   actionLead,
   actionPrivacy,
+  balanceLine,
   pricedReview,
   recipientLine,
   DUSK_WALLET_URL,
@@ -531,12 +532,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const { receive: receiveUnit, send: unit } = routeUnits(route);
     // What the source holds: the public balance on Dusk, the wallet's on an EVM chain.
     const holdings = route.signer === "dusk" ? reads.duskBalance : route.mode === "migration" ? reads.migration?.balanceWei : reads.l2?.balanceWei;
-    const balance =
-      holdings === null || holdings === undefined
-        ? ""
-        : route.signer === "dusk"
-          ? formatDusk(holdings, 4)
-          : `${formatUnitsGrouped(holdings, 18, 4)} ${unit}`;
+    const balance = balanceLine(route, holdings);
     const destination = destinationFor(route);
     const typed = typedRecipient(route);
     // A typed .dusk name, once its lookup found the account it points to.
@@ -604,7 +600,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       // DUSK on Ethereum or BNB Smart Chain, for whoever doesn't know to pick it as From.
       entry: entryRoutes(routes, route).map((item) => ({ href: moveHref(item.id), name: networkName(cfg, item.from.id) })),
       error: state.form.error,
-      from: { balance, balanceLabel: route.signer === "dusk" ? "Public balance" : "Balance", net: netOf(route.from.id) },
+      from: { balance: balance.text, balanceExact: balance.exact, balanceLabel: route.signer === "dusk" ? "Public balance" : "Balance", net: netOf(route.from.id) },
       fromChoices: state.form.menu === "from" ? networkChoices("from", route) : [],
       menu: state.form.menu,
       needsCount: transfersVm().needs,

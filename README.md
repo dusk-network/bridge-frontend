@@ -258,8 +258,10 @@ The page writes times, IDs and fees as every Dusk app does
 clock, with the zone ("Today, 14:05 CET", records in full: "Wed 28 Oct
 2026, 14:05 CET"); Dusk contract IDs without 0x and EVM addresses with their
 checksum, shortened as 6…6 for Dusk IDs, accounts and hashes and as 0x and
-4…4 for EVM addresses and transactions; the most a fee can be rounded up,
-and the fee a transfer paid exact in its receipt's details.
+4…4 for EVM addresses and transactions; the most a fee can be rounded up.
+Amounts go by `@dusk-network/app-core/amounts`, as most wallets write them: a
+row in My transfers and the form's balance line up to 4 decimals, rounded down,
+with every digit on hover; Max, the review and the receipt to the Lux.
 
 The footer and About this page link the Terms of use and Privacy policy the
 network's file names, as the explorer does. A deployment can link its own
