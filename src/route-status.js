@@ -50,15 +50,15 @@ export function statusLine(status, { amountLux = null, now = Date.now() } = {}) 
   if (!status || status.paying === "stopped") return null;
   const last = lastPayoutWords(status, now);
   const words = {
-    late: `Payouts are running late. ${last}`,
-    "on-claim": "It pays when you claim it.",
-    quiet: last || (status.readSince ? `No payouts since ${formatShortDay(status.readSince)}.` : "No recent payouts."),
-    unknown: "Last payout not known right now.",
-    yes: `Paying out. ${last}`,
+    late: ["Payouts are running late.", last],
+    "on-claim": ["It pays when you claim it."],
+    quiet: [last || (status.readSince ? `No payouts since ${formatShortDay(status.readSince)}.` : "No recent payouts.")],
+    unknown: ["Last payout not known right now."],
+    yes: ["Paying out.", last],
   }[status.paying];
-  if (words === undefined) return null;
+  if (!words) return null;
   const pays = status.limit === "balance" && status.canPay !== null && status.canPay !== undefined ? formatShort(status.canPay).text : "";
   const short = Boolean(pays) && amountLux !== null && amountLux > status.canPay;
   const room = !pays ? "" : short ? `It can pay up to ${pays} DUSK now, less than you're sending, so yours may wait.` : `It can pay up to ${pays} DUSK.`;
-  return { text: `${words} ${room}`.trim(), warn: status.paying === "late" || short };
+  return { text: [...words, room].filter(Boolean).join(" "), warn: status.paying === "late" || short };
 }

@@ -46,6 +46,7 @@ test("it says how much it can pay where a balance limits that, and warns only wh
   assert.equal(line({ ...route, canPay: null, limit: "mints" }).text, "Paying out. Last payout 5 minutes ago.");
   assert.equal(line({ canPay: 5_000_000_000n, limit: "balance", paying: "on-claim" }).text, "It pays when you claim it. It can pay up to 5 DUSK.");
   assert.equal(line({ canPay: 5_000_000_000n, limit: "balance", paying: "unknown" }).text, "Last payout not known right now. It can pay up to 5 DUSK.");
+  assert.equal(line({ canPay: 5_000_000_000n, limit: "balance", paying: "yes" }).text, "Paying out. It can pay up to 5 DUSK.");
 });
 
 test("a route is read once as its card opens, and again once what was read is old", async () => {
