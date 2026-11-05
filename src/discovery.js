@@ -2,15 +2,17 @@
 // the networks so the list is the same on any device. The Dusk account's
 // archive history gives its deposits, its transfers to the bridge account and
 // the payouts of its migrations (@dusk-network/app-core/bridge); DuskEVM's
-// bridge events give the EVM address's withdrawals. Each source is synced a
-// bounded number of requests per visit and kept here per network and
+// bridge events give the EVM address's withdrawals, and the archive's memo
+// index the transfers from Dusk that pay it, from any account. Each source is
+// synced a bounded number of requests per visit and kept here per network and
 // account; a transfer found twice, or found and also sent from this browser,
 // is one entry.
 
-import { migrationPayoutOf } from "@dusk-network/app-core/bridge";
+import { migrationPayoutOf, serviceTransferOf } from "@dusk-network/app-core/bridge";
 import { syncWithdrawals } from "@dusk-network/app-core/duskevm-withdrawals";
-import { StaleHistoryError, createHistory } from "@dusk-network/app-core/history";
+import { StaleHistoryError, createHistory, parseHistoryEntry } from "@dusk-network/app-core/history";
 import { routes } from "@dusk-network/networks";
+import { formatEvmAddress } from "@dusk-network/networks/format";
 
 import { entryId } from "./activity.js";
 import { pageStorage as defaultStorage } from "./page-storage.js";
@@ -293,6 +295,25 @@ export function createDiscovery({ archive, cfg, rpc, storage = defaultStorage() 
     return { entries: Object.values(state?.entries ?? {}).map((record) => entryFromHistory(record, account, cfg)).filter(Boolean), state };
   }
 
+  /**
+   * The transfers from Dusk that pay `address`, whoever sent them: those to a
+   * bridge account with the address as their memo, as the archive's memo
+   * index lists them, in the forms the apps write it in. One request.
+   */
+  async function paying(address) {
+    const memos = [...new Set([formatEvmAddress(address), address.toLowerCase()])];
+    const data = await archive.query(`query { ${memos.map((memo, i) => `m${i}: transactionsByMemo(memo: ${JSON.stringify(memo)}) { json }`).join(" ")} }`);
+    const found = memos.flatMap((_, i) => (Array.isArray(data?.[`m${i}`]?.json) ? data[`m${i}`].json : []));
+    const entries = found.flatMap((raw) => {
+      // Read as its sender's history reads it: a transfer out, to a route's account.
+      const sender = raw?.events?.find((event) => event?.topic === "moonlight" && typeof event.data?.sender === "string")?.data.sender;
+      const facts = sender ? serviceTransferOf(parseHistoryEntry(sender, raw), cfg.network) : null;
+      if (!facts || partyKey(facts.to) !== partyKey(address)) return [];
+      return [{ amountLux: facts.sent.toString(), destination: facts.to, hash: facts.hash, parties: [sender, address], routeId: facts.route, sender }];
+    });
+    return { entries, state: null };
+  }
+
   async function evmAddress(address, maxRequests) {
     const key = stateKey(cfg, "l2", address);
     const { state } = await syncWithdrawals({
@@ -316,6 +337,7 @@ export function createDiscovery({ archive, cfg, rpc, storage = defaultStorage() 
       const jobs = [];
       if (dusk) jobs.push(duskAccount(dusk, duskRequests).then((r) => ({ ...r, source: "dusk" })));
       if (evm && cfg.duskEvm.enabled) jobs.push(evmAddress(evm, evmRequests).then((r) => ({ ...r, source: "l2" })));
+      if (evm && cfg.service && archive) jobs.push(paying(evm).then((r) => ({ ...r, source: "memo" })));
       const results = await Promise.allSettled(jobs);
       return {
         entries: results.flatMap((result) => (result.status === "fulfilled" ? result.value.entries : [])),

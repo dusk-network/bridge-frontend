@@ -141,7 +141,10 @@ account so the next visit asks only for what is new.
 - **The EVM address**: DuskEVM's L2 bridge event `ETHBridgeInitiated` filtered
   by sender, 100,000 blocks (the RPC's limit) per request from the newest
   down, synced by `@dusk-network/app-core/duskevm-withdrawals`. Each
-  withdrawal's Dusk recipient is decoded from its `extraData`.
+  withdrawal's Dusk recipient is decoded from its `extraData`. And the
+  transfers from Dusk that pay it, from any account: those to a bridge account
+  with the address as the memo, from the archive's memo index
+  (`transactionsByMemo`), in one request.
 
 ## Following a transfer
 

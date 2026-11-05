@@ -109,6 +109,42 @@ test("an EVM address's withdrawals come from DuskEVM's bridge, kept per network 
   assert.equal(next.entries.length, 2);
 });
 
+test("an EVM address's transfers include those from Dusk that pay it, whoever sent them", async () => {
+  // As the archive's memo index lists transfers naming the address: the apps write it with its checksum.
+  const NAMED = "0x3E5B8223e638CB414BEF8CF95393460cA1C3a11d";
+  const named = (n, sender, memo = NAMED, receiver = TESTNET_REGGIO_BRIDGE_ACCOUNT) => ({
+    block_height: 4_779_000 + n,
+    events: [{ data: { gas_spent: "1859281", memo: hex(memo), receiver, refund_info: null, sender, value: "3000000000" }, reverted: false, target: TRANSFER, topic: "moonlight" }],
+    origin: h(n),
+  });
+  const memos = {
+    // From another Dusk account than any connected here, from the connected one, and to an account that isn't the bridge's.
+    [NAMED]: [named(1, OTHER), named(2, ACCOUNT), named(3, ACCOUNT, NAMED, OTHER)],
+    // Written in lower case, as an app could.
+    [EVM]: [named(4, OTHER, EVM)],
+  };
+  const asked = [];
+  const fetch = async (_url, { body }) => {
+    asked.push(body);
+    const data = {};
+    for (const [, alias, memo] of body.matchAll(/(\w+): transactionsByMemo\(memo: "(\w+)"\)/gu)) data[alias] = memos[memo] ? { json: memos[memo] } : null;
+    return new Response(JSON.stringify({ data }));
+  };
+  const off = { ...cfg, duskEvm: { ...cfg.duskEvm, enabled: false } };
+  const found = await createDiscovery({ archive: createArchive({ fetch, url: "https://node.test" }), cfg: off, rpc: async () => assert.fail("no EVM chain is asked"), storage: memoryStorage() }).discover({ evm: EVM });
+  assert.deepEqual(
+    found.entries.map((entry) => [entry.routeId, entry.hash, entry.sender, entry.destination, entry.amountLux]),
+    [
+      ["dusk-to-ethereum", h(1), OTHER, NAMED, "3000000000"],
+      ["dusk-to-ethereum", h(2), ACCOUNT, NAMED, "3000000000"],
+      ["dusk-to-ethereum", h(4), OTHER, EVM, "3000000000"],
+    ],
+  );
+  // Each is the address's, so My transfers lists it for the address alone.
+  assert.ok(found.entries.every((entry) => shownFor(entry, [NAMED])));
+  assert.deepEqual([found.errors, asked.length], [[], 1]);
+});
+
 test("a transfer found twice, or found and sent here, is one entry", () => {
   const sent = { hash: h(1), id: `dusk-to-dusk-evm:${h(1)}`, parties: [ACCOUNT], routeId: "dusk-to-dusk-evm", sentHere: true, status: "completed", destinationHash: "0x01", createdAt: "2026-10-26T09:00:00.000Z" };
   const found = entryFromHistory({ amountLux: "100000000", blockHeight: 10, destination: EVM, hash: h(1), kind: "deposit" }, ACCOUNT, cfg);
