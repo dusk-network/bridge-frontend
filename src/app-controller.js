@@ -24,7 +24,7 @@ import { connectEvmWallet, ensureEvmChain, getEvmState, initializeEvmWallet, sub
 import { createFormReads } from "./form-reads.js";
 import { amountForInput, formatLux, formatDuskPlain } from "./format.js";
 import { approveMigration, submitMigration } from "./legacy-migration.js";
-import { bridgeTasks, linkedRoute, networkName, networkNames, notRunning, routeUnits, tokenName } from "./names.js";
+import { bridgeTasks, chainName, linkedRoute, networkName, networkNames, notRunning, routeUnits, tokenName } from "./names.js";
 import {
   actionLead,
   actionPrivacy,
@@ -195,16 +195,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     return { state: current.authorized ? "locked" : "connect" };
   }
 
-  function chainNameFor(chainId) {
-    if (!chainId) return "";
-    if (cfg.duskEvm.enabled && chainId === cfg.duskEvm.chainId) return names["dusk-evm"];
-    const match = Object.values(cfg.evmNetworks).find((network) => network.configured && network.chainId === chainId);
-    return match ? names[match.id] : `chain ${chainId}`;
-  }
-
   const evmVm = () =>
     evmAccount()
-      ? { account: evmAccount(), chainName: chainNameFor(state.evmState.chainId), state: "connected", walletName: state.evmState.walletName }
+      ? { account: evmAccount(), chainName: chainName(cfg, state.evmState.chainId), state: "connected", walletName: state.evmState.walletName }
       : { state: "connect" };
 
   const accounts = () => [listedDusk(), evmAccount()].filter(Boolean);

@@ -42,7 +42,9 @@ stays on that network's counterparts. There are three routes:
 Each chain has one name per network: Dusk and DuskEVM keep theirs next to the
 network badge, and Ethereum and BNB Smart Chain go by what the network's file
 calls them there, as the web wallet and the extension do. DUSK on them is named
-by its token standard: ERC20 DUSK and BEP20 DUSK.
+by its token standard: ERC20 DUSK and BEP20 DUSK. An EVM wallet on a chain this
+network doesn't route goes by what another network's file calls it, as Ethereum
+on testnet.
 
 The routes, and everything they use, come from the network's file in
 [`@dusk-network/networks`](https://www.npmjs.com/package/@dusk-network/networks),

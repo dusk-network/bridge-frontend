@@ -4,6 +4,8 @@
 // extension and a wallet adding the chain do: "BSC test chain" and "Sepolia"
 // on testnet.
 
+import { networks } from "@dusk-network/networks";
+
 export function networkNames(cfg) {
   return Object.freeze({
     badge: cfg.profile === "testnet" ? "Testnet" : "Mainnet",
@@ -29,6 +31,24 @@ export const routeUnits = (route) => ({ receive: unitOn(route.to), send: unitOn(
 
 /** The name of a network by id: "dusk", "dusk-evm", "ethereum" or "bsc". */
 export const networkName = (cfg, id) => networkNames(cfg)[id] ?? String(id);
+
+/**
+ * The chain an EVM wallet is on, by its chain ID: this network's own name for
+ * it, or else what a Dusk network's file calls it, as "Ethereum" for chain 1
+ * on testnet. A chain none of them has goes by its number.
+ */
+export function chainName(cfg, chainId) {
+  if (!chainId) return "";
+  if (cfg.duskEvm?.enabled && chainId === cfg.duskEvm.chainId) return networkName(cfg, "dusk-evm");
+  const own = Object.values(cfg.evmNetworks ?? {}).find((network) => network.configured && network.chainId === chainId);
+  if (own) return networkName(cfg, own.id);
+  for (const net of Object.values(networks)) {
+    const chain = Object.values(net.routes.chains).find((each) => each.chainId === chainId);
+    if (chain) return chain.name;
+    if (net.duskEvm?.chainId === chainId) return net.duskEvm.name;
+  }
+  return `chain ${chainId}`;
+}
 
 /** The coin that pays gas on an EVM chain. */
 export const gasCoin = (cfg, id) =>

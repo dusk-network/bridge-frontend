@@ -6,7 +6,7 @@ import { networks } from "@dusk-network/networks";
 import { contractGroups } from "./contracts.js";
 import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
-import { bridgeTasks, linkedRoute, networkName, networkNames, routeTitle, routeUnits, tokenName } from "./names.js";
+import { bridgeTasks, chainName, linkedRoute, networkName, networkNames, routeTitle, routeUnits, tokenName } from "./names.js";
 
 const DUSKEVM = {
   VITE_DUSKEVM_DISPUTE_GAME_FACTORY_CONTRACT_ID: "3".repeat(64),
@@ -41,6 +41,23 @@ test("a chain goes by what the network's file calls it, as the web wallet and th
   for (const cfg of [profile("mainnet"), profile("testnet", DUSKEVM)])
     for (const route of buildRoutes(cfg).filter((each) => each.from.id !== "dusk" && each.from.id !== "dusk-evm"))
       assert.equal(route.from.label, networks[cfg.profile].routes.chains[route.from.id].name);
+});
+
+test("the chain an EVM wallet is on goes by its name, wherever it is", () => {
+  const testnet = profile("testnet", DUSKEVM);
+  const mainnet = profile("mainnet");
+  // This network's chains, as the page calls them.
+  assert.equal(chainName(testnet, 11_155_111), "Sepolia");
+  assert.equal(chainName(testnet, testnet.duskEvm.chainId), "DuskEVM");
+  assert.equal(chainName(mainnet, 56), "BNB Smart Chain");
+  // Another network's, as its file calls them: Ethereum on a testnet page, not "chain 1".
+  assert.equal(chainName(testnet, 1), "Ethereum");
+  assert.equal(chainName(testnet, 56), "BNB Smart Chain");
+  assert.equal(chainName(mainnet, 11_155_111), "Sepolia");
+  assert.equal(chainName(mainnet, networks.testnet.duskEvm.chainId), networks.testnet.duskEvm.name);
+  // A chain no Dusk network has, by its number; and none before the wallet says.
+  assert.equal(chainName(testnet, 137), "chain 137");
+  assert.equal(chainName(testnet, null), "");
 });
 
 test("routes and tasks use the same names everywhere", () => {
