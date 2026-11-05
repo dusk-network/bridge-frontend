@@ -80,7 +80,11 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   receive and when. One line says what becomes public. With the EVM wallet on
   another chain than the route sends from, as the wallet itself says, the
   button offers to switch it, here and on the review. Nothing goes out from
-  another chain.
+  another chain. Under the route, how it's doing, read once as its card opens
+  and kept 10 minutes (`bridgeStatus`): "Paying out. Last payout 12 minutes
+  ago.", what it can pay where a balance limits that, and that it doesn't know
+  where it can't read that. It's only said: nothing waits for it, and nothing
+  it says stops anyone from sending.
 - **Review**: what moves and what becomes public, the checked facts
   (balances, gas, where the payout goes), then each wallet step with the
   lines its window will show, in its order and words, raw values decoded
@@ -307,8 +311,8 @@ doesn't run it.
 - The browser talks directly to configured Dusk and EVM RPC endpoints.
 - Data drivers run only when they match their pinned SHA-256.
 - Local storage contains transaction metadata, what was read for My
-  transfers and the chains' times, per network and account; no keys and no
-  balances. Where the browser denies the page storage, they're kept in
-  memory while the page is open.
+  transfers, the chains' times and how each route was doing, per network and
+  account; no keys and none of your balances. Where the browser denies the
+  page storage, they're kept in memory while the page is open.
 - Contract IDs, RPC endpoints and this site's origin are deployment trust
   inputs. Review them before publishing.

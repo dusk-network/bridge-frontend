@@ -93,6 +93,20 @@ test("the card's route row gives each route its time and cost in one line", () =
   assert.equal(routeLine(from("ethereum"), mainnet), "~70 min · two wallet steps · fee in ETH");
   assert.equal(routeLine(from("bsc"), mainnet), "~1 hour · two wallet steps · fee in BNB");
 });
+test("how the route is doing is said under it, and stops nobody from sending", () => {
+  const status = { text: "Payouts are running late. Last payout 3 hours ago.", warn: true };
+  const vm = cardVmFor({ status });
+  const { cta, route } = cardRegions(vm);
+  assert.ok(route.includes('<span class="route-sum"><span>~1 min · fee up to 0.005 DUSK</span><span class="route-status warn">Payouts are running late. Last payout 3 hours ago.</span></span>'), route);
+  assert.equal(cta, cardRegions(cardVmFor())["cta"]);
+  assert.ok(cta.includes('data-action="review"') && !cta.includes("disabled"), cta);
+  // In the card's open row too, and quiet where nothing could make anyone wait.
+  assert.ok(cardPage(vm).includes("route-status warn"));
+  assert.ok(cardRegions(cardVmFor({ status: { text: "Paying out.", warn: false } })).route.includes('<span class="route-status">Paying out.</span>'));
+  // Until it's read, or where there's nothing to say, nothing.
+  assert.doesNotMatch(cardRegions(cardVmFor()).route, /route-status/u);
+});
+
 test("a name typed without .dusk is offered as the .dusk name, under the recipient", () => {
   const vm = cardVmFor({ to: { ...cardVmFor().to, editing: true, error: "That isn't a Dusk account or a .dusk name.", input: "alice", suggest: "alice.dusk" } });
   assert.equal(cardRegions(vm)["recipient-note"], '<button type="button" class="linkish" data-action="recipient-suggest">Did you mean alice.dusk?</button>');

@@ -181,7 +181,7 @@ export function cardRegions(vm) {
     "from-foot": `<span>${html(vm.from.balanceLabel)}</span><span class="bal">${vm.from.balance ? `<span class="num"${exactTitle(vm.from.balanceExact, vm.from.balance)}>${html(vm.from.balance)}</span>` : ""}${vm.canMax ? '<button type="button" class="mini" data-action="max">Max</button>' : ""}</span>`,
     receive: html(vm.receive || "0"),
     "recipient-note": recipientNote(vm.to),
-    route: `<summary>${icon("clock")}<span>${html(vm.routeLine)}</span>${icon("chev-d", "chev")}</summary>
+    route: `<summary>${icon("clock")}<span class="route-sum"><span>${html(vm.routeLine)}</span>${vm.status ? `<span class="route-status${vm.status.warn ? " warn" : ""}">${html(vm.status.text)}</span>` : ""}</span>${icon("chev-d", "chev")}</summary>
       <dl class="kvs" aria-label="Quote"><div class="kv"><dt class="k">Steps</dt><dd class="v">${html(vm.steps)}</dd></div>${quoteRows({ rows: vm.quote.rows.filter((row) => !["send", "receive", "arrives"].includes(row.key)) })}${leaves}</dl>
       <p class="pubnote">${publicLine(vm.privacy)}</p>`,
   };

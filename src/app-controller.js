@@ -44,6 +44,7 @@ import { serviceTransferRequest } from "./service-transfer.js";
 import { createServices, proofSubmitterFor } from "./services.js";
 import { createLookupFlow } from "./lookup-flow.js";
 import { createReceiptLookups } from "./receipt-lookups.js";
+import { createRouteStatus, statusLine } from "./route-status.js";
 import { checkDuskRecipient, checkEvmRecipient, settledEvmRecipient } from "./recipient.js";
 import { readWatched, saveWatched, watchTarget } from "./watched-account.js";
 import { SIGNER_MOVED, createReviewSession, notSent, sameSigner, sentActionPatch } from "./review-session.js";
@@ -141,6 +142,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   const duskGasPrice = () => formReads.reads.gasPrice ?? 1n;
   /** Reads the gas price again; the page is drawn again where it moved. */
   const refreshPrice = () => formReads.price();
+  // How the card's route is doing. It's only said: nothing waits for it.
+  const routeStatus = createRouteStatus({ onChange: () => refreshForm(), read: (route) => services.status(route) });
   // The review on screen; a request prepared for it fills nothing else.
   const reviews = createReviewSession();
   // How long each route takes on this network: what the chains said, and
@@ -615,6 +618,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       receiveUnit,
       routeLine: routeLine(route, cfg, { gasPrice: duskGasPrice(), timing: timing() }),
       routeOpen: state.form.routeOpen,
+      status: statusLine(routeStatus.get(route), { amountLux: quote.amountLux }),
       steps: routeSteps(route, quote),
       tab: "bridge",
       to: toVm,
@@ -666,6 +670,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   function loadReads() {
     const route = formRoute();
     if (!route) return undefined;
+    routeStatus.open(route);
     return formReads.load({ dusk: duskAccount(), evm: evmAccount(), gas: gasInputs(route), route });
   }
 

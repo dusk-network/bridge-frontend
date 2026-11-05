@@ -351,6 +351,9 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 .route > summary::-webkit-details-marker { display: none; }
 .route > summary:hover { color: var(--text); }
 .route > summary svg { width: 15px; height: 15px; flex: 0 0 auto; }
+/* Under the route, how it's doing: amber where it could make someone wait. */
+.route-sum { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.route-status.warn { color: var(--amber); }
 .route > summary .chev { margin-left: auto; transition: transform var(--motion-fast) var(--motion-ease-exit); }
 .route[open] > summary .chev { transform: rotate(180deg); transition-duration: var(--motion-base); transition-timing-function: var(--motion-ease); }
 .route .kvs .kv { padding: 8px 8px; font-size: 13.5px; }
