@@ -424,7 +424,7 @@ export function transferRow(row, { canAct = true } = {}) {
   // Whom it pays and its transaction, so equal transfers are told apart.
   const to = row.to ? `To ${row.to.name ? html(row.to.name) : `<code class="mono">${html(row.to.address)}</code>`}` : "";
   const meta = [to, row.hash ? `<code class="mono">${html(row.hash)}</code>` : ""].filter(Boolean).join(" · ");
-  return `<li class="tr" data-status="${html(row.status)}"><a class="tr-link" href="${html(row.href)}" aria-label="${html(row.title)}, ${html(row.amountText)}, ${html(row.statusWord)}. Open the receipt"></a>${pairMark(row.pair[0], row.pair[1])}<div class="tr-main"><div class="t1">${html(row.title)}</div><div class="t2">${html(row.subline)}</div>${meta ? `<div class="t3">${meta}</div>` : ""}${trackerBars(row.tracker)}</div><div class="rt"><span class="am num"${exactTitle(row.amountExact, row.amountText)}>${html(row.amountText)}</span>${right}</div></li>`;
+  return `<li class="tr" data-status="${html(row.status)}"><a class="tr-link" href="${html(row.href)}" aria-label="${html(row.title)}, ${html(row.amountText)}, ${html(row.statusWord)}. Open the receipt"${exactTitle(row.amountExact, row.amountText)}></a>${pairMark(row.pair[0], row.pair[1])}<div class="tr-main"><div class="t1">${html(row.title)}</div><div class="t2">${html(row.subline)}</div>${meta ? `<div class="t3">${meta}</div>` : ""}${trackerBars(row.tracker)}</div><div class="rt"><span class="am num">${html(row.amountText)}</span>${right}</div></li>`;
 }
 
 /**

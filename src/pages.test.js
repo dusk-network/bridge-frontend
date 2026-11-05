@@ -521,7 +521,9 @@ test("a row in My transfers writes its amount as wallets do, with every digit on
   assert.equal(shown("999999999").amountText, "0.9999 DUSK");
   assert.equal(shown("1").amountText, "0.000000001 DUSK");
   const row = activityPanel({ empty: "", groups: { done: [], failed: [], needs: [], progress: [{ ...shown("53082083"), href: "#/t" }] }, lede: "", more: false, syncText: "", watch: null });
-  assert.ok(row.includes('<span class="am num" title="0.053082083 DUSK">0.053 DUSK</span>'), row);
+  // On the row's link, which takes the pointer anywhere on the row.
+  assert.match(row, /<a class="tr-link" [^>]* title="0\.053082083 DUSK"><\/a>/u);
+  assert.ok(row.includes('<span class="am num">0.053 DUSK</span>'), row);
   // The receipt is its detail: in full.
   const model = receiptModel({ amountLux: "53082083", hash: "0a".repeat(32), id: "a", routeId: "dusk-to-dusk-evm", status: "pending" }, { cfg: testnet, route: T["duskevm-deposit"], url: "https://bridge.example.org/#/transfer/a" });
   assert.equal(model.view.title, "Sending 0.053082083 DUSK to DuskEVM");
