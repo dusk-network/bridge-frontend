@@ -152,7 +152,8 @@ account so the next visit asks only for what is new.
   withdrawal's Dusk recipient is decoded from its `extraData`. And the
   transfers from Dusk that pay it, from any account: those to a bridge account
   with the address as the memo, from the archive's memo index
-  (`transactionsByMemo`), in one request.
+  (`transactionsByMemo`), in one request, and one more for when those found
+  for the first time were sent, so the list orders them by it.
 
 ## Following a transfer
 

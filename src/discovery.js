@@ -10,7 +10,7 @@
 
 import { migrationPayoutOf, serviceTransferOf } from "@dusk-network/app-core/bridge";
 import { syncWithdrawals } from "@dusk-network/app-core/duskevm-withdrawals";
-import { StaleHistoryError, createHistory, parseHistoryEntry } from "@dusk-network/app-core/history";
+import { DETAILS_BATCH, StaleHistoryError, createHistory, fetchTxDetails, parseHistoryEntry } from "@dusk-network/app-core/history";
 import { routes } from "@dusk-network/networks";
 import { formatEvmAddress } from "@dusk-network/networks/format";
 
@@ -298,9 +298,15 @@ export function createDiscovery({ archive, cfg, rpc, storage = defaultStorage() 
   /**
    * The transfers from Dusk that pay `address`, whoever sent them: those to a
    * bridge account with the address as their memo, as the archive's memo
-   * index lists them, in the forms the apps write it in. One request.
+   * index lists them, in the forms the apps write it in. One request, and one
+   * more for when those found for the first time were sent (up to 50 a
+   * request), so the list orders them by it. What was dated is kept per
+   * network and address; one the archive can't date yet is left for the next
+   * visit.
    */
   async function paying(address) {
+    const key = stateKey(cfg, "memo", address);
+    const dated = loadState(key, storage)?.sentAt ?? {};
     const memos = [...new Set([formatEvmAddress(address), address.toLowerCase()])];
     const data = await archive.query(`query { ${memos.map((memo, i) => `m${i}: transactionsByMemo(memo: ${JSON.stringify(memo)}) { json }`).join(" ")} }`);
     const found = memos.flatMap((_, i) => (Array.isArray(data?.[`m${i}`]?.json) ? data[`m${i}`].json : []));
@@ -309,9 +315,16 @@ export function createDiscovery({ archive, cfg, rpc, storage = defaultStorage() 
       const sender = raw?.events?.find((event) => event?.topic === "moonlight" && typeof event.data?.sender === "string")?.data.sender;
       const facts = sender ? serviceTransferOf(parseHistoryEntry(sender, raw), cfg.network) : null;
       if (!facts || partyKey(facts.to) !== partyKey(address)) return [];
-      return [{ amountLux: facts.sent.toString(), destination: facts.to, hash: facts.hash, parties: [sender, address], routeId: facts.route, sender }];
+      return [{ amountLux: facts.sent.toString(), destination: facts.to, hash: facts.hash, parties: [sender, address], routeId: facts.route, sender, sourceAt: dated[facts.hash] }];
     });
-    return { entries, state: null };
+    const undated = entries.filter((entry) => !entry.sourceAt).map((entry) => entry.hash);
+    for (let at = 0; at < undated.length; at += DETAILS_BATCH) {
+      const details = await fetchTxDetails(archive, undated.slice(at, at + DETAILS_BATCH));
+      for (const entry of entries) entry.sourceAt ??= details.get(entry.hash)?.timestamp ?? undefined;
+    }
+    const sent = entries.filter((entry) => entry.sourceAt);
+    saveState(key, { sentAt: Object.fromEntries(sent.map((entry) => [entry.hash, entry.sourceAt])) }, storage);
+    return { entries: sent, state: null };
   }
 
   async function evmAddress(address, maxRequests) {
