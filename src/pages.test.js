@@ -604,6 +604,9 @@ test("a migration's network fee counts its approval too, where this browser sent
   // Failed on its chain, the gas of both was still spent.
   const failed = receiptModel({ ...entry, receivedLux: undefined, sourceFailed: true, status: "failed" }, { cfg: testnet, route: T.migration, url: "x" });
   assert.deepEqual(failed.details.filter((row) => !row.html).map((row) => [row.label, row.value]), [["Network fee", "0.000071 ETH"]]);
+  // Cancelled in the wallet after its approval: no migration was mined, and the approval's gas is the fee, said as that.
+  const cancelled = receiptModel({ ...entry, feeWei: undefined, receivedLux: undefined, replaced: "cancelled", sourceFailed: true, status: "failed" }, { cfg: testnet, route: T.migration, url: "x" });
+  assert.deepEqual(cancelled.details.filter((row) => !row.html).map((row) => [row.label, row.value, row.exact, row.detail]), [["Network fee", "0.000029 ETH", "0.000029106000465696 ETH", "approval"]]);
 });
 
 test("a receipt on its way offers to tell you when it arrives, and says what happens where that's refused", () => {

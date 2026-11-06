@@ -351,11 +351,13 @@ const failedAtSource = (entry) =>
  * hover. What failed on its own chain moved nothing, so its fee stands alone.
  */
 function ledgerRows(entry, { cfg, from, locale, route, status }) {
-  // A migration's gas: its own, and its approval's where this browser sent one with it.
-  const approvalGas = route.mode === "migration" && entry.approvalFeeWei !== undefined && entry.approvalFeeWei !== null;
+  // A migration's gas: its own, once mined, and its approval's where this
+  // browser sent one with it, also when the migration never was.
+  const known = (wei) => wei !== undefined && wei !== null;
+  const approvalGas = route.mode === "migration" && known(entry.approvalFeeWei);
   const ledger = transferLedger({
     failed: status === "failed" && failedAtSource(entry),
-    gasWei: entry.feeWei === undefined || entry.feeWei === null ? entry.feeWei : BigInt(entry.feeWei) + (approvalGas ? BigInt(entry.approvalFeeWei) : 0n),
+    gasWei: known(entry.feeWei) || approvalGas ? (known(entry.feeWei) ? BigInt(entry.feeWei) : 0n) + (approvalGas ? BigInt(entry.approvalFeeWei) : 0n) : entry.feeWei,
     locale,
     network: cfg.network,
     networkFee: [entry.feeLux, entry.proveFeeLux, entry.claimFeeLux],
@@ -373,7 +375,7 @@ function ledgerRows(entry, { cfg, from, locale, route, status }) {
       sent: "You sent",
     })[line.key];
   // Which transactions a migration's fee counts.
-  const counts = route.mode === "migration" ? (approvalGas ? "approval and migration" : "migration") : "";
+  const counts = route.mode !== "migration" ? "" : !approvalGas ? "migration" : known(entry.feeWei) ? "approval and migration" : "approval";
   return ledger.lines.map((line) =>
     line.key === "gas"
       ? { detail: counts, exact: `${line.exact} ${line.coin}`, label: label(line), value: `${line.text} ${line.coin}` }

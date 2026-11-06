@@ -154,10 +154,25 @@ export function createTracking(deps) {
     return block ? Number(BigInt(block.timestamp)) * 1_000 : null;
   }
 
+  /**
+   * What the approval this browser sent with a migration paid, read once from
+   * its receipt, where `sender` sent it: part of the transfer's fee, whether
+   * the migration was mined or not.
+   */
+  async function approvalFee(entry, network, sender) {
+    if (!entry.approvalHash || entry.approvalFeeWei !== undefined) return {};
+    const approval = await rpc(network, "eth_getTransactionReceipt", [entry.approvalHash]);
+    return approval?.gasUsed && approval.effectiveGasPrice && sameAddress(approval.from, sender)
+      ? { approvalFeeWei: (BigInt(approval.gasUsed) * BigInt(approval.effectiveGasPrice)).toString() }
+      : {};
+  }
+
   async function refreshMigration(entry, route, others) {
     const network = route.from.id;
-    // Cancelled or replaced in the wallet after it was sent: there's no migration.
-    if (entry.replaced) return failed(REPLACED[entry.replaced] ?? REPLACED.replaced, { sourceFailed: true });
+    // Cancelled or replaced in the wallet after it was sent: there's no
+    // migration, though its approval was paid for.
+    if (entry.replaced)
+      return failed(REPLACED[entry.replaced] ?? REPLACED.replaced, { ...(await approvalFee(entry, network, entry.sender)), sourceFailed: true });
     const patch = {};
     if (!entry.destination || !entry.amountLux) {
       const tx = await rpc(network, "eth_getTransactionByHash", [entry.hash]);
@@ -179,12 +194,7 @@ export function createTracking(deps) {
     patch.sender ??= entry.sender ?? receipt.from;
     if (receipt.gasUsed && receipt.effectiveGasPrice)
       patch.feeWei = (BigInt(receipt.gasUsed) * BigInt(receipt.effectiveGasPrice)).toString();
-    // The approval this browser sent for it, read once: what it paid is part of the transfer's fee.
-    if (entry.approvalHash && entry.approvalFeeWei === undefined) {
-      const approval = await rpc(network, "eth_getTransactionReceipt", [entry.approvalHash]);
-      if (approval?.gasUsed && approval.effectiveGasPrice && sameAddress(approval.from, patch.sender))
-        patch.approvalFeeWei = (BigInt(approval.gasUsed) * BigInt(approval.effectiveGasPrice)).toString();
-    }
+    Object.assign(patch, await approvalFee(entry, network, patch.sender));
     if (receipt.status === "0x0")
       return failed(`The migration failed on ${name(network)}.`, { ...patch, sourceFailed: true });
     const recipient = patch.destination ?? entry.destination;

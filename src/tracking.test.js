@@ -322,6 +322,15 @@ test("a migration cancelled or replaced in the wallet after it was sent fails, w
     const ended = await tracking.refresh({ ...sent, replaced }, ROUTES.migration);
     assert.deepEqual([ended.status, ended.note, ended.sourceFailed], ["failed", note, true]);
   }
+  // Its approval went through before the migration was cancelled: what that paid is kept as it ends.
+  const SENDER_EVM = "0xd63b00000000000000000000000000000000df40";
+  const APPROVAL = `0x${"a7".repeat(32)}`;
+  const approval = { blockNumber: toHex(99n), effectiveGasPrice: toHex(1_000_000_016n), from: SENDER_EVM, gasUsed: toHex(46_182n), status: "0x1" };
+  const paid = createTracking({ archive: archive(), config: payingCfg, node: node(), rpc: fakeRpc({ eth_getTransactionReceipt: ([hash]) => (hash === APPROVAL ? approval : null) }) });
+  const cancelled = await paid.refresh({ ...sent, approvalHash: APPROVAL, replaced: "cancelled", sender: SENDER_EVM }, ROUTES.migration);
+  assert.deepEqual([cancelled.status, cancelled.approvalFeeWei], ["failed", "46182000738912"]);
+  // Only from the migration's own sender.
+  assert.equal((await paid.refresh({ ...sent, approvalHash: APPROVAL, replaced: "cancelled", sender: "0x5602300000000000000000000000000000005602" }, ROUTES.migration)).approvalFeeWei, undefined);
 });
 
 test("a migration is paid out by its own route's payout account, also where that account pays out both chains", async () => {
