@@ -162,7 +162,10 @@ Which payout or credit is a transfer's comes from
 `@dusk-network/app-core/bridge`. A transfer on its way is checked every 15
 seconds, every minute while the page is in the background, and every 5
 seconds while its receipt is open around when it usually arrives: from a
-minute before its usual time until five minutes after.
+minute before its usual time until five minutes after. An approval or a
+migration the EVM wallet speeds up goes by the transaction mined in its
+place, as does the receipt open on it; one cancelled or replaced there moved
+nothing, and says so.
 
 - **Migrations** complete when the Dusk payout appears: Messina pays out the
   migrated amount with the migration's transaction hash as the memo

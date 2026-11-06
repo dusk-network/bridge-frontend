@@ -1,5 +1,5 @@
 import { erc20Abi } from "@dusk/evm-sdk";
-import { formatUnits, parseAbi, parseUnits } from "viem";
+import { createPublicClient, formatUnits, http, parseAbi, parseUnits } from "viem";
 
 import { ensureEvmChain, getEvmClients, reviewedEvmAccount } from "./evm-wallet.js";
 import { normalizeDuskAddress, normalizeEvmAddress } from "./validation.js";
@@ -28,7 +28,14 @@ export function assertMigrationBalance(balance, amount) {
   return value;
 }
 
-/** Approves exactly `amount` from `account`, the EVM account it was reviewed for, or sends nothing. */
+/** An approval cancelled in the wallet once it was sent: nothing was approved. */
+export const APPROVAL_CANCELLED = "You cancelled the approval in your wallet. Nothing moved.";
+
+/**
+ * Approves exactly `amount` from `account`, the EVM account it was reviewed
+ * for, or sends nothing. Its hash is the transaction mined: the one the wallet
+ * sent, or the one it sent in its place when sped up.
+ */
 export async function approveMigration(network, amount, { account: reviewed } = {}) {
   await ensureEvmChain(network);
   const { publicClient, walletClient } = getEvmClients(network);
@@ -41,10 +48,11 @@ export async function approveMigration(network, amount, { account: reviewed } = 
     args: [network.migrationContract, value],
   });
   const hash = await walletClient.writeContract({ ...request, account: await reviewedEvmAccount(reviewed) });
-  const receipt = await publicClient.waitForTransactionReceipt({ hash });
-  if (receipt.status !== "success")
+  const { receipt, replaced } = await mined(publicClient, hash);
+  if (replaced === "cancelled") throw new Error(APPROVAL_CANCELLED);
+  if (receipt.status !== "success" || (replaced && replaced !== "repriced"))
     throw new Error("The approval transaction failed.");
-  return hash;
+  return receipt.transactionHash;
 }
 
 /** Why a revoke ends without one: it didn't go through on its chain. */
@@ -104,7 +112,22 @@ export async function revokeMigration(network, { account: reviewed } = {}) {
   return receipt.transactionHash;
 }
 
-/** Migrates `amount` to `duskAccount` from `account`, the EVM account it was reviewed for, or sends nothing. */
+/**
+ * What the wallet's transaction `hash` was mined as, read on its chain: its
+ * own hash, or the one the wallet sent in its place on the same nonce, and why
+ * (`replaced`: "repriced" when sped up, "cancelled" or "replaced"). Given up
+ * after viem's three minutes.
+ */
+export async function minedAs(network, hash) {
+  const { receipt, replaced } = await mined(createPublicClient({ transport: http(network.rpcUrl) }), hash);
+  return { hash: receipt.transactionHash, replaced };
+}
+
+/**
+ * Migrates `amount` to `duskAccount` from `account`, the EVM account it was
+ * reviewed for, or sends nothing. Its hash is the one the wallet sent: until
+ * it's mined (`minedAs`), the wallet can speed it up under another.
+ */
 export async function submitMigration(network, amount, duskAccount, { account: reviewed } = {}) {
   await ensureEvmChain(network);
   const { publicClient, walletClient } = getEvmClients(network);

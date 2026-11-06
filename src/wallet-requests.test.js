@@ -32,7 +32,7 @@ const { decodeBridgeCall } = await import("@dusk-network/networks/duskevm");
 const { depositRequest } = await import("./dusk-deposit.js");
 const { submitDuskEvmWithdrawal } = await import("./duskevm-withdrawal.js");
 const { connectEvmWallet, getEvmState, heldAccount, initializeEvmWallet } = await import("./evm-wallet.js");
-const { NOT_REVOKED, REVOKE_CANCELLED, approveMigration, revokeMigration, submitMigration } = await import("./legacy-migration.js");
+const { APPROVAL_CANCELLED, NOT_REVOKED, REVOKE_CANCELLED, approveMigration, minedAs, revokeMigration, submitMigration } = await import("./legacy-migration.js");
 
 // What the review prepares and then sends, as the account it was reviewed for.
 const submitServiceTransfer = async ({ account, ...options }) => sendDuskTransfer(await serviceTransferRequest(options), { account });
@@ -370,6 +370,29 @@ test("a revoke is said to be done only once the chain says so, whatever the wall
     globalThis.fetch = replacedOn("repriced", { after: 0n, before: 1n });
     await useEvmWallet();
     assert.equal(await sends.revoke(REVIEWED), MINED);
+  } finally {
+    globalThis.fetch = fetch;
+    delete globalThis.ethereum;
+  }
+});
+
+test("an approval or a migration the wallet sped up goes by the transaction mined in its place", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const fetch = globalThis.fetch;
+  try {
+    // The approval's hash, kept with its transfer for its fee, is the one mined.
+    globalThis.fetch = replacedOn("repriced", { after: 1n, before: 0n });
+    await useEvmWallet();
+    assert.equal(await sends.approve(REVIEWED), MINED);
+    // Cancelled in the wallet once sent: nothing was approved, so no migration is offered on it.
+    globalThis.fetch = replacedOn("cancelled", { after: 0n, before: 0n });
+    await useEvmWallet();
+    await assert.rejects(sends.approve(REVIEWED), { message: APPROVAL_CANCELLED });
+    // A migration goes out as the wallet sent it, and is followed to what was mined.
+    globalThis.fetch = replacedOn("repriced", { after: 1n, before: 1n });
+    await useEvmWallet();
+    const sent = await sends.migrate(REVIEWED);
+    assert.deepEqual(await minedAs(config.evmNetworks.ethereum, sent), { hash: MINED, replaced: "repriced" });
   } finally {
     globalThis.fetch = fetch;
     delete globalThis.ethereum;

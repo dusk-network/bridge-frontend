@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { entryId, readActivity, recordActivity, saveActivity, updateActivity, useActivityNetwork } from "./activity.js";
+import { entryId, minedTransfer, readActivity, recordActivity, saveActivity, updateActivity, useActivityNetwork } from "./activity.js";
 
 const storage = (initial = {}) => {
   const values = new Map(Object.entries(initial));
@@ -27,6 +27,23 @@ test("an entry is its route and hash; recording it again merges", () => {
 
   updateActivity(entry.id, { stage: "ready_to_prove" }, store);
   assert.equal(readActivity(store).find((item) => item.id === entry.id).stage, "ready_to_prove");
+});
+
+test("a migration sped up in the wallet goes by the hash mined in its place; one cancelled there is said to be", () => {
+  const MINED = `0x${"cd".repeat(32)}`;
+  const sent = { amountLux: "20000000", approvalHash: `0x${"a7".repeat(32)}`, createdAt: "2026-11-06T00:10:58.000Z", destination: "xyi8z9", hash: HASH, id: entryId("bsc-to-dusk", HASH), routeId: "bsc-to-dusk", sender: "0x90fe", sentHere: true, status: "pending" };
+  const other = { hash: `0x${"0e".repeat(32)}`, id: entryId("bsc-to-dusk", `0x${"0e".repeat(32)}`), routeId: "bsc-to-dusk", status: "completed" };
+  // Sped up: the same transfer, with all it knew, under the mined hash; the hash the wallet dropped is gone.
+  const sped = minedTransfer([sent, other], { hash: HASH, mined: MINED, replaced: "repriced", routeId: "bsc-to-dusk" });
+  assert.equal(sped.id, entryId("bsc-to-dusk", MINED));
+  assert.deepEqual(sped.items.map((item) => item.hash), [MINED, other.hash]);
+  assert.deepEqual(sped.items[0], { ...sent, hash: MINED, id: sped.id });
+  // Cancelled or replaced: it stays, saying so, for its check to end it.
+  const cancelled = minedTransfer([sent, other], { hash: HASH, mined: MINED, replaced: "cancelled", routeId: "bsc-to-dusk" });
+  assert.deepEqual([cancelled.id, cancelled.items.find((item) => item.id === sent.id).replaced], [sent.id, "cancelled"]);
+  // Mined as itself, or not kept here: nothing changes.
+  assert.equal(minedTransfer([sent], { hash: HASH, mined: HASH.toUpperCase().replace("0X", "0x"), replaced: null, routeId: "bsc-to-dusk" }), null);
+  assert.equal(minedTransfer([other], { hash: HASH, mined: MINED, replaced: "repriced", routeId: "bsc-to-dusk" }), null);
 });
 
 test("the same hash on two routes is two entries", () => {

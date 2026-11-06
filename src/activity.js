@@ -130,6 +130,22 @@ export function recordActivity(item, storage = defaultStorage()) {
     : [next];
 }
 
+/**
+ * The transfers once one sent from here, by `hash`, was mined as another
+ * transaction (`minedAs`). Sped up in the wallet ("repriced"), it goes by the
+ * mined hash, with all it knew. Cancelled or replaced there, it says so
+ * (`replaced`), and its next check finds it moved nothing. Null where nothing
+ * changes: mined as itself, or not kept.
+ */
+export function minedTransfer(items, { hash, mined, replaced, routeId }) {
+  const id = entryId(routeId, hash);
+  const entry = items.find((item) => item.id === id);
+  if (!entry || !mined || entryId(routeId, mined) === id) return null;
+  if (replaced !== "repriced") return { id, items: items.map((item) => (item.id === id ? { ...item, replaced } : item)) };
+  const moved = { ...entry, hash: canonicalHash(mined) ?? mined, id: entryId(routeId, mined) };
+  return { id: moved.id, items: [moved, ...items.filter((item) => item.id !== id)] };
+}
+
 export function updateActivity(id, patch, storage = defaultStorage()) {
   const items = readActivity(storage).map((item) =>
     item.id === id ? { ...item, ...patch } : item,

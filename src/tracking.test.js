@@ -313,6 +313,17 @@ test("a migration's fee counts the approval this browser sent for it, read once 
   assert.equal((await tracking.refresh(sent, ROUTES.migration)).approvalFeeWei, undefined);
 });
 
+test("a migration cancelled or replaced in the wallet after it was sent fails, with nothing moved", async () => {
+  // Its hash was dropped: the chain has no receipt for it, and never will.
+  const tracking = createTracking({ archive: archive(), config: payingCfg, node: node(), rpc: fakeRpc({ eth_getTransactionByHash: () => null, eth_getTransactionReceipt: () => null }) });
+  const sent = { amountLux: "3000000000", destination: SENDER, hash: EVM_HASH, routeId: ROUTES.migration.id };
+  assert.equal((await tracking.refresh(sent, ROUTES.migration)).status, "pending");
+  for (const [replaced, note] of [["cancelled", "It was cancelled in the wallet, so nothing moved."], ["replaced", "The wallet sent another transaction in its place, so nothing moved."]]) {
+    const ended = await tracking.refresh({ ...sent, replaced }, ROUTES.migration);
+    assert.deepEqual([ended.status, ended.note, ended.sourceFailed], ["failed", note, true]);
+  }
+});
+
 test("a migration is paid out by its own route's payout account, also where that account pays out both chains", async () => {
   const input = encodeFunctionData({
     abi: parseAbi(["function migrate(uint256 amount, string targetAddress)"]),

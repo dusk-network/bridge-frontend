@@ -32,6 +32,12 @@ const NO_PAYOUT = Object.freeze({
   "under-fee": "The amount didn't exceed the bridge fee, so nothing is paid out.",
 });
 
+/** Why a migration sent from here never happened: the wallet sent something else on its nonce. */
+const REPLACED = Object.freeze({
+  cancelled: "It was cancelled in the wallet, so nothing moved.",
+  replaced: "The wallet sent another transaction in its place, so nothing moved.",
+});
+
 /** A transfer that went through and pays nothing out: it's a failure, though the DUSK moved. */
 const PAID_NOTHING = Object.freeze({ receivedLux: "0" });
 
@@ -150,6 +156,8 @@ export function createTracking(deps) {
 
   async function refreshMigration(entry, route, others) {
     const network = route.from.id;
+    // Cancelled or replaced in the wallet after it was sent: there's no migration.
+    if (entry.replaced) return failed(REPLACED[entry.replaced] ?? REPLACED.replaced, { sourceFailed: true });
     const patch = {};
     if (!entry.destination || !entry.amountLux) {
       const tx = await rpc(network, "eth_getTransactionByHash", [entry.hash]);

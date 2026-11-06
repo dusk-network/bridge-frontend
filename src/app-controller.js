@@ -7,7 +7,7 @@
 import { topGap } from "@dusk-network/app-core/history";
 import { toDuskName } from "@duskdomains/sdk/names";
 
-import { entryId, readActivity, recordActivity, saveActivity, updateActivity, useActivityNetwork } from "./activity.js";
+import { entryId, minedTransfer, readActivity, recordActivity, saveActivity, updateActivity, useActivityNetwork } from "./activity.js";
 import { NOTICE_WORDS, createArrivalNotice } from "./arrival-notice.js";
 import { bridgeRoutes, getBridgeRoute } from "./bridge-routes.js";
 import { cardRoute, choosePair, entryRoutes, flipRoute, followsWallets, fromChoices, handedOverRecipient, primaryButton, routeBetween, toChoices } from "./bridge-card.js";
@@ -23,7 +23,7 @@ import { duskEvmNetwork, submitDuskEvmWithdrawal } from "./duskevm-withdrawal.js
 import { connectEvmWallet, ensureEvmChain, getEvmState, initializeEvmWallet, subscribeEvmWallet } from "./evm-wallet.js";
 import { createFormReads } from "./form-reads.js";
 import { amountForInput, formatLux, formatDuskPlain } from "./format.js";
-import { approveMigration, revokeMigration, submitMigration } from "./legacy-migration.js";
+import { approveMigration, minedAs, revokeMigration, submitMigration } from "./legacy-migration.js";
 import { bridgeTasks, chainName, linkedRoute, networkName, networkNames, notRunning, routeUnits, tokenName } from "./names.js";
 import {
   actionLead,
@@ -1407,7 +1407,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
           return;
         }
         const hash = await submitMigration(network, amount, review.destination, { account: review.signer?.account });
-        return sent({
+        sent({
           amountLux: review.amountLux.toString(),
           approvalHash: review.approvalHash,
           destination: review.destination,
@@ -1416,6 +1416,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
           routeId: route.id,
           sender: evmAccount(),
         });
+        void followMined(route, hash);
+        return;
       }
       if (route.mode === "duskevm-withdrawal") {
         const result = await submitDuskEvmWithdrawal({ account: review.signer?.account, amount: formatDuskPlain(review.amountLux), duskAccount: review.destination });
@@ -1454,6 +1456,28 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         renderSheet();
       }
     }
+  }
+
+  /**
+   * A migration sent from here, followed until it's mined. Sped up in the
+   * wallet, it's mined under another hash: its transfer, and its receipt on
+   * screen, go by that one. Cancelled or replaced there, it moved nothing.
+   */
+  async function followMined(route, hash) {
+    let found;
+    try {
+      found = await minedAs(cfg.evmNetworks[route.from.id], hash);
+    } catch {
+      return;
+    }
+    const next = minedTransfer(state.activity, { hash, mined: found.hash, replaced: found.replaced, routeId: route.id });
+    if (!next) return;
+    setActivity(saveActivity(next.items));
+    track(next.id);
+    if (state.page.page !== "transfer" || canonicalHash(hash) !== state.page.hash) return;
+    const now = state.activity.find((item) => item.id === next.id);
+    if (now && canonicalHash(now.hash) !== state.page.hash) globalThis.location.replace(transferHref(now.hash));
+    else renderMain();
   }
 
   async function headBlock(network) {
