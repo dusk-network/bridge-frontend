@@ -118,7 +118,13 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   notifications are refused or a page can't send them, as on most phones, it's
   the title alone, and the receipt says so. A withdrawal waiting for
   its claim counts down, says when a clock change falls inside the wait, and
-  offers an .ics file made in the browser ("Add to calendar").
+  offers an .ics file made in the browser ("Add to calendar"). A transfer to
+  BNB Smart Chain that arrived at the connected EVM wallet offers "Add DUSK to
+  MetaMask", the wallet's own request to show the token (`wallet_watchAsset`:
+  the network file's token, DUSK, 18 decimals), as the way back's form does
+  beside the balance while the wallet holds none. Only a wallet that takes
+  the request is offered it; one that added DUSK isn't offered it again for
+  that address and chain in this browser, and a refusal says nothing.
 - **My transfers**: the connected accounts' transfers, read from the networks
   (below), plus any sent or looked up on this device, each with whom it pays
   and its transaction's short hash. A withdrawal under way that pays another
@@ -342,7 +348,8 @@ doesn't run it.
 - Local storage contains transaction metadata, what was read for My
   transfers, what each migration paid on its own chain once it's final, the
   chains' times, how each route was doing, per network and
-  account, and whether this device was asked to notify; no keys and none of
+  account, whether this device was asked to notify, and where DUSK was added
+  to an EVM wallet; no keys and none of
   your balances. Where the browser denies the
   page storage, they're kept in memory while the page is open.
 - Contract IDs, RPC endpoints and this site's origin are deployment trust

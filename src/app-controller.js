@@ -20,7 +20,7 @@ import { createDiscoveryRuns } from "./discovery-runs.js";
 import { depositRequest } from "./dusk-deposit.js";
 import { createDuskConnection, ensureDuskConnected, sendDuskContractCall, sendDuskTransfer } from "./dusk-wallet.js";
 import { duskEvmNetwork, submitDuskEvmWithdrawal } from "./duskevm-withdrawal.js";
-import { connectEvmWallet, ensureEvmChain, getEvmState, initializeEvmWallet, subscribeEvmWallet } from "./evm-wallet.js";
+import { addDusk, canAddDusk, connectEvmWallet, ensureEvmChain, getEvmState, initializeEvmWallet, subscribeEvmWallet } from "./evm-wallet.js";
 import { createFormReads } from "./form-reads.js";
 import { amountForInput, formatLux, formatDuskPlain } from "./format.js";
 import { approveMigration, minedAs, revokeMigration, submitMigration } from "./legacy-migration.js";
@@ -28,6 +28,7 @@ import { bridgeTasks, chainName, linkedRoute, networkName, networkNames, notRunn
 import {
   actionLead,
   actionPrivacy,
+  addDuskOffer,
   balanceLine,
   pricedReview,
   recipientLine,
@@ -607,6 +608,11 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     return {
       amount: state.form.amount,
       amountError: quote.insufficient ? "" : quote.error,
+      // Beside the balance of the way back, while the wallet holds none: it can show the DUSK once there is some.
+      addDusk:
+        route.mode === "migration"
+          ? addDuskOffer(route, { balanceWei: reads.migration?.balanceWei ?? null, evm: state.evmState, takes: canAddDusk(cfg.evmNetworks[route.from.id]), wayBack: Boolean(routeBetween(routes, route.to.id, route.from.id)) })
+          : null,
       // What the migration contract may still take, as the chain says, and the word once it's revoked.
       approval: approvalOpen(route),
       approvalNote: state.form.approvalNote ?? "",
@@ -949,7 +955,18 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const route = routeOf(entry.routeId);
     if (!route) return receiptPage({ hash, missing: "This transfer's route isn't on this network's bridge." });
     return receiptPage({
-      ...receiptModel(entry, { cfg, evm: migrationEvm(entry, route), gasPrice: duskGasPrice(), own: { account: duskAccount(), name: duskName() }, owner: listedDusk(), route, submitter: proofSubmitterFor(duskAccount()), timing: timing(), url: receiptUrl(entry.hash) }),
+      ...receiptModel(entry, {
+        cfg,
+        evm: migrationEvm(entry, route),
+        gasPrice: duskGasPrice(),
+        own: { account: duskAccount(), name: duskName() },
+        owner: listedDusk(),
+        route,
+        submitter: proofSubmitterFor(duskAccount()),
+        timing: timing(),
+        url: receiptUrl(entry.hash),
+        wallet: { ...state.evmState, addsDusk: route.to.kind === "evm" && canAddDusk(cfg.evmNetworks[route.to.id]) },
+      }),
       canAct: duskState().installed,
       notice: arrivals.state(),
     });
@@ -1564,6 +1581,25 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     }
   }
 
+  /**
+   * Asks the EVM wallet to add DUSK of `id`'s chain, for it to show it: once
+   * it did, it's offered no more, and focus goes to the page. A refusal says
+   * nothing, and leaves the offer where it was.
+   */
+  async function addDuskToWallet(id) {
+    const network = cfg.evmNetworks[id];
+    if (!network || state.addingDusk) return;
+    const name = evmWalletName(state.evmState);
+    state.addingDusk = true;
+    const added = await addDusk(network);
+    state.addingDusk = false;
+    if (!added) return;
+    if (isCardPage()) refreshForm();
+    else renderMain();
+    announce(`DUSK added to ${name}.`);
+    slot("main").querySelector("#main")?.focus({ preventScroll: true });
+  }
+
   /** Asks the EVM wallet for the chain the card's route sends from. Nothing is sent. */
   async function switchChain() {
     const form = state.form;
@@ -1799,6 +1835,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       return;
     }
     const actions = {
+      "add-dusk": () => addDuskToWallet(target.dataset.net),
       calendar: downloadCalendar,
       "close-sheet": closeByPerson,
       // Not in the moment the review or its next step comes up (review-session.js).

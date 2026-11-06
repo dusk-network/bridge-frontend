@@ -168,6 +168,10 @@ function primaryControl(button) {
   return `<button type="button" class="btn pri full" data-action="${html(button.action ?? "none")}" ${button.enabled ? "" : "disabled"}>${html(button.label)}</button>`;
 }
 
+/** "Add DUSK to MetaMask", for the EVM wallet to show the DUSK of a chain, in the look of where it stands. */
+const addDuskButton = (offer, look) =>
+  `<button type="button" class="${look}" data-action="add-dusk" data-net="${html(offer.network)}">${html(offer.label)}</button>`;
+
 /**
  * Above the way back's form, an approval not used up, as the chain says it:
  * what the Dusk migration contract may still take, with Finish and Revoke.
@@ -191,7 +195,7 @@ export function cardRegions(vm) {
   return {
     approval: approvalBox(vm.approval, vm.approvalNote),
     cta: `${vm.error ? messageLine(vm.error) : ""}${primaryControl(vm.button)}`,
-    "from-foot": `<span>${html(vm.from.balanceLabel)}</span><span class="bal">${vm.from.balance ? `<span class="num"${exactTitle(vm.from.balanceExact, vm.from.balance)}>${html(vm.from.balance)}</span>` : ""}${vm.canMax ? '<button type="button" class="mini" data-action="max">Max</button>' : ""}</span>`,
+    "from-foot": `<span>${html(vm.from.balanceLabel)}</span><span class="bal">${vm.from.balance ? `<span class="num"${exactTitle(vm.from.balanceExact, vm.from.balance)}>${html(vm.from.balance)}</span>` : ""}${vm.canMax ? '<button type="button" class="mini" data-action="max">Max</button>' : ""}${vm.addDusk ? addDuskButton(vm.addDusk, "mini") : ""}</span>`,
     receive: html(vm.receive || "0"),
     "recipient-note": recipientNote(vm.to),
     route: `<summary>${icon("clock")}<span class="route-sum"><span>${html(vm.routeLine)}</span>${vm.status ? `<span class="route-status${vm.status.warn ? " warn" : ""}">${html(vm.status.text)}</span>` : ""}</span>${icon("chev-d", "chev")}</summary>
@@ -402,7 +406,7 @@ export function receiptPage(vm) {
         <div class="pl" role="status">${statusPill(view.status, view.statusWord)}<span class="cap">${html(vm.caption)}</span></div>
       </div>
       ${countdown}
-      <section aria-labelledby="progress-h"><h2 class="gh" id="progress-h">Progress</h2><div class="group pad">${stepList(view.steps)}</div>${action}${vm.arrives && vm.notice ? arrivalNotice(vm.notice) : ""}</section>
+      <section aria-labelledby="progress-h"><h2 class="gh" id="progress-h">Progress</h2><div class="group pad">${stepList(view.steps)}</div>${action}${vm.addDusk ? `<div class="action-box">${addDuskButton(vm.addDusk, "btn sec sm")}</div>` : ""}${vm.arrives && vm.notice ? arrivalNotice(vm.notice) : ""}</section>
       ${notes}
       <div class="lk"><span>${icon("link")}Receipt link</span><code class="mono">${html(vm.url)}</code>${copyButton(vm.url, "receipt link")}</div>
       <p class="small t2">Anyone with the link can see this transfer.</p>

@@ -9,7 +9,7 @@ import { releaseFor } from "@duskdomains/sdk/releases";
 import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
-import { actionLead, actionPrivacy, availableLine, balanceLine, openApproval, pricedReview, receiptModel, recipientLine, replacedLine, reviewChecks, revokeReview, routeLine, transfersModel } from "./page-models.js";
+import { actionLead, actionPrivacy, addDuskOffer, availableLine, balanceLine, openApproval, pricedReview, receiptModel, recipientLine, replacedLine, reviewChecks, revokeReview, routeLine, transfersModel } from "./page-models.js";
 import { buildQuote, withdrawalStepMax } from "./quote.js";
 import { activityPanel, cardPage, cardRegions, contractsSheet, footer, header, networkSheet, receiptPage, reviewSheet, walletLines, walletsSheet } from "./views.js";
 import { formatDateTime } from "./format.js";
@@ -672,6 +672,28 @@ test("a migration's network fee counts the approval it spent, whichever app sign
   // Cancelled in the wallet after its approval: no migration was mined, and the approval's gas, as this browser read it, is the fee.
   const cancelled = await receipt({ ...entry, approvalFeeWei: "29106000465696", approvalHash: approval, receivedLux: undefined, replaced: "cancelled", sourceFailed: true, status: "failed" });
   assert.deepEqual(cancelled.details.filter((row) => !row.html).map((row) => [row.label, row.value, row.exact, row.detail]), [["Network fee", "0.000029 ETH", "0.000029106000465696 ETH", "approval"]]);
+});
+
+test("a transfer to the EVM chain that arrived at the connected wallet offers to add DUSK to it, as the way back's form does while it holds none", () => {
+  const service = T["service-transfer"];
+  const entry = { amountLux: "2053082083", destination: EVM, feeLux: "1859281", hash: "ab".repeat(32), id: "s", receivedLux: "1053082083", routeId: service.id, status: "completed" };
+  const wallet = { account: EVM.toLowerCase(), addsDusk: true, walletName: "MetaMask" };
+  const receipt = (patch = {}, on = wallet) => receiptPage(receiptModel({ ...entry, ...patch }, { cfg: testnet, route: service, url: "x", wallet: on }));
+  // Under its progress, once it arrived.
+  assert.match(receipt(), /<\/ol><\/div><div class="action-box"><button type="button" class="btn sec sm" data-action="add-dusk" data-net="ethereum">Add DUSK to MetaMask<\/button><\/div><\/section>/u);
+  assert.match(receipt({}, { ...wallet, walletName: "" }), />Add DUSK to your EVM wallet</u);
+  // Not before it arrived, nor at another address than the wallet's, nor for a wallet that can't take it or added it here.
+  assert.doesNotMatch(receipt({ receivedLux: undefined, status: "pending" }), /add-dusk/u);
+  assert.doesNotMatch(receipt({ destination: "0x3E5B8223e638CB414BEF8CF95393460cA1C3a11d" }), /add-dusk/u);
+  assert.doesNotMatch(receipt({}, { ...wallet, addsDusk: false }), /add-dusk/u);
+  assert.doesNotMatch(receipt({}, null), /add-dusk/u);
+  // The way back's form, beside the balance, while the wallet holds none.
+  const offer = (balanceWei, wayBack = true) => addDuskOffer(T.migration, { balanceWei, evm: wallet, takes: true, wayBack });
+  const none = { canMax: false, from: { balance: "0 ERC20 DUSK", balanceLabel: "Balance", net: { id: "ethereum", name: "Sepolia" } } };
+  assert.match(cardRegions(cardVmFor({ ...none, addDusk: offer(0n) }))["from-foot"], /<span class="num">0 ERC20 DUSK<\/span><button type="button" class="mini" data-action="add-dusk" data-net="ethereum">Add DUSK to MetaMask<\/button><\/span>$/u);
+  // Not while it holds some, before that's read, on a route only into Dusk, or for a wallet that can't take it.
+  for (const nothing of [offer(1n), offer(null), offer(0n, false), addDuskOffer(T.migration, { balanceWei: 0n, evm: wallet, wayBack: true })]) assert.equal(nothing, null);
+  assert.doesNotMatch(cardRegions(cardVmFor(none))["from-foot"], /add-dusk/u);
 });
 
 test("a receipt on its way offers to tell you when it arrives, and says what happens where that's refused", () => {

@@ -7,6 +7,7 @@ import {
   http,
 } from "viem";
 import { config } from "./config.js";
+import { pageStorage } from "./page-storage.js";
 
 const listeners = new Set();
 const discoveredProviders = [];
@@ -385,6 +386,70 @@ export async function ensureEvmChain(network) {
   publish();
   if (chainId !== network.chainId)
     throw new Error(`Your wallet is still on another chain. Switch it to ${network.chainName ?? network.name} and try again.`);
+}
+
+// ---------------------------------------------------------------------------
+// DUSK added to the wallet, through its own request for it (EIP-747)
+// ---------------------------------------------------------------------------
+
+/** DUSK on an EVM chain, as a wallet lists a token: 18 decimals, as its wei are Lux times 10⁹. */
+const DUSK_TOKEN = Object.freeze({ decimals: 18, symbol: "DUSK" });
+/** Each chain and address DUSK was added for, in this browser. */
+const ADDED_KEY = "dusk-bridge:dusk-added:v1";
+/** The wallets that answered they don't take the request, this visit. */
+const cannotAdd = new WeakSet();
+
+const addedKey = (chain, address) => `${chain}:${String(address).toLowerCase()}`;
+
+function addedList() {
+  try {
+    const kept = JSON.parse(pageStorage().getItem(ADDED_KEY) ?? "[]");
+    return Array.isArray(kept) ? kept.filter((key) => typeof key === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Whether the page offers to add DUSK of `network` to the connected wallet:
+ * one that takes the request, a browser wallet or a WalletConnect session
+ * that lists it, and hasn't added it for this address and chain here.
+ */
+export function canAddDusk(network) {
+  if (!provider || !account || !network?.tokenContract || cannotAdd.has(provider)) return false;
+  if (addedList().includes(addedKey(network.chainId, account))) return false;
+  if (!reownPicks) return true;
+  const methods = provider.session?.namespaces?.eip155?.methods;
+  return Array.isArray(methods) && methods.includes("wallet_watchAsset");
+}
+
+/**
+ * Asks the connected wallet to add DUSK of `network`, on that chain, for it
+ * to show: true once it did, and kept, so it isn't offered again for that
+ * address and chain. A refusal is false, and says nothing; a wallet that
+ * answers it doesn't take the request isn't asked again.
+ */
+export async function addDusk(network) {
+  const wallet = provider;
+  const owner = account;
+  if (!wallet || !owner || !network?.tokenContract) return false;
+  try {
+    // A wallet adds a token to the chain it's on.
+    if (chainId !== network.chainId) await ensureEvmChain(network);
+    const added = await wallet.request({
+      method: "wallet_watchAsset",
+      params: { options: { address: network.tokenContract, ...DUSK_TOKEN }, type: "ERC20" },
+    });
+    if (added !== true) return false;
+    try {
+      pageStorage().setItem(ADDED_KEY, JSON.stringify([...new Set([...addedList(), addedKey(network.chainId, owner)])]));
+    } catch {}
+    return true;
+  } catch (error) {
+    // 4200: not a method it has; -32601: none by that name.
+    if (error?.code === 4200 || error?.code === -32601) cannotAdd.add(wallet);
+    return false;
+  }
 }
 
 /** Why an EVM request isn't sent: since its review, the wallet switched account. */

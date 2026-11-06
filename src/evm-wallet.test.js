@@ -150,3 +150,65 @@ test("a wallet that says yes to a switch and stays where it is doesn't count as 
   assert.equal(wallet.getEvmState().chainId, 1);
   delete globalThis.ethereum;
 });
+
+test("Add DUSK asks the wallet to show the chain's DUSK, on that chain, and isn't offered again once it did", async () => {
+  // This browser's storage, kept past a reload.
+  const kept = new Map();
+  globalThis.localStorage = { getItem: (key) => kept.get(key) ?? null, removeItem: (key) => kept.delete(key), setItem: (key, value) => kept.set(key, String(value)) };
+  const requests = [];
+  let chain = "0x1";
+  let accounts = ["0x0000000000000000000000000000000000000001"];
+  let answer = () => true;
+  globalThis.ethereum = {
+    on() {},
+    removeListener() {},
+    async request(request) {
+      requests.push(request);
+      if (request.method === "eth_accounts" || request.method === "eth_requestAccounts") return accounts;
+      if (request.method === "eth_chainId") return chain;
+      if (request.method === "wallet_switchEthereumChain") return void (chain = request.params[0].chainId);
+      if (request.method === "wallet_watchAsset") return answer();
+      throw new Error(`Unexpected method: ${request.method}`);
+    },
+  };
+  const bsc = { chainId: 56, chainName: "BNB Smart Chain", rpcUrl: "https://bsc-rpc.publicnode.com", tokenContract: "0xB2BD0749DBE21f623d9BABa856D3B0f0e1BFEc9C" };
+  const wallet = await import(`./evm-wallet.js?dusk=${Date.now()}`);
+  await wallet.connectEvmWallet();
+  assert.equal(wallet.canAddDusk(bsc), true);
+
+  // Asked on the token's own chain, which the wallet is asked for first: DUSK, 18 decimals, the network's token.
+  const watch = { method: "wallet_watchAsset", params: { options: { address: bsc.tokenContract, decimals: 18, symbol: "DUSK" }, type: "ERC20" } };
+  const asked = () => requests.splice(0).filter(({ method }) => method.startsWith("wallet_"));
+  // Refused in the wallet: nothing, and it's still offered.
+  answer = () => {
+    throw Object.assign(new Error("User rejected the request."), { code: 4001 });
+  };
+  requests.length = 0;
+  assert.equal(await wallet.addDusk(bsc), false);
+  assert.deepEqual(asked(), [{ method: "wallet_switchEthereumChain", params: [{ chainId: "0x38" }] }, watch]);
+  assert.equal(wallet.canAddDusk(bsc), true);
+
+  // Added, on the chain the wallet is on now.
+  answer = () => true;
+  assert.equal(await wallet.addDusk(bsc), true);
+  assert.deepEqual(asked(), [watch]);
+  // Not offered again for that address and chain, also after a reload; another address, or another chain, still is.
+  assert.equal(wallet.canAddDusk(bsc), false);
+  const reloaded = await import(`./evm-wallet.js?dusk-reloaded=${Date.now()}`);
+  await reloaded.initializeEvmWallet();
+  assert.equal(reloaded.canAddDusk(bsc), false);
+  assert.equal(reloaded.canAddDusk({ ...bsc, chainId: 745_745, tokenContract: "0xBCEe5c06Eda885A6471a0E87f513e7492d411B61" }), true);
+  accounts = ["0x0000000000000000000000000000000000000002"];
+  await reloaded.initializeEvmWallet();
+  assert.equal(reloaded.canAddDusk(bsc), true);
+
+  // A wallet that answers it has no such request isn't asked again; one with no token to add, nor.
+  answer = () => {
+    throw Object.assign(new Error("The method wallet_watchAsset does not exist."), { code: -32601 });
+  };
+  assert.equal(await reloaded.addDusk(bsc), false);
+  assert.equal(reloaded.canAddDusk(bsc), false);
+  assert.equal(wallet.canAddDusk({ ...bsc, tokenContract: "" }), false);
+  delete globalThis.ethereum;
+  delete globalThis.localStorage;
+});
