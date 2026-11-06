@@ -290,6 +290,29 @@ test("a migration is pending until Messina pays it out on Dusk", async () => {
   assert.equal((await tracking.refresh(entry, ROUTES.migration)).status, "failed");
 });
 
+test("a migration's fee counts the approval this browser sent for it, read once from its own receipt", async () => {
+  const SENDER_EVM = "0xd63b00000000000000000000000000000000df40";
+  const APPROVAL = `0x${"a7".repeat(32)}`;
+  const receipts = {
+    [EVM_HASH]: { blockNumber: toHex(100n), effectiveGasPrice: toHex(1_000_000_016n), from: SENDER_EVM, gasUsed: toHex(42_217n), status: "0x1" },
+    [APPROVAL]: { blockNumber: toHex(99n), effectiveGasPrice: toHex(1_000_000_016n), from: SENDER_EVM, gasUsed: toHex(29_106n), status: "0x1" },
+  };
+  const rpc = fakeRpc({ eth_getTransactionReceipt: ([hash]) => receipts[hash] ?? null });
+  const tracking = createTracking({ archive: archive(), config: payingCfg, node: node(), rpc });
+  const sent = { amountLux: "3000000000", destination: SENDER, hash: EVM_HASH, routeId: ROUTES.migration.id, sender: SENDER_EVM, sourceAt: 1 };
+  const checked = await tracking.refresh({ ...sent, approvalHash: APPROVAL }, ROUTES.migration);
+  // Nandini's way back: 29,106 and 42,217 gas at the chain's price.
+  assert.deepEqual([checked.feeWei, checked.approvalFeeWei], ["42217000675472", "29106000465696"]);
+  // Read once: a check that has it asks the chain for the migration alone.
+  const asked = rpc.calls.length;
+  await tracking.refresh({ ...sent, approvalHash: APPROVAL, approvalFeeWei: checked.approvalFeeWei }, ROUTES.migration);
+  assert.deepEqual(rpc.calls.slice(asked).filter((call) => call.method === "eth_getTransactionReceipt").map((call) => call.params[0]), [EVM_HASH]);
+  // Only an approval from the migration's own sender counts; none was sent with one found on the chain.
+  receipts[APPROVAL] = { ...receipts[APPROVAL], from: "0x5602300000000000000000000000000000005602" };
+  assert.equal((await tracking.refresh({ ...sent, approvalHash: APPROVAL }, ROUTES.migration)).approvalFeeWei, undefined);
+  assert.equal((await tracking.refresh(sent, ROUTES.migration)).approvalFeeWei, undefined);
+});
+
 test("a migration is paid out by its own route's payout account, also where that account pays out both chains", async () => {
   const input = encodeFunctionData({
     abi: parseAbi(["function migrate(uint256 amount, string targetAddress)"]),

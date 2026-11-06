@@ -351,9 +351,11 @@ const failedAtSource = (entry) =>
  * hover. What failed on its own chain moved nothing, so its fee stands alone.
  */
 function ledgerRows(entry, { cfg, from, locale, route, status }) {
+  // A migration's gas: its own, and its approval's where this browser sent one with it.
+  const approvalGas = route.mode === "migration" && entry.approvalFeeWei !== undefined && entry.approvalFeeWei !== null;
   const ledger = transferLedger({
     failed: status === "failed" && failedAtSource(entry),
-    gasWei: entry.feeWei,
+    gasWei: entry.feeWei === undefined || entry.feeWei === null ? entry.feeWei : BigInt(entry.feeWei) + (approvalGas ? BigInt(entry.approvalFeeWei) : 0n),
     locale,
     network: cfg.network,
     networkFee: [entry.feeLux, entry.proveFeeLux, entry.claimFeeLux],
@@ -370,9 +372,11 @@ function ledgerRows(entry, { cfg, from, locale, route, status }) {
       received: line.expected && status !== "completed" ? "You receive" : "You received",
       sent: "You sent",
     })[line.key];
+  // Which transactions a migration's fee counts.
+  const counts = route.mode === "migration" ? (approvalGas ? "approval and migration" : "migration") : "";
   return ledger.lines.map((line) =>
     line.key === "gas"
-      ? { exact: `${line.exact} ${line.coin}`, label: label(line), value: `${line.text} ${line.coin}` }
+      ? { detail: counts, exact: `${line.exact} ${line.coin}`, label: label(line), value: `${line.text} ${line.coin}` }
       : { label: label(line), value: `${line.exact} ${line.coin}` },
   );
 }
@@ -404,6 +408,8 @@ export function receiptModel(entry, { cfg, gasPrice = 1n, locale, now = Date.now
   const details = ledgerRows(entry, { cfg, from, locale, route, status: view.status });
   if (entry.sender) details.push({ html: addressHtml(cfg, sourceNetwork, entry.sender, `sender on ${from}`), label: `From, on ${from}` });
   if (entry.destination) details.push({ html: addressHtml(cfg, destinationNetwork, entry.destination, `recipient on ${to}`), label: `To, on ${to}` });
+  if (route.mode === "migration" && entry.approvalHash)
+    details.push({ html: txHtml(cfg, sourceNetwork, entry.approvalHash, `${from} approval`), label: `${from} approval` });
   details.push({ html: txHtml(cfg, sourceNetwork, entry.hash, `${from} transaction`), label: `${from} transaction` });
   if (route.mode === "duskevm-withdrawal") {
     const pendingProof = entry.pendingAction === "prove" ? entry.pendingHash : null;

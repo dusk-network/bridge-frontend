@@ -635,6 +635,7 @@ form.group .l1 { display: block; color: var(--text); font-size: 14px; font-weigh
   .kv .k { max-width: 50%; }
   .rc-side .kvs .kv { flex-direction: column; gap: 4px; }
   .rc-side .kvs .v { max-width: 100%; text-align: left; }
+  .rc-side .kvs .stack { align-items: flex-start; }
   .hero .t { font-size: 22px; }
   .rc .bt { flex-direction: column; }
   .rc .bt .btn { min-width: 0; width: 100%; }

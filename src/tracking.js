@@ -171,6 +171,12 @@ export function createTracking(deps) {
     patch.sender ??= entry.sender ?? receipt.from;
     if (receipt.gasUsed && receipt.effectiveGasPrice)
       patch.feeWei = (BigInt(receipt.gasUsed) * BigInt(receipt.effectiveGasPrice)).toString();
+    // The approval this browser sent for it, read once: what it paid is part of the transfer's fee.
+    if (entry.approvalHash && entry.approvalFeeWei === undefined) {
+      const approval = await rpc(network, "eth_getTransactionReceipt", [entry.approvalHash]);
+      if (approval?.gasUsed && approval.effectiveGasPrice && sameAddress(approval.from, patch.sender))
+        patch.approvalFeeWei = (BigInt(approval.gasUsed) * BigInt(approval.effectiveGasPrice)).toString();
+    }
     if (receipt.status === "0x0")
       return failed(`The migration failed on ${name(network)}.`, { ...patch, sourceFailed: true });
     const recipient = patch.destination ?? entry.destination;

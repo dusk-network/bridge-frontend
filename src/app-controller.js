@@ -1393,7 +1393,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         const step = review.steps[review.current];
         const amount = formatDuskPlain(review.amountLux);
         if (step.title.startsWith("Approve")) {
-          await approveMigration(network, amount, { account: review.signer?.account });
+          // Kept with the transfer: its gas is part of what it cost.
+          review.approvalHash = await approveMigration(network, amount, { account: review.signer?.account });
           review.current += 1;
           review.sub = "The first step went through. One step left.";
           review.after = "";
@@ -1408,6 +1409,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         const hash = await submitMigration(network, amount, review.destination, { account: review.signer?.account });
         return sent({
           amountLux: review.amountLux.toString(),
+          approvalHash: review.approvalHash,
           destination: review.destination,
           hash,
           parties: [evmAccount(), review.destination],

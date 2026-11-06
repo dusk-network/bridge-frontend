@@ -581,6 +581,29 @@ test("gas a migration paid is rounded as wallets write it, with the rest on hove
   ]);
   assert.equal(model.details[2].exact, "0.00004700500075208 ETH");
   assert.ok(receiptPage(model).includes('<span class="num" title="0.00004700500075208 ETH">0.000047 ETH</span>'));
+  // It says which transactions it counts: the migration alone here.
+  assert.equal(model.details[2].detail, "migration");
+  assert.ok(!model.details.some((row) => row.label === "Sepolia approval"));
+});
+
+test("a migration's network fee counts its approval too, where this browser sent one with it", () => {
+  // Nandini's way back: approve 29,106 gas, migrate 42,217, at 1.000000016 gwei.
+  const APPROVAL = `0x${"a7".repeat(32)}`;
+  const entry = { amountLux: "156301633", approvalFeeWei: "29106000465696", approvalHash: APPROVAL, destination: ACCOUNT, feeWei: "42217000675472", hash: `0x${"0d".repeat(32)}`, id: "m", receivedLux: "156301633", routeId: "ethereum-to-dusk", sender: EVM, status: "completed" };
+  const model = receiptModel(entry, { cfg: testnet, route: T.migration, url: "https://bridge.example.org/#/transfer/m" });
+  const fee = model.details.find((row) => row.label === "Network fee");
+  // Both, as left the wallet: 0.000071323001141168 ETH.
+  assert.deepEqual([fee.value, fee.exact, fee.detail], ["0.000071 ETH", "0.000071323001141168 ETH", "approval and migration"]);
+  assert.ok(receiptPage(model).includes('<span class="stack"><span class="num" title="0.000071323001141168 ETH">0.000071 ETH</span><span class="small">approval and migration</span></span>'));
+  // And the approval, with the migration's own transaction after it.
+  const labels = model.details.map((row) => row.label);
+  assert.equal(labels.indexOf("Sepolia approval") + 1, labels.indexOf("Sepolia transaction"));
+  assert.ok(model.details.find((row) => row.label === "Sepolia approval").html.includes(`<code class="mono">${APPROVAL}</code>`));
+  // Before its fee is read, the migration's alone, said as that.
+  assert.deepEqual(["value", "detail"].map((key) => receiptModel({ ...entry, approvalFeeWei: undefined }, { cfg: testnet, route: T.migration, url: "x" }).details.find((row) => row.label === "Network fee")[key]), ["0.000042 ETH", "migration"]);
+  // Failed on its chain, the gas of both was still spent.
+  const failed = receiptModel({ ...entry, receivedLux: undefined, sourceFailed: true, status: "failed" }, { cfg: testnet, route: T.migration, url: "x" });
+  assert.deepEqual(failed.details.filter((row) => !row.html).map((row) => [row.label, row.value]), [["Network fee", "0.000071 ETH"]]);
 });
 
 test("a receipt on its way offers to tell you when it arrives, and says what happens where that's refused", () => {

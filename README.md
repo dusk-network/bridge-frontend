@@ -105,7 +105,9 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   and hashes, both transactions in full, the receipt link, and its amounts as
   every Dusk app says them (`transferLedger`): what you sent, the bridge fee,
   the network fee and what you received, to the Lux, and gas as wallets write
-  it. It shows no balances: the link is safe to share. While a transfer is on
+  it. A migration's gas counts the approval this browser sent with it too,
+  whose transaction is listed beside the migration's, and says which it
+  counts. It shows no balances: the link is safe to share. While a transfer is on
   its way, "Tell me when it arrives" asks the browser for a notification, only
   then, and it stays chosen on this device. Whoever isn't looking at the page
   when one ends gets that, and the tab's title says so until they're back; where
