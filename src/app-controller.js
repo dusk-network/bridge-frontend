@@ -18,9 +18,10 @@ import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js"
 import { followAfterDiscovery, mergeTransfer, mergeTransfers, partyKey } from "./discovery.js";
 import { createDiscoveryRuns } from "./discovery-runs.js";
 import { depositRequest } from "./dusk-deposit.js";
+import { createDuskOffer } from "./dusk-offer.js";
 import { createDuskConnection, ensureDuskConnected, sendDuskContractCall, sendDuskTransfer } from "./dusk-wallet.js";
 import { duskEvmNetwork, submitDuskEvmWithdrawal } from "./duskevm-withdrawal.js";
-import { connectEvmWallet, ensureEvmChain, getEvmState, initializeEvmWallet, subscribeEvmWallet } from "./evm-wallet.js";
+import { addDusk, canAddDusk, connectEvmWallet, ensureEvmChain, getEvmState, initializeEvmWallet, subscribeEvmWallet } from "./evm-wallet.js";
 import { createFormReads } from "./form-reads.js";
 import { amountForInput, formatLux, formatDuskPlain } from "./format.js";
 import { approveMigration, minedAs, revokeMigration, submitMigration } from "./legacy-migration.js";
@@ -28,6 +29,7 @@ import { bridgeTasks, chainName, linkedRoute, networkName, networkNames, notRunn
 import {
   actionLead,
   actionPrivacy,
+  addDuskOffer,
   balanceLine,
   pricedReview,
   recipientLine,
@@ -47,6 +49,7 @@ import { buildQuote, parseAmount, withdrawalStepMax } from "./quote.js";
 import { serviceTransferRequest } from "./service-transfer.js";
 import { createServices, proofSubmitterFor } from "./services.js";
 import { createLookupFlow } from "./lookup-flow.js";
+import { createMigrationFees } from "./migration-fees.js";
 import { createReceiptLookups } from "./receipt-lookups.js";
 import { createRouteStatus, statusLine } from "./route-status.js";
 import { arrivalDue, routeTime } from "./route-times.js";
@@ -607,6 +610,11 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     return {
       amount: state.form.amount,
       amountError: quote.insufficient ? "" : quote.error,
+      // Beside the balance of the way back, while the wallet holds none: it can show the DUSK once there is some.
+      addDusk:
+        route.mode === "migration"
+          ? addDuskOffer(route, { balanceWei: reads.migration?.balanceWei ?? null, evm: state.evmState, takes: canAddDusk(cfg.evmNetworks[route.from.id]), wayBack: Boolean(routeBetween(routes, route.to.id, route.from.id)) })
+          : null,
       // What the migration contract may still take, as the chain says, and the word once it's revoked.
       approval: approvalOpen(route),
       approvalNote: state.form.approvalNote ?? "",
@@ -629,7 +637,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       quote,
       receive: quote.receiveLux !== null && quote.receiveLux > 0n ? formatLux(quote.receiveLux) : "",
       receiveUnit,
-      routeLine: routeLine(route, cfg, { gasPrice: duskGasPrice(), timing: timing() }),
+      // One wallet step where an approval left open covers the amount, as the quote counts them.
+      routeLine: routeLine(route, cfg, { gasPrice: duskGasPrice(), steps: quote.steps, timing: timing() }),
       routeOpen: state.form.routeOpen,
       status: statusLine(routeStatus.get(route), { amountLux: quote.amountLux }),
       steps: routeSteps(route, quote),
@@ -907,6 +916,15 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     await receiptLookups.open(hash);
   }
 
+  // What each migration on a receipt paid on its own chain, with the approval
+  // it spent: read as the receipt shows it, again as the transfer moves on,
+  // and again where the chain couldn't say, while a receipt needs it.
+  const migrationFees = createMigrationFees({
+    isOpen: (hash) => state.page.page === "transfer" && bareHash(state.page.hash) === bareHash(hash),
+    onChange: () => renderMain(),
+    read: (entry, route) => services.tracking.migrationEvm(entry, route),
+  });
+
   function receiptHtml() {
     const hash = state.page.hash;
     const entry = entryForHash(hash);
@@ -918,7 +936,20 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const route = routeOf(entry.routeId);
     if (!route) return receiptPage({ hash, missing: "This transfer's route isn't on this network's bridge." });
     return receiptPage({
-      ...receiptModel(entry, { cfg, gasPrice: duskGasPrice(), own: { account: duskAccount(), name: duskName() }, owner: listedDusk(), route, submitter: proofSubmitterFor(duskAccount()), timing: timing(), url: receiptUrl(entry.hash) }),
+      ...receiptModel(entry, {
+        // Cancelled in the wallet: the migration that spent its approval since, which counts its fee.
+        approvalSpentBy: entry.replaced ? migrationFees.spentBy(entry, route, state.activity) : false,
+        cfg,
+        evm: migrationFees.fact(entry, route),
+        gasPrice: duskGasPrice(),
+        own: { account: duskAccount(), name: duskName() },
+        owner: listedDusk(),
+        route,
+        submitter: proofSubmitterFor(duskAccount()),
+        timing: timing(),
+        url: receiptUrl(entry.hash),
+        wallet: { ...state.evmState, addsDusk: route.to.kind === "evm" && canAddDusk(cfg.evmNetworks[route.to.id]) },
+      }),
       canAct: duskState().installed,
       notice: arrivals.state(),
     });
@@ -1533,6 +1564,23 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     }
   }
 
+  /**
+   * "Add DUSK to <wallet>", pressed: drawn again whatever the wallet answers,
+   * as it then stands. Once it added DUSK, that's said; where the offer went
+   * from under the press, focus goes to the page. A refusal says nothing, and
+   * leaves the offer, and focus, where they were.
+   */
+  const duskOffer = createDuskOffer({
+    add: addDusk,
+    redraw: (added) => {
+      if (isCardPage()) refreshForm();
+      else renderMain();
+      if (added) announce(`DUSK added to ${evmWalletName(state.evmState)}.`);
+      const focused = globalThis.document?.activeElement;
+      if (!focused || focused === globalThis.document?.body) slot("main").querySelector("#main")?.focus({ preventScroll: true });
+    },
+  });
+
   /** Asks the EVM wallet for the chain the card's route sends from. Nothing is sent. */
   async function switchChain() {
     const form = state.form;
@@ -1768,6 +1816,10 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       return;
     }
     const actions = {
+      "add-dusk": () => {
+        const network = cfg.evmNetworks[target.dataset.net];
+        return network ? duskOffer.press(network) : undefined;
+      },
       calendar: downloadCalendar,
       "close-sheet": closeByPerson,
       // Not in the moment the review or its next step comes up (review-session.js).

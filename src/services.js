@@ -118,9 +118,22 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
       })
     : null;
 
+  // What was read on the chains and won't change, kept past a reload, so a
+  // later read asks only for what's new: how a route was doing, and what a
+  // migration paid on its own chain once it's final.
+  const kept = {
+    get: (key) => pageStorage().getItem(`dusk-bridge:${key}`),
+    set: (key, value) => {
+      try {
+        pageStorage().setItem(`dusk-bridge:${key}`, value);
+      } catch {}
+    },
+  };
+
   const clients = new Map();
   const tracking = createTracking({
     archive,
+    cache: kept,
     config: cfg,
     node,
     receiptClient: (network) => {
@@ -145,16 +158,6 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
       })
     : null;
 
-  // What a route's status read: kept past a reload, so a later read asks only for what's new.
-  const statusKept = {
-    get: (key) => pageStorage().getItem(`dusk-bridge:${key}`),
-    set: (key, value) => {
-      try {
-        pageStorage().setItem(`dusk-bridge:${key}`, value);
-      } catch {}
-    },
-  };
-
   const statusNetwork = deployedNetwork(cfg);
   return Object.freeze({
     discovery,
@@ -169,7 +172,7 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
     status: (route) =>
       bridgeStatus({
         archive,
-        cache: statusKept,
+        cache: kept,
         network: statusNetwork,
         nodeUrl: cfg.dusk.nodeUrl,
         route: route.id,

@@ -291,6 +291,9 @@ test("a payout to BNB Smart Chain is looked for from the address the network's f
   // A deployment's own bridge account and token are where its transfers are paid.
   const own = withConfig({ VITE_BRIDGE_PROFILE: "mainnet", VITE_BSC_TOKEN_CONTRACT: `0x${"11".repeat(20)}`, VITE_SERVICE_BRIDGE_ACCOUNT: TESTNET_REGGIO_BRIDGE_ACCOUNT }).cfg;
   assert.deepEqual([own.network.routes.services[0].account, own.network.routes.chains.bsc.token], [TESTNET_REGGIO_BRIDGE_ACCOUNT, `0x${"11".repeat(20)}`]);
+  // And its own migration contract is where what a migration paid is read.
+  const migrating = withConfig({ VITE_BRIDGE_PROFILE: "mainnet", VITE_BSC_MIGRATION_CONTRACT: `0x${"22".repeat(20)}` }).cfg;
+  assert.equal(migrating.network.routes.migrations.find((route) => route.chain === "bsc").contract, `0x${"22".repeat(20)}`);
   assert.equal(withConfig({ VITE_BRIDGE_PROFILE: "mainnet" }).cfg.network, networks.mainnet);
 });
 

@@ -90,7 +90,8 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   contract may still take from the EVM wallet, read on the chain and kept
   nowhere, shows above the form as an open approval, with Finish, the review
   of what it still lets go, and Revoke, an approval of 0 reviewed as any
-  request is.
+  request is. Where it covers the amount, the route under the form says one
+  wallet step.
 - **Review**: what moves and what becomes public, the checked facts
   (balances, gas, where the payout goes, and the earlier approval that covers
   the amount where Approve is skipped, with what stays approved), then each
@@ -105,16 +106,27 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   and hashes, both transactions in full, the receipt link, and its amounts as
   every Dusk app says them (`transferLedger`): what you sent, the bridge fee,
   the network fee and what you received, to the Lux, and gas as wallets write
-  it. A migration's gas counts the approval this browser sent with it too,
-  whose transaction is listed beside the migration's, and says which it
-  counts. It shows no balances: the link is safe to share. While a transfer is on
-  its way, "Tell me when it arrives" asks the browser for a notification, only
+  it. A migration's gas counts the approval it spent, whichever app signed
+  it and whenever, as its chain says (`migrationFacts`), whose transaction is
+  listed beside the migration's, and says which it counts: the migration
+  alone where an earlier transfer spent that approval first, and, saying so,
+  where the approval can't be read, as once the RPC no longer gives logs that
+  old. One cancelled in the wallet counts the approval sent for it, until a
+  migration this browser knows of spends that approval and counts it
+  instead. It shows no balances: the link is safe to share. While a transfer
+  is on its way, "Tell me when it arrives" asks the browser for a notification, only
   then, and it stays chosen on this device. Whoever isn't looking at the page
   when one ends gets that, and the tab's title says so until they're back; where
   notifications are refused or a page can't send them, as on most phones, it's
   the title alone, and the receipt says so. A withdrawal waiting for
   its claim counts down, says when a clock change falls inside the wait, and
-  offers an .ics file made in the browser ("Add to calendar").
+  offers an .ics file made in the browser ("Add to calendar"). A transfer to
+  BNB Smart Chain that arrived at the connected EVM wallet offers "Add DUSK to
+  MetaMask", the wallet's own request to show the token (`wallet_watchAsset`:
+  the network file's token, DUSK, 18 decimals), as the way back's form does
+  beside the balance while the wallet holds none. Only a wallet that takes
+  the request is offered it; one that added DUSK isn't offered it again for
+  that address and chain in this browser, and a refusal says nothing.
 - **My transfers**: the connected accounts' transfers, read from the networks
   (below), plus any sent or looked up on this device, each with whom it pays
   and its transaction's short hash. A withdrawal under way that pays another
@@ -336,8 +348,10 @@ doesn't run it.
 - The browser talks directly to configured Dusk and EVM RPC endpoints.
 - Data drivers run only when they match their pinned SHA-256.
 - Local storage contains transaction metadata, what was read for My
-  transfers, the chains' times, how each route was doing, per network and
-  account, and whether this device was asked to notify; no keys and none of
+  transfers, what each migration paid on its own chain once it's final, the
+  chains' times, how each route was doing, per network and
+  account, whether this device was asked to notify, and where DUSK was added
+  to an EVM wallet; no keys and none of
   your balances. Where the browser denies the
   page storage, they're kept in memory while the page is open.
 - Contract IDs, RPC endpoints and this site's origin are deployment trust
