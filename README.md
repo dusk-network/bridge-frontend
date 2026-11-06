@@ -90,7 +90,8 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   contract may still take from the EVM wallet, read on the chain and kept
   nowhere, shows above the form as an open approval, with Finish, the review
   of what it still lets go, and Revoke, an approval of 0 reviewed as any
-  request is.
+  request is. Where it covers the amount, the route under the form says one
+  wallet step.
 - **Review**: what moves and what becomes public, the checked facts
   (balances, gas, where the payout goes, and the earlier approval that covers
   the amount where Approve is skipped, with what stays approved), then each

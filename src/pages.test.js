@@ -180,6 +180,10 @@ test("an approval not used up shows above the way back's form, with Finish and R
   // Above From, where the way back starts.
   const page = cardPage(cardVmFor({ approval: open }));
   assert.ok(page.indexOf("Open approval.") < page.indexOf('data-side="from"'));
+  // Covering the amount, it leaves one wallet step, and the route under the form says so, as the review does.
+  const line = (amount) => cardRegions(cardVmFor({ approval: open, routeLine: routeLine(route, testnet, { steps: buildQuote(route, amount, { allowanceWei: HALF, balance: held, cfg: testnet }).steps }) })).route;
+  assert.match(line("0.5"), /<span>One wallet step · fee in ETH<\/span>/u);
+  for (const more of ["0.6", ""]) assert.match(line(more), /<span>Two wallet steps · fee in ETH<\/span>/u);
   // Finish goes for what it still lets go, of what the wallet holds.
   assert.equal(open.finishLux, 500_000_000n);
   assert.equal(openApproval(route, { allowanceWei: 10n * held, balanceWei: held, evm: EVM }).finishLux, 5_000_000_000n);

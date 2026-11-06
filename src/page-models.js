@@ -32,8 +32,10 @@ export const evmWalletName = (evm) => evm?.walletName || "your EVM wallet";
  * A route in one line, time then cost: the card's route row and its network
  * list. The time is this network's (`routeTime`), left out where it isn't
  * known; the fee comes from the same calculation as the quote and the review.
+ * A migration takes the wallet steps its quote counts (`steps`): one where an
+ * earlier approval covers the amount.
  */
-export function routeLine(route, cfg, { gasPrice = 1n, timing } = {}) {
+export function routeLine(route, cfg, { gasPrice = 1n, steps = 2, timing } = {}) {
   const cost =
     route.mode === "duskevm-deposit"
       ? [`fee up to ${formatMaxFee(routeDuskFees(route, { gasPrice }).send.maxLux)} DUSK`]
@@ -41,7 +43,7 @@ export function routeLine(route, cfg, { gasPrice = 1n, timing } = {}) {
         ? ["three steps", `${stepFeeText({ gasPrice })} on Dusk`]
         : route.mode === "service-transfer"
           ? [`${formatDusk(cfg.service.feeLux)} bridge fee`]
-          : ["two wallet steps", `fee in ${gasCoin(cfg, route.from.id)}`];
+          : [steps === 1 ? "one wallet step" : "two wallet steps", `fee in ${gasCoin(cfg, route.from.id)}`];
   const line = [routeTimeText(routeTime(route, cfg, timing)), ...cost].filter(Boolean).join(" · ");
   return `${line.charAt(0).toUpperCase()}${line.slice(1)}`;
 }
