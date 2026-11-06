@@ -130,20 +130,37 @@ export function recordActivity(item, storage = defaultStorage()) {
     : [next];
 }
 
+/** What a transfer sent from here knows that one found by its hash may not: what it sent, and the approval sent with it. */
+const SENT_FACTS = Object.freeze(["amountLux", "approvalFeeWei", "approvalHash", "destination", "sender"]);
+
 /**
  * The transfers once one sent from here, by `hash`, was mined as another
  * transaction (`minedAs`). Sped up in the wallet ("repriced"), it goes by the
- * mined hash, with all it knew. Cancelled or replaced there, it says so
+ * mined hash, with all it knew; where a look-up or the networks found that
+ * hash first, it's one transfer still: the one found, with what it lacks of
+ * what was sent from here. Cancelled or replaced there, it says so
  * (`replaced`), and its next check finds it moved nothing. Null where nothing
  * changes: mined as itself, or not kept.
  */
 export function minedTransfer(items, { hash, mined, replaced, routeId }) {
   const id = entryId(routeId, hash);
   const entry = items.find((item) => item.id === id);
-  if (!entry || !mined || entryId(routeId, mined) === id) return null;
+  if (!entry || !mined) return null;
+  const minedId = entryId(routeId, mined);
+  if (minedId === id) return null;
   if (replaced !== "repriced") return { id, items: items.map((item) => (item.id === id ? { ...item, replaced } : item)) };
-  const moved = { ...entry, hash: canonicalHash(mined) ?? mined, id: entryId(routeId, mined) };
-  return { id: moved.id, items: [moved, ...items.filter((item) => item.id !== id)] };
+  const known = items.find((item) => item.id === minedId);
+  const createdAt = [known?.createdAt, entry.createdAt].filter(Boolean).sort()[0];
+  const moved = known
+    ? {
+        ...known,
+        ...Object.fromEntries(SENT_FACTS.filter((key) => (known[key] === undefined || known[key] === null) && entry[key] !== undefined).map((key) => [key, entry[key]])),
+        ...(createdAt ? { createdAt } : {}),
+        parties: [...new Set([...(known.parties ?? []), ...(entry.parties ?? [])])],
+        sentHere: Boolean(known.sentHere || entry.sentHere),
+      }
+    : { ...entry, hash: canonicalHash(mined) ?? mined, id: minedId };
+  return { id: minedId, items: [moved, ...items.filter((item) => item.id !== id && item.id !== minedId)] };
 }
 
 export function updateActivity(id, patch, storage = defaultStorage()) {
