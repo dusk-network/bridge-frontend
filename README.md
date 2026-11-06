@@ -111,8 +111,10 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   listed beside the migration's, and says which it counts: the migration
   alone where an earlier transfer spent that approval first, and, saying so,
   where the approval can't be read, as once the RPC no longer gives logs that
-  old. It shows no balances: the link is safe to share. While a transfer is on
-  its way, "Tell me when it arrives" asks the browser for a notification, only
+  old. One cancelled in the wallet counts the approval sent for it, until a
+  migration this browser knows of spends that approval and counts it
+  instead. It shows no balances: the link is safe to share. While a transfer
+  is on its way, "Tell me when it arrives" asks the browser for a notification, only
   then, and it stays chosen on this device. Whoever isn't looking at the page
   when one ends gets that, and the tab's title says so until they're back; where
   notifications are refused or a page can't send them, as on most phones, it's

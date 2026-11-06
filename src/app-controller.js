@@ -48,6 +48,7 @@ import { buildQuote, parseAmount, withdrawalStepMax } from "./quote.js";
 import { serviceTransferRequest } from "./service-transfer.js";
 import { createServices, proofSubmitterFor } from "./services.js";
 import { createLookupFlow } from "./lookup-flow.js";
+import { createMigrationFees } from "./migration-fees.js";
 import { createReceiptLookups } from "./receipt-lookups.js";
 import { createRouteStatus, statusLine } from "./route-status.js";
 import { arrivalDue, routeTime } from "./route-times.js";
@@ -915,34 +916,13 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   }
 
   // What each migration on a receipt paid on its own chain, with the approval
-  // it spent, by its hash in lower case: read as the receipt shows it, again
-  // as the transfer moves on, and a little later where the chain couldn't say.
-  const migrationsEvm = new Map();
-  const EVM_AGAIN_MS = 15_000;
-  const unsettled = (fact) => !fact || fact.state === "error" || fact.state === "pending" || (fact.approvalState === "found" && typeof fact.approval?.gasWei !== "bigint");
-
-  function migrationEvm(entry, route) {
-    if (route.mode !== "migration" || entry.replaced) return null;
-    const key = String(entry.hash).toLowerCase();
-    const asked = [entry.hash, entry.status, entry.sourceAt ?? ""].join(":");
-    const known = migrationsEvm.get(key);
-    const again = known && !known.reading && unsettled(known.fact) && Date.now() - known.at >= EVM_AGAIN_MS;
-    if (!known || (known.asked !== asked && !known.reading) || again) {
-      migrationsEvm.set(key, { ...known, asked, at: Date.now(), reading: true });
-      const shown = () => state.page.page === "transfer" && bareHash(state.page.hash) === bareHash(entry.hash);
-      void services.tracking
-        .migrationEvm(entry, route)
-        .catch(() => null)
-        .then((fact) => {
-          migrationsEvm.set(key, { asked, at: Date.now(), fact: fact ?? known?.fact ?? null, reading: false });
-          if (!shown()) return;
-          renderMain();
-          // Read again while the receipt shows it, until the chain says.
-          if (unsettled(fact)) setTimeout(() => shown() && renderMain(), EVM_AGAIN_MS);
-        });
-    }
-    return known?.fact ?? null;
-  }
+  // it spent: read as the receipt shows it, again as the transfer moves on,
+  // and again where the chain couldn't say, while a receipt needs it.
+  const migrationFees = createMigrationFees({
+    isOpen: (hash) => state.page.page === "transfer" && bareHash(state.page.hash) === bareHash(hash),
+    onChange: () => renderMain(),
+    read: (entry, route) => services.tracking.migrationEvm(entry, route),
+  });
 
   function receiptHtml() {
     const hash = state.page.hash;
@@ -956,8 +936,10 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     if (!route) return receiptPage({ hash, missing: "This transfer's route isn't on this network's bridge." });
     return receiptPage({
       ...receiptModel(entry, {
+        // Cancelled in the wallet: the migration that spent its approval since, which counts its fee.
+        approvalSpentBy: entry.replaced ? migrationFees.spentBy(entry, route, state.activity) : false,
         cfg,
-        evm: migrationEvm(entry, route),
+        evm: migrationFees.fact(entry, route),
         gasPrice: duskGasPrice(),
         own: { account: duskAccount(), name: duskName() },
         owner: listedDusk(),

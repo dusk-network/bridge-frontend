@@ -383,11 +383,12 @@ function gasCounts(gas, evm) {
  * A migration's gas is what its chain says it and the approval it spent paid
  * (`evm`, from `migrationFacts`), whichever app signed that approval.
  */
-function ledgerRows(entry, { cfg, evm = null, from, locale, route, status }) {
+function ledgerRows(entry, { approvalSpentBy = false, cfg, evm = null, from, locale, route, status }) {
   const migration = route.mode === "migration";
   // Cancelled or replaced in the wallet, the migration was never mined: what
-  // it cost is the approval this browser sent for it.
-  const cancelled = migration && Boolean(entry.replaced) && known(entry.approvalFeeWei);
+  // it cost is the approval this browser sent for it, until a migration
+  // spends that approval and counts it (`approvalSpentBy`), once.
+  const cancelled = migration && Boolean(entry.replaced) && known(entry.approvalFeeWei) && approvalSpentBy === false;
   const ledger = transferLedger({
     evm: migration && !entry.replaced ? evm : null,
     failed: status === "failed" && failedAtSource(entry),
@@ -420,11 +421,13 @@ function ledgerRows(entry, { cfg, evm = null, from, locale, route, status }) {
 /**
  * The receipt of one transfer. No balances: the link may be shared. `owner`
  * is the Dusk account the page is for, Dusk Wallet's (`own`) or a followed one.
- * `evm` is what a migration did on its own chain, as `migrationFacts` read it.
+ * `evm` is what a migration did on its own chain, as `migrationFacts` read it;
+ * `approvalSpentBy`, for one cancelled in the wallet, the migration that
+ * spent its approval since (false for none, null while that's being read).
  * `wallet` is the connected EVM wallet, with whether it takes adding DUSK of
  * the transfer's chain (`addsDusk`).
  */
-export function receiptModel(entry, { cfg, evm = null, gasPrice = 1n, locale, now = Date.now(), own = null, owner = own?.account ?? "", route, submitter = null, timeZone, timing, url, wallet = null }) {
+export function receiptModel(entry, { approvalSpentBy = false, cfg, evm = null, gasPrice = 1n, locale, now = Date.now(), own = null, owner = own?.account ?? "", route, submitter = null, timeZone, timing, url, wallet = null }) {
   const view = transferView(entry, { account: own?.account ?? "", cfg, locale, name: own?.name ?? "", now, owner, route, submitter, timeZone, timing, year: true });
   const from = networkName(cfg, route.from.id);
   const to = networkName(cfg, route.to.id);
@@ -444,7 +447,7 @@ export function receiptModel(entry, { cfg, evm = null, gasPrice = 1n, locale, no
 
   const sourceNetwork = route.from.kind === "dusk" ? "dusk" : route.from.id;
   const destinationNetwork = route.to.kind === "dusk" ? "dusk" : route.to.id;
-  const details = ledgerRows(entry, { cfg, evm, from, locale, route, status: view.status });
+  const details = ledgerRows(entry, { approvalSpentBy, cfg, evm, from, locale, route, status: view.status });
   if (entry.sender) details.push({ html: addressHtml(cfg, sourceNetwork, entry.sender, `sender on ${from}`), label: `From, on ${from}` });
   if (entry.destination) details.push({ html: addressHtml(cfg, destinationNetwork, entry.destination, `recipient on ${to}`), label: `To, on ${to}` });
   // The approval the migration spent, as its chain says, or the one this browser sent for it.

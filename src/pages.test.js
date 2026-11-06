@@ -670,8 +670,15 @@ test("a migration's network fee counts the approval it spent, whichever app sign
   assert.deepEqual(failed.details.filter((row) => !row.html).map((row) => [row.label, row.value, row.detail]), [["Network fee", "0.00003 ETH", "migration"]]);
 
   // Cancelled in the wallet after its approval: no migration was mined, and the approval's gas, as this browser read it, is the fee.
-  const cancelled = await receipt({ ...entry, approvalFeeWei: "29106000465696", approvalHash: approval, receivedLux: undefined, replaced: "cancelled", sourceFailed: true, status: "failed" });
+  const cancel = { ...entry, approvalFeeWei: "29106000465696", approvalHash: approval, receivedLux: undefined, replaced: "cancelled", sourceFailed: true, status: "failed" };
+  const cancelled = await receipt(cancel);
   assert.deepEqual(cancelled.details.filter((row) => !row.html).map((row) => [row.label, row.value, row.exact, row.detail]), [["Network fee", "0.000029 ETH", "0.000029106000465696 ETH", "approval"]]);
+  // Until a migration spends that approval: then it counts the fee, once, and this receipt doesn't; nor while that's read. The approval stays listed.
+  for (const approvalSpentBy of [`0x${"f1".repeat(32)}`, null]) {
+    const spent = receiptModel(cancel, { approvalSpentBy, cfg: testnet, route: T.migration, url: "x" });
+    assert.equal(fee(spent), undefined);
+    assert.ok(spent.details.find((row) => row.label === "Sepolia approval").html.includes(`<code class="mono">${approval}</code>`));
+  }
 });
 
 test("a transfer to the EVM chain that arrived at the connected wallet offers to add DUSK to it, as the way back's form does while it holds none", () => {
