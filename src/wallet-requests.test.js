@@ -32,7 +32,7 @@ const { decodeBridgeCall } = await import("@dusk-network/networks/duskevm");
 const { depositRequest } = await import("./dusk-deposit.js");
 const { submitDuskEvmWithdrawal } = await import("./duskevm-withdrawal.js");
 const { connectEvmWallet, getEvmState, heldAccount, initializeEvmWallet } = await import("./evm-wallet.js");
-const { approveMigration, revokeMigration, submitMigration } = await import("./legacy-migration.js");
+const { NOT_REVOKED, REVOKE_CANCELLED, approveMigration, revokeMigration, submitMigration } = await import("./legacy-migration.js");
 
 // What the review prepares and then sends, as the account it was reviewed for.
 const submitServiceTransfer = async ({ account, ...options }) => sendDuskTransfer(await serviceTransferRequest(options), { account });
@@ -211,17 +211,18 @@ async function useEvmWallet(options) {
   return wallet;
 }
 
-// The source chain's RPC: every call succeeds, and a sent transaction is mined.
+// The source chain's RPC: every call succeeds, and a sent transaction is mined
+// in block 16, which leaves nothing approved: as a revoke does.
 globalThis.fetch = async (_url, { body }) => {
-  const result = (method) =>
+  const result = (method, params) =>
     ({
       eth_blockNumber: "0x10",
-      eth_call: `0x${"1".padStart(64, "0")}`,
+      eth_call: `0x${(params?.[0]?.data?.startsWith("0xdd62ed3e") && params[1] === "0x10" ? "0" : "1").padStart(64, "0")}`,
       eth_chainId: "0xaa36a7",
       eth_getTransactionReceipt: { blockHash: `0x${"cd".repeat(32)}`, blockNumber: "0x10", logs: [], status: "0x1", transactionHash: `0x${"ab".repeat(32)}`, transactionIndex: "0x0" },
     })[method];
   const calls = JSON.parse(body);
-  const answer = ({ id, method }) => ({ id, jsonrpc: "2.0", result: result(method) });
+  const answer = ({ id, method, params }) => ({ id, jsonrpc: "2.0", result: result(method, params) });
   return Response.json(Array.isArray(calls) ? calls.map(answer) : answer(calls));
 };
 
@@ -294,13 +295,13 @@ test("a revoke is an approval of 0, and asks the wallet nothing once the chain s
   const wallet = await useEvmWallet();
   const sent = [];
   const fetch = globalThis.fetch;
-  // What the migration contract may still take, as the token's allowance says: none.
+  // What the migration contract may still take, as the token's allowance says it now; the revoke's block leaves none.
   let approved = 1n;
   globalThis.fetch = async (url, init) => {
     const call = JSON.parse(init.body);
-    if (!Array.isArray(call) && call.method === "eth_call" && call.params[0].data.startsWith("0xdd62ed3e"))
+    if (!Array.isArray(call) && call.method === "eth_call" && call.params[0].data.startsWith("0xdd62ed3e") && call.params[1] === "latest")
       return Response.json({ id: call.id, jsonrpc: "2.0", result: `0x${approved.toString(16).padStart(64, "0")}` });
-    if (!Array.isArray(call) && call.method === "eth_call") sent.push(call.params[0].data);
+    if (!Array.isArray(call) && call.method === "eth_call" && !call.params[0].data.startsWith("0xdd62ed3e")) sent.push(call.params[0].data);
     return fetch(url, init);
   };
   try {
@@ -312,6 +313,63 @@ test("a revoke is an approval of 0, and asks the wallet nothing once the chain s
     approved = 0n;
     assert.equal(await sends.revoke(REVIEWED), null);
     assert.equal(wallet.sent.length, 1);
+  } finally {
+    globalThis.fetch = fetch;
+    delete globalThis.ethereum;
+  }
+});
+
+/** What the wallet mines in place of what it sent, and the block it's in. */
+const MINED = `0x${"cd".repeat(32)}`;
+const MINED_IN = `0x${"ef".repeat(32)}`;
+
+/**
+ * The source chain, where what the wallet sent (0xabab…, from the reviewed
+ * account at nonce 5) is never mined: another transaction is, at its nonce,
+ * as when the wallet speeds it up ("repriced", the same call at another
+ * price), cancels it ("cancelled", nothing to itself) or sends something
+ * else ("replaced"). `approved` is the token's allowance: before, and as of
+ * the block that mined the other.
+ */
+function replacedOn(reason, approved) {
+  const from = REVIEWED.toLowerCase();
+  const sent = { blockHash: null, blockNumber: null, from, gas: "0x5208", gasPrice: "0x1", hash: `0x${"ab".repeat(32)}`, input: "0x095ea7b3", nonce: "0x5", to: config.evmNetworks.ethereum.tokenContract.toLowerCase(), transactionIndex: null, type: "0x0", value: "0x0" };
+  const instead = { ...sent, blockHash: MINED_IN, blockNumber: "0x10", gasPrice: "0x2", hash: MINED, transactionIndex: "0x0", ...{ cancelled: { input: "0x", to: from }, replaced: { input: "0xa9059cbb" }, repriced: {} }[reason] };
+  const receipt = { blockHash: MINED_IN, blockNumber: "0x10", contractAddress: null, cumulativeGasUsed: "0x5208", effectiveGasPrice: "0x2", from, gasUsed: "0x5208", logs: [], logsBloom: `0x${"0".repeat(512)}`, status: "0x1", to: instead.to, transactionHash: MINED, transactionIndex: "0x0", type: "0x0" };
+  const word = (value) => `0x${value.toString(16).padStart(64, "0")}`;
+  const result = ({ method, params }) =>
+    ({
+      eth_blockNumber: () => "0x10",
+      eth_call: () => (params[0].data.startsWith("0xdd62ed3e") ? word(params[1] === "0x10" ? approved.after : approved.before) : word(1n)),
+      eth_chainId: () => "0xaa36a7",
+      eth_getBlockByNumber: () => ({ hash: MINED_IN, number: "0x10", parentHash: `0x${"00".repeat(32)}`, timestamp: "0x1", transactions: [instead] }),
+      eth_getTransactionByHash: () => (params[0] === MINED ? instead : sent),
+      eth_getTransactionReceipt: () => (params[0] === MINED ? receipt : null),
+    })[method]?.();
+  return async (_url, { body }) => {
+    const calls = JSON.parse(body);
+    const answer = (call) => ({ id: call.id, jsonrpc: "2.0", result: result(call) ?? null });
+    return Response.json(Array.isArray(calls) ? calls.map(answer) : answer(calls));
+  };
+}
+
+test("a revoke is said to be done only once the chain says so, whatever the wallet sent in its place", async (t) => {
+  // The chain's block watch waits between its polls: not here.
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const fetch = globalThis.fetch;
+  try {
+    // Cancelled in the wallet after it was sent: nothing was revoked, and that's said.
+    globalThis.fetch = replacedOn("cancelled", { after: 1n, before: 1n });
+    await useEvmWallet();
+    await assert.rejects(sends.revoke(REVIEWED), { message: REVOKE_CANCELLED });
+    // Replaced by another transaction: not revoked either.
+    globalThis.fetch = replacedOn("replaced", { after: 1n, before: 1n });
+    await useEvmWallet();
+    await assert.rejects(sends.revoke(REVIEWED), { message: NOT_REVOKED });
+    // Sped up: revoked, as the chain says, by the transaction mined in its place.
+    globalThis.fetch = replacedOn("repriced", { after: 0n, before: 1n });
+    await useEvmWallet();
+    assert.equal(await sends.revoke(REVIEWED), MINED);
   } finally {
     globalThis.fetch = fetch;
     delete globalThis.ethereum;

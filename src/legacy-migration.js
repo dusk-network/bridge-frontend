@@ -50,21 +50,45 @@ export async function approveMigration(network, amount, { account: reviewed } = 
 /** Why a revoke ends without one: it didn't go through on its chain. */
 export const NOT_REVOKED = "The approval wasn't revoked. Check your EVM wallet's activity before you try again.";
 
+/** A revoke cancelled in the wallet once it was sent: the approval is as it was. */
+export const REVOKE_CANCELLED = "You cancelled the revoke in your wallet. The approval stands.";
+
+/**
+ * Waits for the wallet's transaction `hash` to be mined, or the one the
+ * wallet sent in its place on the same nonce (viem's `onReplaced`): sped up
+ * ("repriced"), "cancelled", or "replaced" by another. The receipt is the
+ * mined transaction's, under its own hash.
+ */
+async function mined(publicClient, hash) {
+  let replaced = null;
+  const receipt = await publicClient.waitForTransactionReceipt({
+    hash,
+    onReplaced: ({ reason }) => {
+      replaced = reason;
+    },
+  });
+  return { receipt, replaced };
+}
+
 /**
  * Takes back what the migration contract may take from `account`, the EVM
  * account it was reviewed for: an approval of 0, once it's in a block. With
  * nothing approved on the chain any more, the wallet is asked for nothing.
+ * It's revoked only once the chain says so: a revoke the wallet cancelled or
+ * replaced after sending it leaves the approval standing.
  */
 export async function revokeMigration(network, { account: reviewed } = {}) {
   await ensureEvmChain(network);
   const { publicClient, walletClient } = getEvmClients(network);
-  const left = await publicClient.readContract({
-    abi: erc20Abi,
-    address: network.tokenContract,
-    args: [reviewed, network.migrationContract],
-    functionName: "allowance",
-  });
-  if (left === 0n) return null;
+  const approved = (blockNumber) =>
+    publicClient.readContract({
+      abi: erc20Abi,
+      address: network.tokenContract,
+      args: [reviewed, network.migrationContract],
+      blockNumber,
+      functionName: "allowance",
+    });
+  if ((await approved()) === 0n) return null;
   const { request } = await publicClient.simulateContract({
     account: reviewed,
     abi: erc20Abi,
@@ -73,9 +97,11 @@ export async function revokeMigration(network, { account: reviewed } = {}) {
     args: [network.migrationContract, 0n],
   });
   const hash = await walletClient.writeContract({ ...request, account: await reviewedEvmAccount(reviewed) });
-  const receipt = await publicClient.waitForTransactionReceipt({ hash });
-  if (receipt.status !== "success") throw new Error(NOT_REVOKED);
-  return hash;
+  const { receipt, replaced } = await mined(publicClient, hash);
+  // As of the block it was mined in, whatever the wallet sent in its place.
+  if (receipt.status !== "success" || (await approved(receipt.blockNumber)) !== 0n)
+    throw new Error(replaced === "cancelled" ? REVOKE_CANCELLED : NOT_REVOKED);
+  return receipt.transactionHash;
 }
 
 /** Migrates `amount` to `duskAccount` from `account`, the EVM account it was reviewed for, or sends nothing. */
