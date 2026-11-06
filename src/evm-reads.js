@@ -75,6 +75,16 @@ export function createEvmReads({ cfg, rpc, rpcBatch }) {
     return { approve: await approve, migrate: await migrate };
   }
 
+  /** Gas for a revoke: an approval of 0 for the migration contract. Null where it can't be estimated. */
+  function revokeGas(network, owner) {
+    const chain = cfg.evmNetworks[network];
+    return estimate(network, {
+      data: encodeFunctionData({ abi: ERC20, args: [chain.migrationContract, 0n], functionName: "approve" }),
+      from: owner,
+      to: chain.tokenContract,
+    });
+  }
+
   /** DUSK on DuskEVM, its gas price, and what the withdrawal call would spend. */
   async function withdrawalState(owner, { amountWei, duskAccount } = {}) {
     const [balance, price] = await rpcBatch("dusk-evm", [
@@ -99,5 +109,5 @@ export function createEvmReads({ cfg, rpc, rpcBatch }) {
     return Boolean(code) && code !== "0x";
   }
 
-  return Object.freeze({ hasCode, migrationGas, migrationState, withdrawalState });
+  return Object.freeze({ hasCode, migrationGas, migrationState, revokeGas, withdrawalState });
 }

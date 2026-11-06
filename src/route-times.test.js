@@ -5,7 +5,7 @@ import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 import { actionLead, receiptModel, reviewChecks, routeLine, transfersModel } from "./page-models.js";
 import { buildQuote } from "./quote.js";
-import { measuredSeconds, routeTime, routeTimeText } from "./route-times.js";
+import { arrivalDue, measuredSeconds, routeTime, routeTimeText } from "./route-times.js";
 import { transferView } from "./transfer-view.js";
 
 const DUSKEVM = {
@@ -90,6 +90,23 @@ test("this browser's own recent transfers measure a route the chain says nothing
   // A withdrawal's time is always the chain's.
   const withdrawal = byId(testnet, "dusk-evm-to-dusk");
   assert.equal(routeTime(withdrawal, testnet, { now, transfers: [paid(1, 3, { routeId: withdrawal.id }), paid(2, 2, { routeId: withdrawal.id })] }), null);
+});
+
+test("a transfer is due from a minute before its usual time until five minutes after", () => {
+  const sent = Date.UTC(2026, 10, 5, 19, 58);
+  const entry = { routeId: "dusk-to-bsc", sourceAt: sent, status: "pending" };
+  const due = (route, cfg, seconds, extra = {}) => arrivalDue(route, routeTime(route, cfg), { ...entry, ...extra }, sent + seconds * 1_000);
+  // Mainnet's BSC payout takes about 10 hours: due around then, not the hour after it was sent.
+  const payout = byId(mainnet, "dusk-to-bsc");
+  assert.deepEqual([3_600, 35_940, 36_000, 36_300, 36_301].map((seconds) => due(payout, mainnet, seconds)), [false, true, true, true, false]);
+  // A minute's route is due from when it's sent; until it's confirmed, from when it was sent here.
+  const minute = { ...mainnet, service: { ...mainnet.service, delaySeconds: 60 } };
+  assert.deepEqual([0, 360, 361].map((seconds) => due(payout, minute, seconds)), [true, true, false]);
+  assert.equal(due(payout, minute, 30, { createdAt: new Date(sent).toISOString(), sourceAt: undefined }), true);
+  // Without a usual time, or for a withdrawal, which arrives as it's claimed, never.
+  assert.equal(due(byId(testnet, "dusk-to-ethereum"), testnet, 60), false);
+  const withdrawal = byId(testnet, "dusk-evm-to-dusk");
+  assert.equal(arrivalDue(withdrawal, { seconds: 60 }, entry, sent + 60_000), false);
 });
 
 test("every page says the same time for the same route", () => {

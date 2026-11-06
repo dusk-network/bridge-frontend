@@ -81,6 +81,23 @@ export function routeTime(route, cfg, { chain = null, now = Date.now(), transfer
 /** The route's time as every page writes it, or "" when it isn't known. */
 export const routeTimeText = (time) => (time ? aboutTime(time.seconds) : "");
 
+/** How long before its usual time a transfer is due, and how long after it it still is. */
+const DUE_BEFORE_MS = 60_000;
+const DUE_AFTER_MS = 5 * 60_000;
+
+/**
+ * Whether a transfer is due now, from its sending: from a minute before its
+ * usual time (`time`) until five minutes after it. A withdrawal arrives when
+ * it's claimed, so none is; nor is a transfer whose route has no usual time.
+ */
+export function arrivalDue(route, time, entry, now = Date.now()) {
+  if (route.mode === "duskevm-withdrawal" || !time?.seconds) return false;
+  const sent = entry?.sourceAt ?? Date.parse(entry?.createdAt ?? "");
+  if (!sent) return false;
+  const usual = sent + time.seconds * 1_000;
+  return now >= usual - DUE_BEFORE_MS && now <= usual + DUE_AFTER_MS;
+}
+
 /**
  * When a transfer counts as late: twice its usual time, and at least a
  * quarter of an hour past it. A withdrawal is late only until it can be

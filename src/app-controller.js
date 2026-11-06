@@ -7,7 +7,7 @@
 import { topGap } from "@dusk-network/app-core/history";
 import { toDuskName } from "@duskdomains/sdk/names";
 
-import { entryId, readActivity, recordActivity, saveActivity, updateActivity, useActivityNetwork } from "./activity.js";
+import { entryId, minedTransfer, readActivity, recordActivity, saveActivity, updateActivity, useActivityNetwork } from "./activity.js";
 import { NOTICE_WORDS, createArrivalNotice } from "./arrival-notice.js";
 import { bridgeRoutes, getBridgeRoute } from "./bridge-routes.js";
 import { cardRoute, choosePair, entryRoutes, flipRoute, followsWallets, fromChoices, handedOverRecipient, primaryButton, routeBetween, toChoices } from "./bridge-card.js";
@@ -23,8 +23,8 @@ import { duskEvmNetwork, submitDuskEvmWithdrawal } from "./duskevm-withdrawal.js
 import { connectEvmWallet, ensureEvmChain, getEvmState, initializeEvmWallet, subscribeEvmWallet } from "./evm-wallet.js";
 import { createFormReads } from "./form-reads.js";
 import { amountForInput, formatLux, formatDuskPlain } from "./format.js";
-import { approveMigration, submitMigration } from "./legacy-migration.js";
-import { bridgeTasks, linkedRoute, networkName, networkNames, notRunning, routeUnits, tokenName } from "./names.js";
+import { approveMigration, minedAs, revokeMigration, submitMigration } from "./legacy-migration.js";
+import { bridgeTasks, chainName, linkedRoute, networkName, networkNames, notRunning, routeUnits, tokenName } from "./names.js";
 import {
   actionLead,
   actionPrivacy,
@@ -33,8 +33,11 @@ import {
   recipientLine,
   DUSK_WALLET_URL,
   evmWalletName,
+  openApproval,
   receiptModel,
+  replacedLine,
   reviewChecks,
+  revokeReview,
   routeLine,
   routeSteps,
   transfersModel,
@@ -46,6 +49,7 @@ import { createServices, proofSubmitterFor } from "./services.js";
 import { createLookupFlow } from "./lookup-flow.js";
 import { createReceiptLookups } from "./receipt-lookups.js";
 import { createRouteStatus, statusLine } from "./route-status.js";
+import { arrivalDue, routeTime } from "./route-times.js";
 import { checkDuskRecipient, checkEvmRecipient, settledEvmRecipient } from "./recipient.js";
 import { readWatched, saveWatched, watchTarget } from "./watched-account.js";
 import { SIGNER_MOVED, createReviewSession, notSent, sameSigner, sentActionPatch } from "./review-session.js";
@@ -195,16 +199,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     return { state: current.authorized ? "locked" : "connect" };
   }
 
-  function chainNameFor(chainId) {
-    if (!chainId) return "";
-    if (cfg.duskEvm.enabled && chainId === cfg.duskEvm.chainId) return names["dusk-evm"];
-    const match = Object.values(cfg.evmNetworks).find((network) => network.configured && network.chainId === chainId);
-    return match ? names[match.id] : `chain ${chainId}`;
-  }
-
   const evmVm = () =>
     evmAccount()
-      ? { account: evmAccount(), chainName: chainNameFor(state.evmState.chainId), state: "connected", walletName: state.evmState.walletName }
+      ? { account: evmAccount(), chainName: chainName(cfg, state.evmState.chainId), state: "connected", walletName: state.evmState.walletName }
       : { state: "connect" };
 
   const accounts = () => [listedDusk(), evmAccount()].filter(Boolean);
@@ -373,6 +370,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const before = routeOf(form.routeId);
     form.routeId = route.id;
     form.error = "";
+    form.approvalNote = "";
     if (before?.to.kind !== route.to.kind) {
       form.recipientInput = "";
       form.recipientEditing = false;
@@ -503,6 +501,10 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     });
   }
 
+  /** What the migration contract may still take on `route`, as the chain said it last. */
+  const approvalOpen = (route) =>
+    openApproval(route, { allowanceWei: formReads.reads.migration?.allowanceWei, balanceWei: formReads.reads.migration?.balanceWei, evm: evmAccount(), paused: route.paused });
+
   function signerReady(route) {
     return route.signer === "dusk" ? Boolean(duskAccount()) : Boolean(evmAccount());
   }
@@ -605,6 +607,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     return {
       amount: state.form.amount,
       amountError: quote.insufficient ? "" : quote.error,
+      // What the migration contract may still take, as the chain says, and the word once it's revoked.
+      approval: approvalOpen(route),
+      approvalNote: state.form.approvalNote ?? "",
       button: { ...button, href: DUSK_WALLET_URL },
       canFlip: Boolean(flipRoute(routes, route)),
       canMax: quote.maxLux !== null && quote.maxLux !== undefined && quote.maxLux > 0n,
@@ -752,7 +757,15 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     if (state.page.page === "transfers" || (state.page.page === "transfer" && canonicalHash(entry.hash) === state.page.hash)) renderMain();
     return state.activity.find((item) => item.id === id) ?? null;
   }
-  const scheduler = createScheduler({ check: checkEntry });
+  const scheduler = createScheduler({
+    check: checkEntry,
+    // Its receipt on screen, around when it usually arrives: checked every 5
+    // seconds, so the receipt says it arrived soon after it did.
+    due: (entry) => {
+      const route = routeOf(entry.routeId);
+      return state.page.page === "transfer" && canonicalHash(entry.hash) === state.page.hash && Boolean(route) && arrivalDue(route, routeTime(route, cfg, timing()), entry);
+    },
+  });
 
   function track(id, { delay = 0 } = {}) {
     if (delay) setTimeout(() => scheduler.track(id), delay);
@@ -1006,10 +1019,13 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     return true;
   }
 
+  /** Whether a review's request goes to the EVM wallet: a transfer it sends, or a revoke. */
+  const evmStep = (review) => review.kind === "send" || review.kind === "revoke";
+
   function reviewVm() {
     const review = reviews.current;
     const route = routeOf(review.routeId);
-    const walletName = route.signer === "dusk" || review.kind !== "send" ? "Dusk Wallet" : evmWalletName(state.evmState);
+    const walletName = route.signer === "dusk" || !evmStep(review) ? "Dusk Wallet" : evmWalletName(state.evmState);
     const step = review.steps[review.current];
     return {
       after: review.after ?? "",
@@ -1017,7 +1033,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       cfgLinks: explorerFor,
       checks: review.checks,
       // On another chain, it's asked for first, as the card does.
-      confirmLabel: review.busy ? `Waiting for ${walletName}…` : (review.kind === "send" && switchTo(route) ? `Switch to ${switchTo(route)}` : step?.confirmLabel) ?? "Confirm",
+      confirmLabel: review.busy ? `Waiting for ${walletName}…` : (evmStep(review) && switchTo(route) ? `Switch to ${switchTo(route)}` : step?.confirmLabel) ?? "Confirm",
       error: review.error,
       feeRows: review.feeRows,
       lead: review.lead ?? null,
@@ -1092,6 +1108,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       const network = route.from.id;
       const migration = formReads.reads.migration ?? {};
       const needsApproval = (migration.allowanceWei ?? 0n) < lux * WEI_PER_LUX;
+      // An approval not used up is replaced by this one, not added to.
+      const replaces = needsApproval ? replacedLine(migration.allowanceWei ?? 0n, tokenName(network)) : "";
       const gasPrice = migration.gasPriceWei ?? null;
       const fee = (gas) => (gasPrice && gas ? gas * gasPrice : null);
       const steps = [];
@@ -1101,7 +1119,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
           lines: approveLines({ amountLux: lux, cfg, fee: fee(migration.gas?.approve), network }),
           title: `Approve exactly ${amountText} ${tokenName(network)}`,
           walletName,
-          what: `Lets the Dusk migration contract take <b>exactly ${html(amountText)} ${html(tokenName(network))}</b> from <code class="mono">${html(short(evmAccount()))}</code>.`,
+          what: `Lets the Dusk migration contract take <b>exactly ${html(amountText)} ${html(tokenName(network))}</b> from <code class="mono">${html(short(evmAccount()))}</code>.${replaces ? ` ${html(replaces)}` : ""}`,
         });
       steps.push({
         confirmLabel: `Migrate ${amountText} DUSK`,
@@ -1195,6 +1213,41 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       },
       (error) => {
         review.error = friendlyWalletError(error, "dusk");
+      },
+    );
+    if (state.sheet === "review" && reviews.current === review) renderSheet();
+  }
+
+  /**
+   * The review of a revoke: what the migration contract may take now, and the
+   * approval of 0 the EVM wallet will show, once its gas is estimated.
+   */
+  async function openRevokeReview(opener) {
+    const route = formRoute();
+    if (!route || route.mode !== "migration" || !evmAccount()) return;
+    const network = route.from.id;
+    const walletName = evmWalletName(state.evmState);
+    const parts = (feeWei) => revokeReview(route, { cfg, evm: state.evmState, feeWei, reads: formReads.reads, walletName: walletName === "your EVM wallet" ? "your wallet" : walletName });
+    const before = parts(null);
+    const review = reviews.start({
+      ...before,
+      current: 0,
+      error: "",
+      kind: "revoke",
+      routeId: route.id,
+      signer: { account: evmAccount(), wallet: "evm" },
+      steps: before.steps.map((step) => ({ ...step, lines: null, linesNote: "Preparing the request…" })),
+    });
+    openSheet("review", opener);
+    await reviews.fill(
+      review,
+      () => services.evmReads.revokeGas(network, review.signer.account),
+      (gas) => {
+        const price = formReads.reads.migration?.gasPriceWei;
+        Object.assign(review, parts(gas && price ? gas * price : null));
+      },
+      (error) => {
+        review.error = friendlyWalletError(error, "evm");
       },
     );
     if (state.sheet === "review" && reviews.current === review) renderSheet();
@@ -1300,7 +1353,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     review.error = "";
     renderSheet();
     try {
-      if (review.kind === "send" && switchTo(route)) {
+      if (evmStep(review) && switchTo(route)) {
         await ensureEvmChain(signingChain(route));
         review.busy = false;
         reviews.stepShown();
@@ -1320,6 +1373,19 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         else render();
         return;
       }
+      // A revoke goes out from the account it was reviewed for; with nothing
+      // approved any more, the wallet is asked for nothing.
+      if (review.kind === "revoke") {
+        await revokeMigration(cfg.evmNetworks[route.from.id], { account: review.signer?.account });
+        review.busy = false;
+        closeSheet();
+        if (state.form) state.form.approvalNote = "The approval is revoked.";
+        announce("The approval is revoked.");
+        await loadReads();
+        // Drawn again as reads land, the word keeps focus by its id.
+        root.querySelector("#approval-note")?.focus();
+        return;
+      }
       // An EVM step goes out from the account it was reviewed for, which the
       // wallet is asked for again once it's on the chain.
       if (route.mode === "migration") {
@@ -1327,7 +1393,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         const step = review.steps[review.current];
         const amount = formatDuskPlain(review.amountLux);
         if (step.title.startsWith("Approve")) {
-          await approveMigration(network, amount, { account: review.signer?.account });
+          // Kept with the transfer: its gas is part of what it cost.
+          review.approvalHash = await approveMigration(network, amount, { account: review.signer?.account });
           review.current += 1;
           review.sub = "The first step went through. One step left.";
           review.after = "";
@@ -1340,14 +1407,17 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
           return;
         }
         const hash = await submitMigration(network, amount, review.destination, { account: review.signer?.account });
-        return sent({
+        sent({
           amountLux: review.amountLux.toString(),
+          approvalHash: review.approvalHash,
           destination: review.destination,
           hash,
           parties: [evmAccount(), review.destination],
           routeId: route.id,
           sender: evmAccount(),
         });
+        void followMined(route, hash);
+        return;
       }
       if (route.mode === "duskevm-withdrawal") {
         const result = await submitDuskEvmWithdrawal({ account: review.signer?.account, amount: formatDuskPlain(review.amountLux), duskAccount: review.destination });
@@ -1377,7 +1447,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     } catch (error) {
       if (reviews.current === review) {
         // Why, on the review and in the live region: a cancel is heard as a cancel.
-        notSent(review, error, { announce, wallet: review.kind === "send" && route.signer === "evm" ? "evm" : "dusk" });
+        notSent(review, error, { announce, wallet: evmStep(review) && route.signer === "evm" ? "evm" : "dusk" });
         if (review.entryId) {
           // Kept on the transfer: its receipt says so behind the sheet, grey when you cancelled.
           setActivity(updateActivity(review.entryId, { actionError: actionErrorOf(error) }));
@@ -1386,6 +1456,28 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         renderSheet();
       }
     }
+  }
+
+  /**
+   * A migration sent from here, followed until it's mined. Sped up in the
+   * wallet, it's mined under another hash: its transfer, and its receipt on
+   * screen, go by that one. Cancelled or replaced there, it moved nothing.
+   */
+  async function followMined(route, hash) {
+    let found;
+    try {
+      found = await minedAs(cfg.evmNetworks[route.from.id], hash);
+    } catch {
+      return;
+    }
+    const next = minedTransfer(state.activity, { hash, mined: found.hash, replaced: found.replaced, routeId: route.id });
+    if (!next) return;
+    setActivity(saveActivity(next.items));
+    track(next.id);
+    if (state.page.page !== "transfer" || canonicalHash(hash) !== state.page.hash) return;
+    const now = state.activity.find((item) => item.id === next.id);
+    if (now && canonicalHash(now.hash) !== state.page.hash) globalThis.location.replace(transferHref(now.hash));
+    else renderMain();
   }
 
   async function headBlock(network) {
@@ -1588,6 +1680,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     if (name === "amount") {
       state.form.amount = value;
       state.form.error = "";
+      state.form.approvalNote = "";
       refreshForm();
       loadGasSoon();
     } else if (name === "recipient") {
@@ -1683,6 +1776,20 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       "connect-dusk": () => connectDusk(target),
       "connect-evm": connectEvm,
       "discover-more": () => discover({ more: true }),
+      // What an approval not used up still lets go, to its review: Approve is skipped.
+      "approval-finish": () => {
+        const route = formRoute();
+        const open = route && approvalOpen(route);
+        if (!open?.finishLux) return undefined;
+        state.form.amount = amountForInput(open.finishLux);
+        state.form.approvalNote = "";
+        const input = root.querySelector("#amount");
+        if (input) input.value = state.form.amount;
+        refreshForm();
+        loadGasSoon();
+        return openReview(target);
+      },
+      "approval-revoke": () => openRevokeReview(target),
       max: () => {
         const route = formRoute();
         const quote = quoteFor(route);

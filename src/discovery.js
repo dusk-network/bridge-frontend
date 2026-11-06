@@ -2,15 +2,17 @@
 // the networks so the list is the same on any device. The Dusk account's
 // archive history gives its deposits, its transfers to the bridge account and
 // the payouts of its migrations (@dusk-network/app-core/bridge); DuskEVM's
-// bridge events give the EVM address's withdrawals. Each source is synced a
-// bounded number of requests per visit and kept here per network and
+// bridge events give the EVM address's withdrawals, and the archive's memo
+// index the transfers from Dusk that pay it, from any account. Each source is
+// synced a bounded number of requests per visit and kept here per network and
 // account; a transfer found twice, or found and also sent from this browser,
 // is one entry.
 
-import { migrationPayoutOf } from "@dusk-network/app-core/bridge";
+import { migrationPayoutOf, serviceTransferOf } from "@dusk-network/app-core/bridge";
 import { syncWithdrawals } from "@dusk-network/app-core/duskevm-withdrawals";
-import { StaleHistoryError, createHistory } from "@dusk-network/app-core/history";
+import { DETAILS_BATCH, StaleHistoryError, createHistory, fetchTxDetails, parseHistoryEntry } from "@dusk-network/app-core/history";
 import { routes } from "@dusk-network/networks";
+import { formatEvmAddress } from "@dusk-network/networks/format";
 
 import { entryId } from "./activity.js";
 import { pageStorage as defaultStorage } from "./page-storage.js";
@@ -293,6 +295,38 @@ export function createDiscovery({ archive, cfg, rpc, storage = defaultStorage() 
     return { entries: Object.values(state?.entries ?? {}).map((record) => entryFromHistory(record, account, cfg)).filter(Boolean), state };
   }
 
+  /**
+   * The transfers from Dusk that pay `address`, whoever sent them: those to a
+   * bridge account with the address as their memo, as the archive's memo
+   * index lists them, in the forms the apps write it in. One request, and one
+   * more for when those found for the first time were sent (up to 50 a
+   * request), so the list orders them by it. What was dated is kept per
+   * network and address; one the archive can't date yet is left for the next
+   * visit.
+   */
+  async function paying(address) {
+    const key = stateKey(cfg, "memo", address);
+    const dated = loadState(key, storage)?.sentAt ?? {};
+    const memos = [...new Set([formatEvmAddress(address), address.toLowerCase()])];
+    const data = await archive.query(`query { ${memos.map((memo, i) => `m${i}: transactionsByMemo(memo: ${JSON.stringify(memo)}) { json }`).join(" ")} }`);
+    const found = memos.flatMap((_, i) => (Array.isArray(data?.[`m${i}`]?.json) ? data[`m${i}`].json : []));
+    const entries = found.flatMap((raw) => {
+      // Read as its sender's history reads it: a transfer out, to a route's account.
+      const sender = raw?.events?.find((event) => event?.topic === "moonlight" && typeof event.data?.sender === "string")?.data.sender;
+      const facts = sender ? serviceTransferOf(parseHistoryEntry(sender, raw), cfg.network) : null;
+      if (!facts || partyKey(facts.to) !== partyKey(address)) return [];
+      return [{ amountLux: facts.sent.toString(), destination: facts.to, hash: facts.hash, parties: [sender, address], routeId: facts.route, sender, sourceAt: dated[facts.hash] }];
+    });
+    const undated = entries.filter((entry) => !entry.sourceAt).map((entry) => entry.hash);
+    for (let at = 0; at < undated.length; at += DETAILS_BATCH) {
+      const details = await fetchTxDetails(archive, undated.slice(at, at + DETAILS_BATCH));
+      for (const entry of entries) entry.sourceAt ??= details.get(entry.hash)?.timestamp ?? undefined;
+    }
+    const sent = entries.filter((entry) => entry.sourceAt);
+    saveState(key, { sentAt: Object.fromEntries(sent.map((entry) => [entry.hash, entry.sourceAt])) }, storage);
+    return { entries: sent, state: null };
+  }
+
   async function evmAddress(address, maxRequests) {
     const key = stateKey(cfg, "l2", address);
     const { state } = await syncWithdrawals({
@@ -316,6 +350,7 @@ export function createDiscovery({ archive, cfg, rpc, storage = defaultStorage() 
       const jobs = [];
       if (dusk) jobs.push(duskAccount(dusk, duskRequests).then((r) => ({ ...r, source: "dusk" })));
       if (evm && cfg.duskEvm.enabled) jobs.push(evmAddress(evm, evmRequests).then((r) => ({ ...r, source: "l2" })));
+      if (evm && cfg.service && archive) jobs.push(paying(evm).then((r) => ({ ...r, source: "memo" })));
       const results = await Promise.allSettled(jobs);
       return {
         entries: results.flatMap((result) => (result.status === "fulfilled" ? result.value.entries : [])),

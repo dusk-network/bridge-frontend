@@ -42,7 +42,9 @@ stays on that network's counterparts. There are three routes:
 Each chain has one name per network: Dusk and DuskEVM keep theirs next to the
 network badge, and Ethereum and BNB Smart Chain go by what the network's file
 calls them there, as the web wallet and the extension do. DUSK on them is named
-by its token standard: ERC20 DUSK and BEP20 DUSK.
+by its token standard: ERC20 DUSK and BEP20 DUSK. An EVM wallet on a chain this
+network doesn't route goes by what another network's file calls it, as Ethereum
+on testnet.
 
 The routes, and everything they use, come from the network's file in
 [`@dusk-network/networks`](https://www.npmjs.com/package/@dusk-network/networks),
@@ -84,11 +86,17 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   and kept 10 minutes (`bridgeStatus`): "Paying out. Last payout 12 minutes
   ago.", what it can pay where a balance limits that, and that it doesn't know
   where it can't read that. It's only said: nothing waits for it, and nothing
-  it says stops anyone from sending.
+  it says stops anyone from sending. On the way into Dusk, what the migration
+  contract may still take from the EVM wallet, read on the chain and kept
+  nowhere, shows above the form as an open approval, with Finish, the review
+  of what it still lets go, and Revoke, an approval of 0 reviewed as any
+  request is.
 - **Review**: what moves and what becomes public, the checked facts
-  (balances, gas, where the payout goes), then each wallet step with the
-  lines its window will show, in its order and words, raw values decoded
-  next to them and every recipient in full. Cancel and confirm are equal; a
+  (balances, gas, where the payout goes, and the earlier approval that covers
+  the amount where Approve is skipped, with what stays approved), then each
+  wallet step with the lines its window will show, in its order and words,
+  raw values decoded next to them and every recipient in full. An approval
+  that replaces an open one says so. Cancel and confirm are equal; a
   request you reject in the wallet is said in grey, not as a failure. A
   Dusk call is built before the review, so the call data's sha256 shown is
   the one Dusk Wallet prints (older versions show a bridge call only as its
@@ -97,7 +105,9 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   and hashes, both transactions in full, the receipt link, and its amounts as
   every Dusk app says them (`transferLedger`): what you sent, the bridge fee,
   the network fee and what you received, to the Lux, and gas as wallets write
-  it. It shows no balances: the link is safe to share. While a transfer is on
+  it. A migration's gas counts the approval this browser sent with it too,
+  whose transaction is listed beside the migration's, and says which it
+  counts. It shows no balances: the link is safe to share. While a transfer is on
   its way, "Tell me when it arrives" asks the browser for a notification, only
   then, and it stays chosen on this device. Whoever isn't looking at the page
   when one ends gets that, and the tab's title says so until they're back; where
@@ -139,14 +149,24 @@ account so the next visit asks only for what is new.
 - **The EVM address**: DuskEVM's L2 bridge event `ETHBridgeInitiated` filtered
   by sender, 100,000 blocks (the RPC's limit) per request from the newest
   down, synced by `@dusk-network/app-core/duskevm-withdrawals`. Each
-  withdrawal's Dusk recipient is decoded from its `extraData`.
+  withdrawal's Dusk recipient is decoded from its `extraData`. And the
+  transfers from Dusk that pay it, from any account: those to a bridge account
+  with the address as the memo, from the archive's memo index
+  (`transactionsByMemo`), in one request, and one more for when those found
+  for the first time were sent, so the list orders them by it.
 
 ## Following a transfer
 
 Every entry is rebuilt from its route and source transaction hash, so a
 receipt link or a looked-up hash opens the same transfer on any device.
 Which payout or credit is a transfer's comes from
-`@dusk-network/app-core/bridge`.
+`@dusk-network/app-core/bridge`. A transfer on its way is checked every 15
+seconds, every minute while the page is in the background, and every 5
+seconds while its receipt is open around when it usually arrives: from a
+minute before its usual time until five minutes after. An approval or a
+migration the EVM wallet speeds up goes by the transaction mined in its
+place, as does the receipt open on it; one cancelled or replaced there moved
+nothing, and says so.
 
 - **Migrations** complete when the Dusk payout appears: Messina pays out the
   migrated amount with the migration's transaction hash as the memo

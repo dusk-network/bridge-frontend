@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { entryId, readActivity, recordActivity, saveActivity, updateActivity, useActivityNetwork } from "./activity.js";
+import { entryId, minedTransfer, readActivity, recordActivity, saveActivity, updateActivity, useActivityNetwork } from "./activity.js";
 
 const storage = (initial = {}) => {
   const values = new Map(Object.entries(initial));
@@ -27,6 +27,38 @@ test("an entry is its route and hash; recording it again merges", () => {
 
   updateActivity(entry.id, { stage: "ready_to_prove" }, store);
   assert.equal(readActivity(store).find((item) => item.id === entry.id).stage, "ready_to_prove");
+});
+
+test("a migration sped up in the wallet goes by the hash mined in its place; one cancelled there is said to be", () => {
+  const MINED = `0x${"cd".repeat(32)}`;
+  const sent = { amountLux: "20000000", approvalHash: `0x${"a7".repeat(32)}`, createdAt: "2026-11-06T00:10:58.000Z", destination: "xyi8z9", hash: HASH, id: entryId("bsc-to-dusk", HASH), routeId: "bsc-to-dusk", sender: "0x90fe", sentHere: true, status: "pending" };
+  const other = { hash: `0x${"0e".repeat(32)}`, id: entryId("bsc-to-dusk", `0x${"0e".repeat(32)}`), routeId: "bsc-to-dusk", status: "completed" };
+  // Sped up: the same transfer, with all it knew, under the mined hash; the hash the wallet dropped is gone.
+  const sped = minedTransfer([sent, other], { hash: HASH, mined: MINED, replaced: "repriced", routeId: "bsc-to-dusk" });
+  assert.equal(sped.id, entryId("bsc-to-dusk", MINED));
+  assert.deepEqual(sped.items.map((item) => item.hash), [MINED, other.hash]);
+  assert.deepEqual(sped.items[0], { ...sent, hash: MINED, id: sped.id });
+  // Cancelled or replaced: it stays, saying so, for its check to end it.
+  const cancelled = minedTransfer([sent, other], { hash: HASH, mined: MINED, replaced: "cancelled", routeId: "bsc-to-dusk" });
+  assert.deepEqual([cancelled.id, cancelled.items.find((item) => item.id === sent.id).replaced], [sent.id, "cancelled"]);
+  // Mined as itself, or not kept here: nothing changes.
+  assert.equal(minedTransfer([sent], { hash: HASH, mined: HASH.toUpperCase().replace("0X", "0x"), replaced: null, routeId: "bsc-to-dusk" }), null);
+  assert.equal(minedTransfer([other], { hash: HASH, mined: MINED, replaced: "repriced", routeId: "bsc-to-dusk" }), null);
+});
+
+test("a migration sped up in the wallet whose mined hash was found first is one transfer: the one found, with its approval", () => {
+  const MINED = `0x${"cd".repeat(32)}`;
+  const APPROVAL = `0x${"a7".repeat(32)}`;
+  const sent = { amountLux: "20000000", approvalFeeWei: "46182000738912", approvalHash: APPROVAL, createdAt: "2026-11-06T00:10:58.000Z", destination: "xyi8z9", hash: HASH, id: entryId("bsc-to-dusk", HASH), note: "Waiting for BSC test chain.", parties: ["0x90fe", "xyi8z9"], routeId: "bsc-to-dusk", sender: "0x90fe", sentHere: true, status: "pending" };
+  // Found under the mined hash before the wallet's answer came: looked up, and followed to its payout.
+  const found = { amountLux: "20000000", createdAt: "2026-11-06T00:11:30.000Z", destination: "xyi8z9", destinationAt: 1_793_000_100_000, destinationHash: "dc".repeat(32), feeWei: "46993000751888", followed: true, hash: MINED, id: entryId("bsc-to-dusk", MINED), note: "", parties: ["xyi8z9", "0x90fe"], receivedLux: "20000000", routeId: "bsc-to-dusk", sender: "0x90fe", sourceAt: 1_793_000_000_000, status: "completed" };
+  const other = { hash: `0x${"0e".repeat(32)}`, id: entryId("bsc-to-dusk", `0x${"0e".repeat(32)}`), routeId: "bsc-to-dusk", status: "completed" };
+  const { id, items } = minedTransfer([sent, found, other], { hash: HASH, mined: MINED, replaced: "repriced", routeId: "bsc-to-dusk" });
+  // One transfer for the mined hash, and none for the one dropped: My transfers lists it once.
+  assert.equal(id, found.id);
+  assert.deepEqual(items.map((item) => item.id), [found.id, other.id]);
+  // What it found stays, completed; what was sent from here joins it: its approval, for the fee, and that it was sent here.
+  assert.deepEqual(items[0], { ...found, approvalFeeWei: sent.approvalFeeWei, approvalHash: APPROVAL, createdAt: sent.createdAt, parties: ["xyi8z9", "0x90fe"], sentHere: true });
 });
 
 test("the same hash on two routes is two entries", () => {

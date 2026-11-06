@@ -32,6 +32,12 @@ const NO_PAYOUT = Object.freeze({
   "under-fee": "The amount didn't exceed the bridge fee, so nothing is paid out.",
 });
 
+/** Why a migration sent from here never happened: the wallet sent something else on its nonce. */
+const REPLACED = Object.freeze({
+  cancelled: "It was cancelled in the wallet, so nothing moved.",
+  replaced: "The wallet sent another transaction in its place, so nothing moved.",
+});
+
 /** A transfer that went through and pays nothing out: it's a failure, though the DUSK moved. */
 const PAID_NOTHING = Object.freeze({ receivedLux: "0" });
 
@@ -148,8 +154,25 @@ export function createTracking(deps) {
     return block ? Number(BigInt(block.timestamp)) * 1_000 : null;
   }
 
+  /**
+   * What the approval this browser sent with a migration paid, read once from
+   * its receipt, where `sender` sent it: part of the transfer's fee, whether
+   * the migration was mined or not.
+   */
+  async function approvalFee(entry, network, sender) {
+    if (!entry.approvalHash || entry.approvalFeeWei !== undefined) return {};
+    const approval = await rpc(network, "eth_getTransactionReceipt", [entry.approvalHash]);
+    return approval?.gasUsed && approval.effectiveGasPrice && sameAddress(approval.from, sender)
+      ? { approvalFeeWei: (BigInt(approval.gasUsed) * BigInt(approval.effectiveGasPrice)).toString() }
+      : {};
+  }
+
   async function refreshMigration(entry, route, others) {
     const network = route.from.id;
+    // Cancelled or replaced in the wallet after it was sent: there's no
+    // migration, though its approval was paid for.
+    if (entry.replaced)
+      return failed(REPLACED[entry.replaced] ?? REPLACED.replaced, { ...(await approvalFee(entry, network, entry.sender)), sourceFailed: true });
     const patch = {};
     if (!entry.destination || !entry.amountLux) {
       const tx = await rpc(network, "eth_getTransactionByHash", [entry.hash]);
@@ -171,6 +194,7 @@ export function createTracking(deps) {
     patch.sender ??= entry.sender ?? receipt.from;
     if (receipt.gasUsed && receipt.effectiveGasPrice)
       patch.feeWei = (BigInt(receipt.gasUsed) * BigInt(receipt.effectiveGasPrice)).toString();
+    Object.assign(patch, await approvalFee(entry, network, patch.sender));
     if (receipt.status === "0x0")
       return failed(`The migration failed on ${name(network)}.`, { ...patch, sourceFailed: true });
     const recipient = patch.destination ?? entry.destination;
@@ -444,11 +468,12 @@ export function createTracking(deps) {
 }
 
 /**
- * Re-checks pending entries until they end: often while an action waits,
- * less when the page is hidden.
+ * Re-checks pending entries until they end: often while an action waits, or
+ * while `due` says an entry's arrival is looked out for now, less when the
+ * page is hidden.
  */
-export function createScheduler({ check, intervals = {} }) {
-  const delays = { action: 5_000, active: 15_000, hidden: 60_000, ...intervals };
+export function createScheduler({ check, due = () => false, intervals = {} }) {
+  const delays = { action: 5_000, active: 15_000, due: 5_000, hidden: 60_000, ...intervals };
   const timers = new Map();
   // Entries being checked now. Tracking one again then asks for one more
   // check right after it, so each entry has one loop and its patches land in
@@ -458,9 +483,8 @@ export function createScheduler({ check, intervals = {} }) {
 
   function delayFor(entry) {
     if (entry?.pendingAction) return delays.action;
-    return globalThis.document?.visibilityState === "hidden"
-      ? delays.hidden
-      : delays.active;
+    if (globalThis.document?.visibilityState === "hidden") return delays.hidden;
+    return entry && due(entry) ? delays.due : delays.active;
   }
 
   async function run(id) {

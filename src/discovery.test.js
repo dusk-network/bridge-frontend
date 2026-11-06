@@ -13,6 +13,7 @@ import { encodeDepositArgs, evmAddressOf } from "@dusk-network/networks/duskevm"
 // Two accounts the networks' files name: the BSC and the Sepolia bridge accounts.
 const MAINNET_BSC_BRIDGE_ACCOUNT = networks.mainnet.routes.services[0].account;
 const TESTNET_REGGIO_BRIDGE_ACCOUNT = networks.testnet.routes.services[0].account;
+import { saveActivity } from "./activity.js";
 import {
   createDiscovery,
   entryFromHistory,
@@ -107,6 +108,74 @@ test("an EVM address's withdrawals come from DuskEVM's bridge, kept per network 
   const next = await discovery.discover({ evm: EVM, evmRequests: 3 });
   assert.deepEqual(windows, [[head + 1_000 - 100_000 + 1, head + 1_000], [head - 300_000 + 1, head - 200_000]]);
   assert.equal(next.entries.length, 2);
+});
+
+// As the archive's memo index lists transfers naming the address: the apps write it with its checksum.
+const NAMED = "0x3E5B8223e638CB414BEF8CF95393460cA1C3a11d";
+const named = (n, sender, memo = NAMED, receiver = TESTNET_REGGIO_BRIDGE_ACCOUNT) => ({
+  block_height: 4_779_000 + n,
+  events: [{ data: { gas_spent: "1859281", memo: hex(memo), receiver, refund_info: null, sender, value: "3000000000" }, reverted: false, target: TRANSFER, topic: "moonlight" }],
+  origin: h(n),
+});
+// Testnet, without DuskEVM: only the memo index is asked of the EVM address.
+const memoCfg = { ...cfg, duskEvm: { ...cfg.duskEvm, enabled: false } };
+
+/**
+ * The archive, answering its memo index (`memos`) and each transaction's
+ * block time, in seconds (`sent`, by hash). `asked` keeps each request.
+ */
+function memoArchive(memos, sent) {
+  const asked = [];
+  const fetch = async (_url, { body }) => {
+    asked.push(body);
+    const data = {};
+    for (const [, alias, memo] of body.matchAll(/(\w+): transactionsByMemo\(memo: "(\w+)"\)/gu)) data[alias] = memos[memo] ? { json: memos[memo] } : null;
+    for (const [, alias, hash] of body.matchAll(/(t\d+): tx\(hash: "(\w+)"\)/gu)) data[alias] = sent[hash] ? { blockTimestamp: sent[hash], err: null, gasSpent: 1, tx: { gasLimit: 1, gasPrice: 1 } } : null;
+    return new Response(JSON.stringify({ data }));
+  };
+  return { archive: createArchive({ fetch, url: "https://node.test" }), asked };
+}
+
+test("an EVM address's transfers include those from Dusk that pay it, whoever sent them", async () => {
+  const memos = {
+    // From another Dusk account than any connected here, from the connected one, and to an account that isn't the bridge's.
+    [NAMED]: [named(1, OTHER), named(2, ACCOUNT), named(3, ACCOUNT, NAMED, OTHER)],
+    // Written in lower case, as an app could.
+    [EVM]: [named(4, OTHER, EVM)],
+  };
+  const { archive, asked } = memoArchive(memos, { [h(1)]: 1_792_980_001, [h(2)]: 1_792_980_002, [h(4)]: 1_792_980_004 });
+  const found = await createDiscovery({ archive, cfg: memoCfg, rpc: async () => assert.fail("no EVM chain is asked"), storage: memoryStorage() }).discover({ evm: EVM });
+  assert.deepEqual(
+    found.entries.map((entry) => [entry.routeId, entry.hash, entry.sender, entry.destination, entry.amountLux, entry.sourceAt]),
+    [
+      ["dusk-to-ethereum", h(1), OTHER, NAMED, "3000000000", 1_792_980_001_000],
+      ["dusk-to-ethereum", h(2), ACCOUNT, NAMED, "3000000000", 1_792_980_002_000],
+      ["dusk-to-ethereum", h(4), OTHER, EVM, "3000000000", 1_792_980_004_000],
+    ],
+  );
+  // Each is the address's, so My transfers lists it for the address alone.
+  assert.ok(found.entries.every((entry) => shownFor(entry, [NAMED])));
+  // The memo index, then when they were sent.
+  assert.deepEqual([found.errors, asked.length], [[], 2]);
+});
+
+test("a transfer newly found paying the EVM address is kept by when it was sent, however many are held", async () => {
+  const { archive, asked } = memoArchive({ [NAMED]: [named(1, OTHER), named(2, OTHER)] }, { [h(1)]: 1_793_000_000 });
+  const discovery = createDiscovery({ archive, cfg: memoCfg, rpc: async () => assert.fail("no EVM chain is asked"), storage: memoryStorage() });
+  const found = await discovery.discover({ evm: EVM });
+  // 200 transfers held, all sent before it: it's kept, in the oldest one's place.
+  const held = Array.from({ length: 200 }, (_, i) => ({ hash: h(1_000 + i), id: `dusk-to-ethereum:${h(1_000 + i)}`, routeId: "dusk-to-ethereum", sourceAt: 1_792_000_000_000 + i, status: "completed" }));
+  const kept = saveActivity(mergeTransfers(held, found.entries), null);
+  assert.equal(kept.length, 200);
+  assert.equal(kept[0].hash, h(1));
+  assert.ok(!kept.some((entry) => entry.hash === held[0].hash));
+  // One the archive can't date yet isn't listed, so it can't be dropped as if it were the oldest: the next visit asks again.
+  assert.ok(!found.entries.some((entry) => entry.hash === h(2)));
+  asked.length = 0;
+  const again = await discovery.discover({ evm: EVM });
+  assert.deepEqual(again.entries.map((entry) => [entry.hash, entry.sourceAt]), [[h(1), 1_793_000_000_000]]);
+  // Its date was kept: only the one still undated is asked for.
+  assert.deepEqual(asked.map((body) => [...body.matchAll(/tx\(hash: "(\w+)"\)/gu)].map((match) => match[1])), [[], [h(2)]]);
 });
 
 test("a transfer found twice, or found and sent here, is one entry", () => {

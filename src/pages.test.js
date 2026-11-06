@@ -9,7 +9,7 @@ import { releaseFor } from "@duskdomains/sdk/releases";
 import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
-import { actionLead, actionPrivacy, availableLine, balanceLine, pricedReview, receiptModel, recipientLine, reviewChecks, routeLine, transfersModel } from "./page-models.js";
+import { actionLead, actionPrivacy, availableLine, balanceLine, openApproval, pricedReview, receiptModel, recipientLine, replacedLine, reviewChecks, revokeReview, routeLine, transfersModel } from "./page-models.js";
 import { buildQuote, withdrawalStepMax } from "./quote.js";
 import { activityPanel, cardPage, cardRegions, contractsSheet, footer, header, networkSheet, receiptPage, reviewSheet, walletLines, walletsSheet } from "./views.js";
 import { formatDateTime } from "./format.js";
@@ -167,6 +167,100 @@ test("the review checks the facts first, then lists the wallet's lines with full
   const tags = (html) => [...html.matchAll(/<h3 id="req-\d+">[\s\S]*?<span class="tag">([^<]*)<\/span><\/h3>/gu)].map((match) => match[1]);
   assert.deepEqual(tags(sheet), ["Now", "After step 1"]);
   assert.deepEqual(tags(reviewSheet({ ...vm, steps: vm.steps.map((step, index) => ({ ...step, current: index === 1 })) })), ["Done", "Now"]);
+});
+
+test("an approval not used up shows above the way back's form, with Finish and Revoke", () => {
+  const route = T.migration;
+  const HALF = 5n * 10n ** 17n;
+  const held = 5n * 10n ** 18n;
+  const open = openApproval(route, { allowanceWei: HALF, balanceWei: held, evm: EVM });
+  const box = cardRegions(cardVmFor({ approval: open })).approval;
+  assert.match(box, /<b>Open approval\.<\/b> The Dusk migration contract may still take <b class="num">0\.5 ERC20 DUSK<\/b> from <code class="mono">0xd63b…8df4<\/code>\./u);
+  assert.match(box, /data-action="approval-finish">Finish<\/button><button type="button" class="btn sec sm" data-action="approval-revoke">Revoke<\/button>/u);
+  // Above From, where the way back starts.
+  const page = cardPage(cardVmFor({ approval: open }));
+  assert.ok(page.indexOf("Open approval.") < page.indexOf('data-side="from"'));
+  // Finish goes for what it still lets go, of what the wallet holds.
+  assert.equal(open.finishLux, 500_000_000n);
+  assert.equal(openApproval(route, { allowanceWei: 10n * held, balanceWei: held, evm: EVM }).finishLux, 5_000_000_000n);
+  // With nothing to finish it with, or on a route that isn't running: Revoke alone.
+  for (const quiet of [{ balanceWei: 0n }, { paused: true }]) {
+    const only = cardRegions(cardVmFor({ approval: openApproval(route, { allowanceWei: HALF, balanceWei: held, evm: EVM, ...quiet }) })).approval;
+    assert.ok(!only.includes("approval-finish") && only.includes("approval-revoke"), only);
+  }
+  // One with no limit, and one of less than a Lux, as that.
+  const say = (allowanceWei) => cardRegions(cardVmFor({ approval: openApproval(route, { allowanceWei, balanceWei: held, evm: EVM }) })).approval;
+  assert.match(say(2n ** 256n - 1n), /may still take <b class="num">any amount of ERC20 DUSK<\/b>/u);
+  assert.match(say(999n), /may still take <b class="num">less than 0\.000000001 ERC20 DUSK<\/b>/u);
+  assert.doesNotMatch(say(999n), /approval-finish/u);
+  // Nothing approved, nothing read yet, no EVM wallet, or another route: none.
+  for (const none of [{ allowanceWei: 0n }, { allowanceWei: null }, { allowanceWei: HALF, evm: "" }]) assert.equal(openApproval(route, { balanceWei: held, evm: EVM, ...none }), null);
+  assert.equal(openApproval(T["service-transfer"], { allowanceWei: HALF, balanceWei: held, evm: EVM }), null);
+  assert.equal(cardRegions(cardVmFor()).approval, "");
+  // Once it's revoked, that, in its place.
+  assert.equal(cardRegions(cardVmFor({ approvalNote: "The approval is revoked." })).approval, '<p class="message" id="approval-note" role="status" tabindex="-1">The approval is revoked.</p>');
+});
+
+test("a review that skips Approve says which approval covers the amount, and what stays approved", () => {
+  const route = T.migration;
+  const HALF = 5n * 10n ** 17n;
+  const held = 5n * 10n ** 18n;
+  const checks = (amount, allowanceWei) =>
+    reviewChecks(route, {
+      cfg: testnet,
+      destination: ACCOUNT,
+      duskAccount: ACCOUNT,
+      evm: { account: EVM },
+      quote: buildQuote(route, amount, { allowanceWei, balance: held, cfg: testnet }),
+      reads: { migration: { allowanceWei, balanceWei: held, gasCoinWei: 10n ** 16n } },
+    });
+  const covered = (amount, allowanceWei) => checks(amount, allowanceWei).find((check) => check.html.startsWith("An earlier approval"))?.html;
+  assert.equal(covered("0.2", HALF), 'An earlier approval of <b class="num">0.5 ERC20 DUSK</b> covers this, so you aren\'t asked to approve. <b class="num">0.3 ERC20 DUSK</b> stays approved after it.');
+  assert.equal(covered("0.5", HALF), 'An earlier approval of <b class="num">0.5 ERC20 DUSK</b> covers this, so you aren\'t asked to approve. None of it stays approved after it.');
+  assert.equal(covered("1", 2n ** 256n - 1n), "An earlier approval with no limit covers this, so you aren't asked to approve. It stays approved after it.");
+  assert.match(covered("0.5", HALF + 5n), /<b class="num">Less than 0\.000000001 ERC20 DUSK<\/b> stays approved after it\.$/u);
+  // A fact, read on the chain: the review still confirms.
+  assert.ok(checks("0.2", HALF).every((check) => check.ok));
+  // One that doesn't cover it isn't said to: the approval step replaces it, and says so.
+  assert.equal(covered("1", HALF), undefined);
+  assert.equal(covered("0.2", 0n), undefined);
+  assert.equal(replacedLine(HALF, "ERC20 DUSK"), "It replaces the earlier approval of 0.5 ERC20 DUSK.");
+  assert.equal(replacedLine(0n, "ERC20 DUSK"), "");
+});
+
+test("a revoke is reviewed as its wallet shows it: an approval of 0, and nothing moves", () => {
+  const route = T.migration;
+  const reads = { migration: { allowanceWei: 3n * 10n ** 16n, balanceWei: 10n ** 17n, gasCoinWei: 9n * 10n ** 15n, gasPriceWei: 10n ** 9n } };
+  const revoke = (patch = {}, feeWei = 26_000n * 10n ** 9n) => revokeReview(route, { cfg: testnet, evm: { account: EVM }, feeWei, reads: { migration: { ...reads.migration, ...patch } }, walletName: "MetaMask" });
+  const review = revoke();
+  assert.deepEqual(review.lead, { amount: "0.03", chain: "ethereum", label: "Approved now", line: "Sepolia · 0xd63b…8df4 · No DUSK moves", unit: "ERC20 DUSK" });
+  const [step] = review.steps;
+  assert.deepEqual(
+    step.lines.map((line) => [line.label, line.value, line.address ?? ""]),
+    [
+      ["Network", "Sepolia, chain 11155111", ""],
+      ["Token", "ERC20 DUSK", testnet.evmNetworks.ethereum.tokenContract],
+      ["Spender", "Dusk migration contract", testnet.evmNetworks.ethereum.migrationContract],
+      ["Spending cap", "0 ERC20 DUSK", ""],
+      ["Network fee", "about 0.000026 ETH", ""],
+    ],
+  );
+  assert.deepEqual([step.title, step.confirmLabel], ["Revoke the approval", "Revoke in MetaMask"]);
+  assert.deepEqual(review.feeRows.map((row) => [row.label, row.value, row.detail]), [["Network fee", "about 0.000026 ETH", "one wallet step"]]);
+  assert.match(review.checks[0].html, /0\.009 ETH<\/b> for the network fee, about 0\.000026 ETH needed for the step/u);
+  // Without ETH for its fee, it can't be confirmed.
+  assert.equal(revoke({ gasCoinWei: 1n }).checks[0].ok, false);
+  // Its sheet: what's approved now, what's public, the step and its lines, as every review shows them.
+  const sheet = reviewSheet({ ...review, canConfirm: true, cfgLinks: explorer, confirmLabel: step.confirmLabel, steps: review.steps.map((item) => ({ ...item, current: true })), walletCheckName: "MetaMask" });
+  assert.match(sheet, /<div class="k">Approved now<\/div><div class="v num">0\.03<span class="u">ERC20 DUSK<\/span><\/div>/u);
+  assert.match(sheet, /<b>Public on Sepolia:<\/b> 0xd63b…8df4 and that it revokes its approval\./u);
+  assert.ok(sheet.includes(`<code class="mono">${testnet.evmNetworks.ethereum.migrationContract}</code>`));
+  assert.match(sheet, /data-action="confirm" >Revoke in MetaMask</u);
+  // One with no limit, as that; its fee, as the wallet shows it, before it's estimated.
+  const unlimited = revoke({ allowanceWei: 2n ** 256n - 1n }, null);
+  assert.deepEqual([unlimited.lead.amount, unlimited.lead.unit], ["No limit", ""]);
+  assert.equal(unlimited.steps[0].lines.at(-1).value, "shown by your wallet, paid in ETH");
+  assert.doesNotMatch(reviewSheet({ ...unlimited, canConfirm: true, cfgLinks: explorer, confirmLabel: "x", steps: unlimited.steps.map((item) => ({ ...item, current: true })), walletCheckName: "MetaMask" }), /No limit<span class="u">/u);
 });
 
 // Dusk Wallet's approval windows (ux/extension-approvals): each line's label
@@ -487,6 +581,32 @@ test("gas a migration paid is rounded as wallets write it, with the rest on hove
   ]);
   assert.equal(model.details[2].exact, "0.00004700500075208 ETH");
   assert.ok(receiptPage(model).includes('<span class="num" title="0.00004700500075208 ETH">0.000047 ETH</span>'));
+  // It says which transactions it counts: the migration alone here.
+  assert.equal(model.details[2].detail, "migration");
+  assert.ok(!model.details.some((row) => row.label === "Sepolia approval"));
+});
+
+test("a migration's network fee counts its approval too, where this browser sent one with it", () => {
+  // Nandini's way back: approve 29,106 gas, migrate 42,217, at 1.000000016 gwei.
+  const APPROVAL = `0x${"a7".repeat(32)}`;
+  const entry = { amountLux: "156301633", approvalFeeWei: "29106000465696", approvalHash: APPROVAL, destination: ACCOUNT, feeWei: "42217000675472", hash: `0x${"0d".repeat(32)}`, id: "m", receivedLux: "156301633", routeId: "ethereum-to-dusk", sender: EVM, status: "completed" };
+  const model = receiptModel(entry, { cfg: testnet, route: T.migration, url: "https://bridge.example.org/#/transfer/m" });
+  const fee = model.details.find((row) => row.label === "Network fee");
+  // Both, as left the wallet: 0.000071323001141168 ETH.
+  assert.deepEqual([fee.value, fee.exact, fee.detail], ["0.000071 ETH", "0.000071323001141168 ETH", "approval and migration"]);
+  assert.ok(receiptPage(model).includes('<span class="stack"><span class="num" title="0.000071323001141168 ETH">0.000071 ETH</span><span class="small">approval and migration</span></span>'));
+  // And the approval, with the migration's own transaction after it.
+  const labels = model.details.map((row) => row.label);
+  assert.equal(labels.indexOf("Sepolia approval") + 1, labels.indexOf("Sepolia transaction"));
+  assert.ok(model.details.find((row) => row.label === "Sepolia approval").html.includes(`<code class="mono">${APPROVAL}</code>`));
+  // Before its fee is read, the migration's alone, said as that.
+  assert.deepEqual(["value", "detail"].map((key) => receiptModel({ ...entry, approvalFeeWei: undefined }, { cfg: testnet, route: T.migration, url: "x" }).details.find((row) => row.label === "Network fee")[key]), ["0.000042 ETH", "migration"]);
+  // Failed on its chain, the gas of both was still spent.
+  const failed = receiptModel({ ...entry, receivedLux: undefined, sourceFailed: true, status: "failed" }, { cfg: testnet, route: T.migration, url: "x" });
+  assert.deepEqual(failed.details.filter((row) => !row.html).map((row) => [row.label, row.value]), [["Network fee", "0.000071 ETH"]]);
+  // Cancelled in the wallet after its approval: no migration was mined, and the approval's gas is the fee, said as that.
+  const cancelled = receiptModel({ ...entry, feeWei: undefined, receivedLux: undefined, replaced: "cancelled", sourceFailed: true, status: "failed" }, { cfg: testnet, route: T.migration, url: "x" });
+  assert.deepEqual(cancelled.details.filter((row) => !row.html).map((row) => [row.label, row.value, row.exact, row.detail]), [["Network fee", "0.000029 ETH", "0.000029106000465696 ETH", "approval"]]);
 });
 
 test("a receipt on its way offers to tell you when it arrives, and says what happens where that's refused", () => {
