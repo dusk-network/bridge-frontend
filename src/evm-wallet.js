@@ -427,20 +427,24 @@ export function canAddDusk(network) {
  * Asks the connected wallet to add DUSK of `network`, on that chain, for it
  * to show: true once it did, and kept, so it isn't offered again for that
  * address and chain. A refusal is false, and says nothing; a wallet that
- * answers it doesn't take the request isn't asked again.
+ * answers it doesn't take the request isn't asked again. Where the wallet
+ * moved to another account while it asked to switch chain, or to add DUSK,
+ * nothing is asked or kept: the offer is for the account now.
  */
 export async function addDusk(network) {
   const wallet = provider;
   const owner = account;
-  if (!wallet || !owner || !network?.tokenContract) return false;
+  if (!wallet || !owner || !network?.tokenContract || cannotAdd.has(wallet)) return false;
+  const same = () => provider === wallet && String(account ?? "").toLowerCase() === String(owner).toLowerCase();
   try {
     // A wallet adds a token to the chain it's on.
     if (chainId !== network.chainId) await ensureEvmChain(network);
+    if (!same()) return false;
     const added = await wallet.request({
       method: "wallet_watchAsset",
       params: { options: { address: network.tokenContract, ...DUSK_TOKEN }, type: "ERC20" },
     });
-    if (added !== true) return false;
+    if (added !== true || !same()) return false;
     try {
       pageStorage().setItem(ADDED_KEY, JSON.stringify([...new Set([...addedList(), addedKey(network.chainId, owner)])]));
     } catch {}

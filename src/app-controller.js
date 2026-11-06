@@ -18,6 +18,7 @@ import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js"
 import { followAfterDiscovery, mergeTransfer, mergeTransfers, partyKey } from "./discovery.js";
 import { createDiscoveryRuns } from "./discovery-runs.js";
 import { depositRequest } from "./dusk-deposit.js";
+import { createDuskOffer } from "./dusk-offer.js";
 import { createDuskConnection, ensureDuskConnected, sendDuskContractCall, sendDuskTransfer } from "./dusk-wallet.js";
 import { duskEvmNetwork, submitDuskEvmWithdrawal } from "./duskevm-withdrawal.js";
 import { addDusk, canAddDusk, connectEvmWallet, ensureEvmChain, getEvmState, initializeEvmWallet, subscribeEvmWallet } from "./evm-wallet.js";
@@ -1564,23 +1565,21 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   }
 
   /**
-   * Asks the EVM wallet to add DUSK of `id`'s chain, for it to show it: once
-   * it did, it's offered no more, and focus goes to the page. A refusal says
-   * nothing, and leaves the offer where it was.
+   * "Add DUSK to <wallet>", pressed: drawn again whatever the wallet answers,
+   * as it then stands. Once it added DUSK, that's said; where the offer went
+   * from under the press, focus goes to the page. A refusal says nothing, and
+   * leaves the offer, and focus, where they were.
    */
-  async function addDuskToWallet(id) {
-    const network = cfg.evmNetworks[id];
-    if (!network || state.addingDusk) return;
-    const name = evmWalletName(state.evmState);
-    state.addingDusk = true;
-    const added = await addDusk(network);
-    state.addingDusk = false;
-    if (!added) return;
-    if (isCardPage()) refreshForm();
-    else renderMain();
-    announce(`DUSK added to ${name}.`);
-    slot("main").querySelector("#main")?.focus({ preventScroll: true });
-  }
+  const duskOffer = createDuskOffer({
+    add: addDusk,
+    redraw: (added) => {
+      if (isCardPage()) refreshForm();
+      else renderMain();
+      if (added) announce(`DUSK added to ${evmWalletName(state.evmState)}.`);
+      const focused = globalThis.document?.activeElement;
+      if (!focused || focused === globalThis.document?.body) slot("main").querySelector("#main")?.focus({ preventScroll: true });
+    },
+  });
 
   /** Asks the EVM wallet for the chain the card's route sends from. Nothing is sent. */
   async function switchChain() {
@@ -1817,7 +1816,10 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       return;
     }
     const actions = {
-      "add-dusk": () => addDuskToWallet(target.dataset.net),
+      "add-dusk": () => {
+        const network = cfg.evmNetworks[target.dataset.net];
+        return network ? duskOffer.press(network) : undefined;
+      },
       calendar: downloadCalendar,
       "close-sheet": closeByPerson,
       // Not in the moment the review or its next step comes up (review-session.js).
