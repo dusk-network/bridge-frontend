@@ -32,7 +32,7 @@ const { decodeBridgeCall } = await import("@dusk-network/networks/duskevm");
 const { depositRequest } = await import("./dusk-deposit.js");
 const { submitDuskEvmWithdrawal } = await import("./duskevm-withdrawal.js");
 const { connectEvmWallet, getEvmState, heldAccount, initializeEvmWallet } = await import("./evm-wallet.js");
-const { approveMigration, submitMigration } = await import("./legacy-migration.js");
+const { approveMigration, revokeMigration, submitMigration } = await import("./legacy-migration.js");
 
 // What the review prepares and then sends, as the account it was reviewed for.
 const submitServiceTransfer = async ({ account, ...options }) => sendDuskTransfer(await serviceTransferRequest(options), { account });
@@ -228,10 +228,11 @@ globalThis.fetch = async (_url, { body }) => {
 const sends = {
   approve: (account) => approveMigration(config.evmNetworks.ethereum, "1", { account }),
   migrate: (account) => submitMigration(config.evmNetworks.ethereum, "1", DUSK, { account }),
+  revoke: (account) => revokeMigration(config.evmNetworks.ethereum, { account }),
   withdraw: (account) => submitDuskEvmWithdrawal({ account, amount: "1", duskAccount: DUSK }),
 };
 
-test("an EVM withdrawal, approval or migration goes out from the account it was reviewed for, or not at all", async () => {
+test("an EVM withdrawal, approval, revoke or migration goes out from the account it was reviewed for, or not at all", async () => {
   const switches = {
     // The wallet switches account while its chain-switch dialog is open.
     during: (wallet) => {
@@ -263,7 +264,7 @@ test("an EVM withdrawal, approval or migration goes out from the account it was 
   delete globalThis.ethereum;
 });
 
-test("an EVM withdrawal, approval or migration isn't sent on another chain than its own", async () => {
+test("an EVM withdrawal, approval, revoke or migration isn't sent on another chain than its own", async () => {
   for (const [name, send] of Object.entries(sends)) {
     // The wallet says yes to the switch, and stays where it is.
     const stays = await useEvmWallet({
@@ -287,6 +288,34 @@ test("an EVM withdrawal, approval or migration isn't sent on another chain than 
     assert.deepEqual(moves.sent, [], `${name}, moves`);
   }
   delete globalThis.ethereum;
+});
+
+test("a revoke is an approval of 0, and asks the wallet nothing once the chain says nothing's approved", async () => {
+  const wallet = await useEvmWallet();
+  const sent = [];
+  const fetch = globalThis.fetch;
+  // What the migration contract may still take, as the token's allowance says: none.
+  let approved = 1n;
+  globalThis.fetch = async (url, init) => {
+    const call = JSON.parse(init.body);
+    if (!Array.isArray(call) && call.method === "eth_call" && call.params[0].data.startsWith("0xdd62ed3e"))
+      return Response.json({ id: call.id, jsonrpc: "2.0", result: `0x${approved.toString(16).padStart(64, "0")}` });
+    if (!Array.isArray(call) && call.method === "eth_call") sent.push(call.params[0].data);
+    return fetch(url, init);
+  };
+  try {
+    assert.equal(await sends.revoke(REVIEWED), `0x${"ab".repeat(32)}`);
+    // approve(migration contract, 0), as the wallet is asked to sign it.
+    const network = config.evmNetworks.ethereum;
+    assert.deepEqual(sent, [`0x095ea7b3${network.migrationContract.slice(2).toLowerCase().padStart(64, "0")}${"0".repeat(64)}`]);
+    assert.equal(wallet.sent.length, 1);
+    approved = 0n;
+    assert.equal(await sends.revoke(REVIEWED), null);
+    assert.equal(wallet.sent.length, 1);
+  } finally {
+    globalThis.fetch = fetch;
+    delete globalThis.ethereum;
+  }
 });
 
 test("where Reown picks the EVM account, the reviewed one may be any the wallet lists; otherwise it's the wallet's first", () => {

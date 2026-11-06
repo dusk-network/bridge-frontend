@@ -83,6 +83,18 @@ export function approveLines({ amountLux, cfg, fee, network }) {
   ];
 }
 
+/** Revoke: an approval of 0, so the migration contract may take no more. */
+export function revokeLines({ cfg, fee, network }) {
+  const chain = cfg.evmNetworks[network];
+  return [
+    chainLine(cfg, network),
+    { address: chain.tokenContract, label: "Token", network, value: tokenName(network) },
+    { address: chain.migrationContract, label: "Spender", network, value: "Dusk migration contract" },
+    { label: "Spending cap", note: "It can take nothing more.", value: `0 ${tokenName(network)}` },
+    evmFeeLine(fee, chain.currency?.symbol ?? "ETH"),
+  ];
+}
+
 /** Migrate: the ERC20 or BEP20 DUSK goes into the contract, naming the Dusk account to pay. */
 export function migrateLines({ amountLux, cfg, duskAccount, fee, network }) {
   const chain = cfg.evmNetworks[network];

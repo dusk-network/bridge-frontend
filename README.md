@@ -86,11 +86,17 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   and kept 10 minutes (`bridgeStatus`): "Paying out. Last payout 12 minutes
   ago.", what it can pay where a balance limits that, and that it doesn't know
   where it can't read that. It's only said: nothing waits for it, and nothing
-  it says stops anyone from sending.
+  it says stops anyone from sending. On the way into Dusk, what the migration
+  contract may still take from the EVM wallet, read on the chain and kept
+  nowhere, shows above the form as an open approval, with Finish, the review
+  of what it still lets go, and Revoke, an approval of 0 reviewed as any
+  request is.
 - **Review**: what moves and what becomes public, the checked facts
-  (balances, gas, where the payout goes), then each wallet step with the
-  lines its window will show, in its order and words, raw values decoded
-  next to them and every recipient in full. Cancel and confirm are equal; a
+  (balances, gas, where the payout goes, and the earlier approval that covers
+  the amount where Approve is skipped, with what stays approved), then each
+  wallet step with the lines its window will show, in its order and words,
+  raw values decoded next to them and every recipient in full. An approval
+  that replaces an open one says so. Cancel and confirm are equal; a
   request you reject in the wallet is said in grey, not as a failure. A
   Dusk call is built before the review, so the call data's sha256 shown is
   the one Dusk Wallet prints (older versions show a bridge call only as its

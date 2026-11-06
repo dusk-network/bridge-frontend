@@ -169,6 +169,17 @@ function primaryControl(button) {
 }
 
 /**
+ * Above the way back's form, an approval not used up, as the chain says it:
+ * what the Dusk migration contract may still take, with Finish and Revoke.
+ * Once it's revoked, that, in its place.
+ */
+function approvalBox(open, note = "") {
+  if (!open) return note ? `<p class="message" id="approval-note" role="status" tabindex="-1">${html(note)}</p>` : "";
+  const finish = open.finishLux > 0n ? '<button type="button" class="btn sec sm" data-action="approval-finish">Finish</button>' : "";
+  return `<div class="card notice-box" role="note"><div class="note">${icon("info")}<span><b>Open approval.</b> The Dusk migration contract may still take <b class="num">${html(open.text)}</b> from <code class="mono">${html(short(open.evm))}</code>.</span></div><div class="btn-row">${finish}<button type="button" class="btn sec sm" data-action="approval-revoke">Revoke</button></div></div>`;
+}
+
+/**
  * The parts of the card that follow balances, prices, the amount and the
  * recipient. The page renders each in a `data-region` and replaces them all
  * when anything changes, so none goes stale while someone types.
@@ -178,6 +189,7 @@ export function cardRegions(vm) {
     ? `<div class="kv"><dt class="k">Leaves your Dusk account</dt><dd class="v"><span class="num">${html(vm.quote.leaves)}</span></dd></div>`
     : "";
   return {
+    approval: approvalBox(vm.approval, vm.approvalNote),
     cta: `${vm.error ? messageLine(vm.error) : ""}${primaryControl(vm.button)}`,
     "from-foot": `<span>${html(vm.from.balanceLabel)}</span><span class="bal">${vm.from.balance ? `<span class="num"${exactTitle(vm.from.balanceExact, vm.from.balance)}>${html(vm.from.balance)}</span>` : ""}${vm.canMax ? '<button type="button" class="mini" data-action="max">Max</button>' : ""}</span>`,
     receive: html(vm.receive || "0"),
@@ -226,7 +238,7 @@ export function cardPage(vm) {
       ${recipient}
     </div>`;
   return `<main class="swap" id="main" tabindex="-1"><h1 class="sr-only">Bridge DUSK</h1>
-    <section class="bcard" aria-label="Bridge">${top}${notice}${from}${flip}${to}
+    <section class="bcard" aria-label="Bridge">${top}${notice}<div data-region="approval">${regions.approval}</div>${from}${flip}${to}
       <details class="route" data-region="route"${vm.routeOpen ? " open" : ""}>${regions.route}</details>
       <div class="cta" data-region="cta">${regions.cta}</div>
     </section>${entryLine(vm.entry)}
@@ -277,9 +289,11 @@ export function walletLines(lines, cfgLinks) {
 const otherAccount = (text) =>
   `<div class="group pad warn-box" role="note"><div class="note">${icon("person")}<span><b>Another account gets this DUSK.</b> ${html(text)}</span></div></div>`;
 
-// A proof's or a claim's review leads with what the step costs and what moves.
-const actionLead = (lead) =>
-  `<div class="flow group lead"><div><div class="k">${html(lead.label)}</div><div class="v num">${html(lead.amount)}<span class="u">DUSK</span></div><div class="w">${lead.chain ? chainMark(lead.chain, "xs") : ""}<span>${html(lead.line)}</span></div></div></div>`;
+// A proof's or a claim's review leads with what the step costs and what moves; a revoke's with what's approved.
+function actionLead(lead) {
+  const unit = lead.unit ?? "DUSK";
+  return `<div class="flow group lead"><div><div class="k">${html(lead.label)}</div><div class="v num">${html(lead.amount)}${unit ? `<span class="u">${html(unit)}</span>` : ""}</div><div class="w">${lead.chain ? chainMark(lead.chain, "xs") : ""}<span>${html(lead.line)}</span></div></div></div>`;
+}
 
 export function reviewSheet(vm) {
   // Each step's tag follows the review: done once confirmed, now while it's

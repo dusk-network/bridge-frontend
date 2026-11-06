@@ -47,6 +47,37 @@ export async function approveMigration(network, amount, { account: reviewed } = 
   return hash;
 }
 
+/** Why a revoke ends without one: it didn't go through on its chain. */
+export const NOT_REVOKED = "The approval wasn't revoked. Check your EVM wallet's activity before you try again.";
+
+/**
+ * Takes back what the migration contract may take from `account`, the EVM
+ * account it was reviewed for: an approval of 0, once it's in a block. With
+ * nothing approved on the chain any more, the wallet is asked for nothing.
+ */
+export async function revokeMigration(network, { account: reviewed } = {}) {
+  await ensureEvmChain(network);
+  const { publicClient, walletClient } = getEvmClients(network);
+  const left = await publicClient.readContract({
+    abi: erc20Abi,
+    address: network.tokenContract,
+    args: [reviewed, network.migrationContract],
+    functionName: "allowance",
+  });
+  if (left === 0n) return null;
+  const { request } = await publicClient.simulateContract({
+    account: reviewed,
+    abi: erc20Abi,
+    address: network.tokenContract,
+    functionName: "approve",
+    args: [network.migrationContract, 0n],
+  });
+  const hash = await walletClient.writeContract({ ...request, account: await reviewedEvmAccount(reviewed) });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash });
+  if (receipt.status !== "success") throw new Error(NOT_REVOKED);
+  return hash;
+}
+
 /** Migrates `amount` to `duskAccount` from `account`, the EVM account it was reviewed for, or sends nothing. */
 export async function submitMigration(network, amount, duskAccount, { account: reviewed } = {}) {
   await ensureEvmChain(network);

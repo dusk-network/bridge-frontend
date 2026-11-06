@@ -15,6 +15,7 @@ import { buildQuote, routeDuskFees, stepFeeText, withdrawalStepMax } from "./quo
 import { routeTime, routeTimeText } from "./route-times.js";
 import { explorerTxUrl, html, short, transferSubline, transferView } from "./transfer-view.js";
 import { copyButton } from "./views.js";
+import { revokeLines } from "./wallet-lines.js";
 
 export const DUSK_WALLET_URL = "https://docs.dusk.network/use/wallets/#dusk-wallet";
 
@@ -43,6 +44,101 @@ export function routeLine(route, cfg, { gasPrice = 1n, timing } = {}) {
           : ["two wallet steps", `fee in ${gasCoin(cfg, route.from.id)}`];
   const line = [routeTimeText(routeTime(route, cfg, timing)), ...cost].filter(Boolean).join(" · ");
   return `${line.charAt(0).toUpperCase()}${line.slice(1)}`;
+}
+
+// ---------------------------------------------------------------------------
+// An approval not used up, on the way back
+// ---------------------------------------------------------------------------
+
+/** Past what any token holds: an approval with no limit, as wallets give one. */
+export const NO_LIMIT = 2n ** 255n;
+
+/** What an approval lets the migration contract take, as a page says it: "0.03 BEP20 DUSK", or less than a Lux. */
+const approved = (wei, unit) => (wei < WEI_PER_LUX ? `less than ${formatLux(1n)} ${unit}` : `${formatLux(wei / WEI_PER_LUX)} ${unit}`);
+
+/**
+ * What the Dusk migration contract may still take from the EVM wallet, as the
+ * chain says (`allowanceWei`), above the way back's form: null with nothing
+ * approved, or before it's read. Finish goes to the review of what it still
+ * lets go of what the wallet holds (`finishLux`), none on a route that isn't
+ * running; Revoke takes it back.
+ */
+export function openApproval(route, { allowanceWei, balanceWei, evm, paused = false }) {
+  if (route.mode !== "migration" || !evm || allowanceWei === null || allowanceWei === undefined || allowanceWei <= 0n) return null;
+  const unit = tokenName(route.from.id);
+  const lets = allowanceWei / WEI_PER_LUX;
+  const held = balanceWei === null || balanceWei === undefined ? 0n : balanceWei / WEI_PER_LUX;
+  return {
+    evm,
+    finishLux: paused ? 0n : lets < held ? lets : held,
+    text: allowanceWei >= NO_LIMIT ? `any amount of ${unit}` : approved(allowanceWei, unit),
+  };
+}
+
+/**
+ * On a review whose approval step replaces an approval not used up: what it
+ * replaces, as a sentence. "" with none.
+ */
+export function replacedLine(allowanceWei, unit) {
+  return allowanceWei > 0n ? `It replaces the earlier approval of ${approved(allowanceWei, unit)}.` : "";
+}
+
+/**
+ * On a review that skips Approve: which approval covers the amount, and what
+ * of it stays approved once the amount went. HTML, its values in bold.
+ */
+function coveredLine(allowanceWei, amountLux, unit) {
+  if (allowanceWei >= NO_LIMIT) return "An earlier approval with no limit covers this, so you aren't asked to approve. It stays approved after it.";
+  const left = allowanceWei - amountLux * WEI_PER_LUX;
+  const stays = left > 0n ? approved(left, unit) : "";
+  return `An earlier approval of <b class="num">${html(approved(allowanceWei, unit))}</b> covers this, so you aren't asked to approve. ${
+    stays ? `<b class="num">${html(stays.charAt(0).toUpperCase() + stays.slice(1))}</b> stays approved after it.` : "None of it stays approved after it."
+  }`;
+}
+
+/**
+ * A revoke's review: what's approved now, the gas for an approval of 0
+ * (`feeWei`, once estimated), and the one step its wallet shows.
+ */
+export function revokeReview(route, { cfg, evm, feeWei = null, reads, walletName }) {
+  const network = route.from.id;
+  const from = networkName(cfg, network);
+  const coin = gasCoin(cfg, network);
+  const unit = tokenName(network);
+  const migration = reads.migration ?? {};
+  const allowance = migration.allowanceWei ?? 0n;
+  const who = short(evm?.account);
+  const checks =
+    migration.gasCoinWei === null || migration.gasCoinWei === undefined
+      ? []
+      : [
+          {
+            html: `You have <b class="num">${html(formatShort(migration.gasCoinWei, 18).text)} ${html(coin)}</b> for the network fee${feeWei ? `, ${html(aboutFee(feeWei, 18, coin))} needed for the step` : ""}`,
+            ok: feeWei ? migration.gasCoinWei >= feeWei : migration.gasCoinWei > 0n,
+          },
+        ];
+  return {
+    checks,
+    feeRows: [{ detail: "one wallet step", key: "fee", label: "Network fee", value: feeWei ? aboutFee(feeWei, 18, coin) : `paid in ${coin}` }],
+    lead: {
+      amount: allowance >= NO_LIMIT ? "No limit" : allowance < WEI_PER_LUX ? `less than ${formatLux(1n)}` : formatLux(allowance / WEI_PER_LUX),
+      chain: network,
+      label: "Approved now",
+      line: `${from} · ${who} · No DUSK moves`,
+      unit: allowance >= NO_LIMIT ? "" : unit,
+    },
+    privacy: `Public on ${from}: ${who} and that it revokes its approval.`,
+    steps: [
+      {
+        confirmLabel: `Revoke in ${walletName}`,
+        lines: revokeLines({ cfg, fee: feeWei, network }),
+        title: "Revoke the approval",
+        walletName,
+        what: `Sets what the Dusk migration contract may take from <code class="mono">${html(who)}</code> to 0.`,
+      },
+    ],
+    sub: `${unit} on ${from} · nothing moves`,
+  };
 }
 
 /** Who does what, in one line: the route's steps and the wallets they take. */
@@ -94,6 +190,9 @@ export function reviewChecks(route, { cfg, destination, duskAccount, evm, quote,
         html: `You have <b class="num">${html(formatShort(migration.gasCoinWei, 18).text)} ${html(coin)}</b> for the network fee${quote.evmFeeWei ? `, ${html(aboutFee(quote.evmFeeWei, 18, coin))} needed for ${quote.steps === 2 ? "both steps" : "the step"}` : ""}`,
         ok: quote.evmFeeWei ? migration.gasCoinWei >= quote.evmFeeWei : migration.gasCoinWei > 0n,
       });
+    // Approve is skipped: which approval covers the amount, read on the chain.
+    const allowance = migration.allowanceWei ?? 0n;
+    if (lux > 0n && allowance >= lux * WEI_PER_LUX) checks.push({ html: coveredLine(allowance, lux, tokenName(route.from.id)), ok: true });
     checks.push({
       html: `The payout goes to Dusk account <code class="mono">${html(short(destination))}</code>${duskAccount && destination === duskAccount ? ", your connected account" : ""}`,
       ok: true,
