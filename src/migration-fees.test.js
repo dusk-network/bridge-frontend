@@ -105,3 +105,73 @@ test("a cancelled migration's approval is counted by the migration that spent it
   assert.equal(none.fees.spentBy({ ...cancelled, approvalHash: undefined }, ROUTE, others), false);
   assert.deepEqual(none.reads, []);
 });
+
+test("an approval a read left unread is read again while its logs may still come, and not once they're gone", async () => {
+  // The RPC left the logs out: the migration's own gas, its approval unread.
+  const unread = (at) => ({ approval: null, approvalState: "unread", at, gasWei: 47_005_000_752_080n, state: "mined", totalWei: 47_005_000_752_080n });
+  const migration = { hash: hash("0d"), id: "m", routeId: ROUTE.id, status: "completed" };
+  const answers = { [migration.hash]: [] };
+  const { fees, page, reads, timers } = setup(answers);
+  page.now = Date.parse("2026-11-06T15:00:00Z");
+  answers[migration.hash].push(unread(page.now - 60_000), mined());
+  page.open = migration.hash;
+  fees.fact(migration, ROUTE);
+  await settle();
+  // Drawn with the migration's gas alone; read again once it's due.
+  assert.equal(fees.fact(migration, ROUTE).approvalState, "unread");
+  assert.deepEqual(timers.map((timer) => timer.ms), [15_000]);
+  page.now += 15_000;
+  timers.shift().fn();
+  fees.fact(migration, ROUTE);
+  await settle();
+  assert.deepEqual([reads.length, fees.fact(migration, ROUTE).totalWei], [2, 93_199_001_491_184n]);
+
+  // Ten days on, the logs are gone for good: not read again.
+  const old = { hash: hash("0e"), id: "o", routeId: ROUTE.id, status: "completed" };
+  answers[old.hash] = [unread(page.now - 10 * 24 * 60 * 60_000)];
+  page.open = old.hash;
+  fees.fact(old, ROUTE);
+  await settle();
+  fees.fact(old, ROUTE);
+  page.now += 60_000;
+  fees.fact(old, ROUTE);
+  assert.deepEqual([reads.length, timers.length], [3, 0]);
+});
+
+test("a read that lands, or comes due, draws again the receipt that needs it now, also a cancelled transfer's that depends on it", async () => {
+  const APPROVAL = hash("a7");
+  const SENDER = "0x90Fe863078ffD0371d62e648A601345aF8CF2CbE";
+  const sent = Date.parse("2026-11-06T14:15:00Z");
+  const finish = { hash: hash("f1"), id: "f", routeId: ROUTE.id, sender: SENDER, sourceAt: sent + 60_000, status: "completed" };
+  const cancelled = { approvalHash: APPROVAL, createdAt: new Date(sent).toISOString(), hash: hash("c0"), id: "c", replaced: "cancelled", routeId: ROUTE.id, sender: SENDER, status: "failed" };
+  const others = [cancelled, finish];
+  const { changes, fees, page, timers } = setup({ [finish.hash]: [new Error("bsc-rpc didn't answer"), mined(APPROVAL)] });
+  // The Finish's receipt: its read fails; drawn again, it waits to read again.
+  page.open = finish.hash;
+  fees.fact(finish, ROUTE);
+  await settle();
+  fees.fact(finish, ROUTE);
+  assert.equal(timers.length, 1);
+  // The cancelled transfer's receipt, opened meanwhile, depends on that read: when it's due, that one's drawn again.
+  page.open = cancelled.hash;
+  assert.equal(fees.spentBy(cancelled, ROUTE, others), null);
+  assert.equal(timers.length, 1);
+  page.now += 15_000;
+  timers.shift().fn();
+  assert.deepEqual(changes, [finish.hash, cancelled.hash]);
+  // Drawn again: read, and as it lands, drawn again with the Finish counting the approval.
+  assert.equal(fees.spentBy(cancelled, ROUTE, others), null);
+  await settle();
+  assert.deepEqual(changes, [finish.hash, cancelled.hash, cancelled.hash]);
+  assert.equal(fees.spentBy(cancelled, ROUTE, others), finish.hash);
+
+  // A read running for one receipt, needed by another opened before it lands: that one's drawn as it does.
+  const running = setup({ [finish.hash]: [mined(APPROVAL)] });
+  running.page.open = finish.hash;
+  running.fees.fact(finish, ROUTE);
+  running.page.open = cancelled.hash;
+  running.fees.spentBy(cancelled, ROUTE, others);
+  await settle();
+  assert.deepEqual(running.changes, [cancelled.hash]);
+  assert.equal(running.fees.spentBy(cancelled, ROUTE, others), finish.hash);
+});

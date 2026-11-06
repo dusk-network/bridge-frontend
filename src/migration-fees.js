@@ -3,7 +3,9 @@
 // that show it: read as a receipt shows it, and again as its transfer moves
 // on. Where the chain couldn't say, it's read again once 15 seconds have
 // passed, while a receipt that needs it shows, however that receipt was left
-// and opened again meanwhile. One read at a time per migration.
+// and opened again meanwhile, and whichever receipt needs it: its own, or a
+// cancelled transfer's whose approval it may have spent. One read at a time
+// per migration.
 
 /** Read again after a read the chain didn't settle, while a receipt needs it. */
 export const AGAIN_MS = 15_000;
@@ -11,8 +13,23 @@ export const AGAIN_MS = 15_000;
 /** A migration older than a cancelled one by this much, on the clocks of the chain and the browser, can't have spent its approval. */
 const CLOCKS_MS = 60 * 60_000;
 
-/** What the chain didn't settle: nothing read, not mined yet, unreadable, or its approval's receipt unread. */
-export const unsettled = (fact) => !fact || fact.state === "error" || fact.state === "pending" || (fact.approvalState === "found" && typeof fact.approval?.gasWei !== "bigint");
+/**
+ * How long the public RPCs give a block's logs, about: BSC's some four days.
+ * An approval a migration's read left unread (its logs left out) may come
+ * with a read again until then; after, it won't.
+ */
+const LOGS_MS = 4 * 24 * 60 * 60_000;
+
+/** Whether the approval a migration spent was left unread while its logs may still be given, at `at`. */
+const unreadYet = (fact, at) => fact.approvalState === "unread" && !(fact.at && at - fact.at > LOGS_MS);
+
+/**
+ * What the chain didn't settle at `at`: nothing read, not mined yet,
+ * unreadable, its approval left unread while its logs may still be given, or
+ * the approval's receipt unread.
+ */
+export const unsettled = (fact, at = Date.now()) =>
+  !fact || fact.state === "error" || fact.state === "pending" || unreadYet(fact, at) || (fact.approvalState === "found" && typeof fact.approval?.gasWei !== "bigint");
 
 /**
  * @param {object} options
@@ -25,7 +42,17 @@ export const unsettled = (fact) => !fact || fact.state === "error" || fact.state
  */
 export function createMigrationFees({ isOpen, onChange, read, againMs = AGAIN_MS, now = Date.now, setTimer = setTimeout }) {
   const facts = new Map();
-  const waiting = new Set();
+  // By migration, the receipts its read, running or due, is for: each of
+  // them that's open is drawn again as it lands, or once it's due.
+  const waiting = new Map();
+  const timers = new Set();
+
+  const waitFor = (key, on) => waiting.set(key, new Set([...(waiting.get(key) ?? []), on]));
+  function tell(key) {
+    const receipts = waiting.get(key) ?? new Set();
+    waiting.delete(key);
+    for (const on of receipts) if (isOpen(on)) onChange(on);
+  }
 
   /**
    * What `entry`, a migration, paid on its chain, as read so far (null
@@ -37,24 +64,31 @@ export function createMigrationFees({ isOpen, onChange, read, againMs = AGAIN_MS
     const key = String(entry.hash).toLowerCase();
     const asked = [key, entry.status ?? "", entry.sourceAt ?? ""].join(":");
     const known = facts.get(key);
-    if (known?.reading) return known.fact;
-    const wait = known && unsettled(known.fact) ? known.at + againMs - now() : Infinity;
+    if (known?.reading) {
+      waitFor(key, on);
+      return known.fact;
+    }
+    const wait = known && unsettled(known.fact, now()) ? known.at + againMs - now() : Infinity;
     if (!known || known.asked !== asked || wait <= 0) {
+      waitFor(key, on);
       facts.set(key, { asked, at: now(), fact: known?.fact ?? null, reading: true });
       void Promise.resolve()
         .then(() => read(entry, route))
         .catch(() => null)
         .then((answer) => {
           facts.set(key, { asked, at: now(), fact: answer ?? known?.fact ?? null, reading: false });
-          if (isOpen(on)) onChange(on);
+          tell(key);
         });
-    } else if (wait !== Infinity && !waiting.has(key)) {
-      // Read moments ago, on this receipt or one left since: asked again once it's due, if a receipt still needs it.
-      waiting.add(key);
-      setTimer(() => {
-        waiting.delete(key);
-        if (isOpen(on)) onChange(on);
-      }, wait);
+    } else if (wait !== Infinity) {
+      // Read moments ago, for this receipt or another: asked again once it's due, for each receipt that needs it then.
+      waitFor(key, on);
+      if (!timers.has(key)) {
+        timers.add(key);
+        setTimer(() => {
+          timers.delete(key);
+          tell(key);
+        }, wait);
+      }
     }
     return known?.fact ?? null;
   }
@@ -78,8 +112,8 @@ export function createMigrationFees({ isOpen, onChange, read, againMs = AGAIN_MS
       if (sent && other.sourceAt && other.sourceAt < sent - CLOCKS_MS) continue;
       const read = fact(other, route, on);
       if (read?.approval?.hash === approval) return other.hash;
-      // Which approval it spent is known once it's mined and read.
-      if (!read || read.state === "error" || read.state === "pending") unknown = true;
+      // Which approval it spent is known once it's mined and read, its approval too while its logs may come.
+      if (!read || read.state === "error" || read.state === "pending" || unreadYet(read, now())) unknown = true;
     }
     return unknown ? null : false;
   }
