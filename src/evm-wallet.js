@@ -427,9 +427,10 @@ export function canAddDusk(network) {
  * Asks the connected wallet to add DUSK of `network`, on that chain, for it
  * to show: true once it did, and kept, so it isn't offered again for that
  * address and chain. A refusal is false, and says nothing; a wallet that
- * answers it doesn't take the request isn't asked again. Where the wallet
- * moved to another account while it asked to switch chain, or to add DUSK,
- * nothing is asked or kept: the offer is for the account now.
+ * answers it doesn't take the request isn't asked again; one that can't
+ * switch chain from the page still is, once it's on the chain. Where the
+ * wallet moved to another account while it asked to switch chain, or to add
+ * DUSK, nothing is asked or kept: the offer is for the account now.
  */
 export async function addDusk(network) {
   const wallet = provider;
@@ -439,21 +440,27 @@ export async function addDusk(network) {
   try {
     // A wallet adds a token to the chain it's on.
     if (chainId !== network.chainId) await ensureEvmChain(network);
-    if (!same()) return false;
-    const added = await wallet.request({
+  } catch {
+    // Not switched, or a wallet that switches only by hand: still offered, for once it's on the chain.
+    return false;
+  }
+  if (!same()) return false;
+  let added;
+  try {
+    added = await wallet.request({
       method: "wallet_watchAsset",
       params: { options: { address: network.tokenContract, ...DUSK_TOKEN }, type: "ERC20" },
     });
-    if (added !== true || !same()) return false;
-    try {
-      pageStorage().setItem(ADDED_KEY, JSON.stringify([...new Set([...addedList(), addedKey(network.chainId, owner)])]));
-    } catch {}
-    return true;
   } catch (error) {
     // 4200: not a method it has; -32601: none by that name.
     if (error?.code === 4200 || error?.code === -32601) cannotAdd.add(wallet);
     return false;
   }
+  if (added !== true || !same()) return false;
+  try {
+    pageStorage().setItem(ADDED_KEY, JSON.stringify([...new Set([...addedList(), addedKey(network.chainId, owner)])]));
+  } catch {}
+  return true;
 }
 
 /** Why an EVM request isn't sent: since its review, the wallet switched account. */

@@ -225,6 +225,11 @@ function movingWallet(handlers) {
       wallet.accounts = [to];
       for (const listener of listeners.get("accountsChanged") ?? []) listener([to]);
     },
+    /** The person picks another chain in the wallet, which says so. */
+    turn(chain) {
+      wallet.chain = chain;
+      for (const listener of listeners.get("chainChanged") ?? []) listener(chain);
+    },
     on(event, listener) {
       listeners.set(event, [...(listeners.get(event) ?? []), listener]);
     },
@@ -322,4 +327,31 @@ test("Add DUSK pressed: the offer is drawn again whatever the wallet answers, an
   assert.equal(await offer.press(bsc), false);
   assert.equal(watched(), 2);
   delete globalThis.ethereum;
+});
+
+test("a wallet that can't switch chain from the page keeps the offer, and adds DUSK once the person picks the chain in it", async () => {
+  const bsc = { chainId: 56, chainName: "BNB Smart Chain", rpcUrl: "https://bsc-rpc.publicnode.com", tokenContract: "0xB2BD0749DBE21f623d9BABa856D3B0f0e1BFEc9C" };
+  for (const code of [4200, -32601]) {
+    const kept = new Map();
+    globalThis.localStorage = { getItem: (key) => kept.get(key) ?? null, removeItem: (key) => kept.delete(key), setItem: (key, value) => kept.set(key, String(value)) };
+    const wallet = movingWallet({
+      wallet_switchEthereumChain: () => {
+        throw Object.assign(new Error("Switching chains from a site isn't supported."), { code });
+      },
+      wallet_watchAsset: () => true,
+    });
+    globalThis.ethereum = wallet;
+    const evm = await import(`./evm-wallet.js?by-hand=${code}-${Date.now()}`);
+    await evm.connectEvmWallet();
+    // Not on the chain, and not switched from here: nothing asked, and still offered.
+    assert.equal(await evm.addDusk(bsc), false);
+    assert.equal(wallet.asked.includes("wallet_watchAsset"), false);
+    assert.equal(evm.canAddDusk(bsc), true);
+    // Switched by hand: added.
+    wallet.turn("0x38");
+    assert.equal(await evm.addDusk(bsc), true);
+    assert.equal(evm.canAddDusk(bsc), false);
+  }
+  delete globalThis.ethereum;
+  delete globalThis.localStorage;
 });
