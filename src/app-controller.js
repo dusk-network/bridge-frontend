@@ -908,6 +908,36 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     await receiptLookups.open(hash);
   }
 
+  // What each migration on a receipt paid on its own chain, with the approval
+  // it spent, by its hash in lower case: read as the receipt shows it, again
+  // as the transfer moves on, and a little later where the chain couldn't say.
+  const migrationsEvm = new Map();
+  const EVM_AGAIN_MS = 15_000;
+  const unsettled = (fact) => !fact || fact.state === "error" || fact.state === "pending" || (fact.approvalState === "found" && typeof fact.approval?.gasWei !== "bigint");
+
+  function migrationEvm(entry, route) {
+    if (route.mode !== "migration" || entry.replaced) return null;
+    const key = String(entry.hash).toLowerCase();
+    const asked = [entry.hash, entry.status, entry.sourceAt ?? ""].join(":");
+    const known = migrationsEvm.get(key);
+    const again = known && !known.reading && unsettled(known.fact) && Date.now() - known.at >= EVM_AGAIN_MS;
+    if (!known || (known.asked !== asked && !known.reading) || again) {
+      migrationsEvm.set(key, { ...known, asked, at: Date.now(), reading: true });
+      const shown = () => state.page.page === "transfer" && bareHash(state.page.hash) === bareHash(entry.hash);
+      void services.tracking
+        .migrationEvm(entry, route)
+        .catch(() => null)
+        .then((fact) => {
+          migrationsEvm.set(key, { asked, at: Date.now(), fact: fact ?? known?.fact ?? null, reading: false });
+          if (!shown()) return;
+          renderMain();
+          // Read again while the receipt shows it, until the chain says.
+          if (unsettled(fact)) setTimeout(() => shown() && renderMain(), EVM_AGAIN_MS);
+        });
+    }
+    return known?.fact ?? null;
+  }
+
   function receiptHtml() {
     const hash = state.page.hash;
     const entry = entryForHash(hash);
@@ -919,7 +949,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const route = routeOf(entry.routeId);
     if (!route) return receiptPage({ hash, missing: "This transfer's route isn't on this network's bridge." });
     return receiptPage({
-      ...receiptModel(entry, { cfg, gasPrice: duskGasPrice(), own: { account: duskAccount(), name: duskName() }, owner: listedDusk(), route, submitter: proofSubmitterFor(duskAccount()), timing: timing(), url: receiptUrl(entry.hash) }),
+      ...receiptModel(entry, { cfg, evm: migrationEvm(entry, route), gasPrice: duskGasPrice(), own: { account: duskAccount(), name: duskName() }, owner: listedDusk(), route, submitter: proofSubmitterFor(duskAccount()), timing: timing(), url: receiptUrl(entry.hash) }),
       canAct: duskState().installed,
       notice: arrivals.state(),
     });

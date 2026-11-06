@@ -16,6 +16,7 @@ import { formatDateTime } from "./format.js";
 import { chainMark, pairMark } from "./icons.js";
 import { approveLines, duskCallLines, duskTransferLines, migrateLines, walletFee, withdrawalAmount } from "./wallet-lines.js";
 import { driverJson, loadDataDriver } from "./data-driver.js";
+import { createTracking } from "./tracking.js";
 import { contractCreditLog, messagePassedLog, u256, withdrawalInput } from "./withdrawals.fixtures.js";
 
 const DUSKEVM = {
@@ -575,41 +576,101 @@ test("a receipt says the transfer's amounts as every Dusk app does, to the Lux",
   ]);
 });
 
-test("gas a migration paid is rounded as wallets write it, with the rest on hover", () => {
-  const entry = { amountLux: "1000000000", destination: ACCOUNT, feeWei: "47005000752080", hash: `0x${"0d".repeat(32)}`, id: "m", receivedLux: "1000000000", routeId: "ethereum-to-dusk", sender: EVM, status: "completed" };
-  const model = receiptModel(entry, { cfg: testnet, route: T.migration, url: "https://bridge.example.org/#/transfer/m" });
-  assert.deepEqual(model.details.slice(0, 3).map((row) => [row.label, row.value]), [
-    ["You sent", "1 ERC20 DUSK"],
-    ["You received", "1 DUSK"],
-    ["Network fee", "0.000047 ETH"],
-  ]);
-  assert.equal(model.details[2].exact, "0.00004700500075208 ETH");
-  assert.ok(receiptPage(model).includes('<span class="num" title="0.00004700500075208 ETH">0.000047 ETH</span>'));
-  // It says which transactions it counts: the migration alone here.
-  assert.equal(model.details[2].detail, "migration");
-  assert.ok(!model.details.some((row) => row.label === "Sepolia approval"));
-});
+/**
+ * Sepolia's migration route as `migrationFacts` asks its RPC over fetch: an
+ * owner's approvals and migrations, each in a block of its own, with the
+ * token's Transfer and Approval logs as an ERC-20 writes them. `pruned`: the
+ * RPC refuses logs that old, as Ethereum's publicnode does a day on.
+ */
+function migrationChain({ pruned = false } = {}) {
+  const { contract } = testnet.network.routes.migrations.find((route) => route.id === T.migration.id);
+  const token = testnet.network.routes.chains.ethereum.token;
+  const topic = (address) => `0x${address.slice(2).toLowerCase().padStart(64, "0")}`;
+  const word = (value) => `0x${BigInt(value).toString(16).padStart(64, "0")}`;
+  const [APPROVAL, TRANSFER] = ["0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925", "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"];
+  const receipts = new Map();
+  const nonces = new Map();
+  const logs = [];
+  const urls = [];
+  /** The owner sends a transaction: an approval of `wei`, or a migration of it, at 1.000000016 gwei. */
+  const send = (kind, { block, gas, hash, left = 0n, wei, failed = false }) => {
+    const own = kind === "approve" ? [[APPROVAL, wei]] : failed ? [] : [[TRANSFER, wei], [APPROVAL, left]];
+    const placed = own.map(([event, value], index) => ({ address: token, blockNumber: `0x${block.toString(16)}`, data: word(value), logIndex: `0x${index.toString(16)}`, topics: [event, topic(EVM), topic(contract)], transactionHash: hash }));
+    logs.push(...placed);
+    receipts.set(hash, { blockNumber: `0x${block.toString(16)}`, effectiveGasPrice: "0x3b9aca10", from: EVM.toLowerCase(), gasUsed: `0x${gas.toString(16)}`, logs: placed, status: failed ? "0x0" : "0x1", to: (kind === "approve" ? token : contract).toLowerCase() });
+    nonces.set(hash, nonces.size);
+    return hash;
+  };
+  const fetch = async (url, { body }) => {
+    const { id, method, params } = JSON.parse(body);
+    urls.push(url);
+    const answer = (result) => new Response(JSON.stringify({ id, jsonrpc: "2.0", result }));
+    if (method === "eth_getTransactionReceipt") return answer(receipts.get(params[0]) ?? null);
+    if (method === "eth_getTransactionByHash") return answer(nonces.has(params[0]) ? { from: EVM.toLowerCase(), hash: params[0], nonce: `0x${nonces.get(params[0]).toString(16)}` } : null);
+    if (method === "eth_blockNumber") return answer("0x2710");
+    if (method === "eth_getBlockByNumber") return answer({ number: params[0], timestamp: `0x${(1_793_000_000 + Number(params[0])).toString(16)}` });
+    if (method !== "eth_getLogs") throw new Error(`unexpected ${method}`);
+    if (pruned) return new Response(JSON.stringify({ error: { code: -32000, message: "history has been pruned for this block" }, id, jsonrpc: "2.0" }));
+    const [{ address, fromBlock, toBlock, topics }] = params;
+    return answer(logs.filter((log) => log.address.toLowerCase() === address.toLowerCase() && BigInt(log.blockNumber) >= BigInt(fromBlock) && BigInt(log.blockNumber) <= BigInt(toBlock) && topics[0].includes(log.topics[0]) && log.topics[1] === topics[1] && log.topics[2] === topics[2]));
+  };
+  // What's final of it, kept as the page keeps it.
+  return { cache: new Map(), fetch, send, urls };
+}
 
-test("a migration's network fee counts its approval too, where this browser sent one with it", () => {
-  // Nandini's way back: approve 29,106 gas, migrate 42,217, at 1.000000016 gwei.
-  const APPROVAL = `0x${"a7".repeat(32)}`;
-  const entry = { amountLux: "156301633", approvalFeeWei: "29106000465696", approvalHash: APPROVAL, destination: ACCOUNT, feeWei: "42217000675472", hash: `0x${"0d".repeat(32)}`, id: "m", receivedLux: "156301633", routeId: "ethereum-to-dusk", sender: EVM, status: "completed" };
-  const model = receiptModel(entry, { cfg: testnet, route: T.migration, url: "https://bridge.example.org/#/transfer/m" });
-  const fee = model.details.find((row) => row.label === "Network fee");
-  // Both, as left the wallet: 0.000071323001141168 ETH.
-  assert.deepEqual([fee.value, fee.exact, fee.detail], ["0.000071 ETH", "0.000071323001141168 ETH", "approval and migration"]);
-  assert.ok(receiptPage(model).includes('<span class="stack"><span class="num" title="0.000071323001141168 ETH">0.000071 ETH</span><span class="small">approval and migration</span></span>'));
-  // And the approval, with the migration's own transaction after it.
+test("a migration's network fee counts the approval it spent, whichever app signed it and whenever, as its chain says", async () => {
+  // Nandini's way back of 0.003: an approval signed in another app, then the migration: 46,194 and 47,005 gas at 1.000000016 gwei.
+  const chain = migrationChain();
+  const approval = chain.send("approve", { block: 100, gas: 46_194, hash: `0x${"a7".repeat(32)}`, wei: 3n * 10n ** 15n });
+  const hash = chain.send("migrate", { block: 140, gas: 47_005, hash: `0x${"0d".repeat(32)}`, wei: 3n * 10n ** 15n });
+  const entry = { amountLux: "3000000", destination: ACCOUNT, hash, id: "m", receivedLux: "3000000", routeId: T.migration.id, sender: EVM, status: "completed" };
+  const read = (sent, on = chain) => createTracking({ cache: on.cache, config: testnet, fetch: on.fetch }).migrationEvm(sent, T.migration);
+  const receipt = async (sent, on = chain) => receiptModel(sent, { cfg: testnet, evm: await read(sent, on), route: T.migration, url: "https://bridge.example.org/#/transfer/m" });
+  const fee = (model) => {
+    const row = model.details.find((each) => each.label === "Network fee");
+    return row && [row.value, row.exact, row.detail];
+  };
+  const model = await receipt(entry);
+  // Both, to the wei, as left the wallet: 0.000093199001491184 ETH.
+  assert.deepEqual(fee(model), ["0.000093 ETH", "0.000093199001491184 ETH", "approval and migration"]);
+  assert.ok(receiptPage(model).includes('<span class="stack"><span class="num" title="0.000093199001491184 ETH">0.000093 ETH</span><span class="small">approval and migration</span></span>'));
+  // And the approval found on the chain, with the migration's own transaction after it.
   const labels = model.details.map((row) => row.label);
   assert.equal(labels.indexOf("Sepolia approval") + 1, labels.indexOf("Sepolia transaction"));
-  assert.ok(model.details.find((row) => row.label === "Sepolia approval").html.includes(`<code class="mono">${APPROVAL}</code>`));
-  // Before its fee is read, the migration's alone, said as that.
-  assert.deepEqual(["value", "detail"].map((key) => receiptModel({ ...entry, approvalFeeWei: undefined }, { cfg: testnet, route: T.migration, url: "x" }).details.find((row) => row.label === "Network fee")[key]), ["0.000042 ETH", "migration"]);
-  // Failed on its chain, the gas of both was still spent.
-  const failed = receiptModel({ ...entry, receivedLux: undefined, sourceFailed: true, status: "failed" }, { cfg: testnet, route: T.migration, url: "x" });
-  assert.deepEqual(failed.details.filter((row) => !row.html).map((row) => [row.label, row.value]), [["Network fee", "0.000071 ETH"]]);
-  // Cancelled in the wallet after its approval: no migration was mined, and the approval's gas is the fee, said as that.
-  const cancelled = receiptModel({ ...entry, feeWei: undefined, receivedLux: undefined, replaced: "cancelled", sourceFailed: true, status: "failed" }, { cfg: testnet, route: T.migration, url: "x" });
+  assert.ok(model.details.find((row) => row.label === "Sepolia approval").html.includes(`<code class="mono">${approval}</code>`));
+  // Read from the deployment's own RPC; and once it's final, kept: opened again, the chain isn't asked.
+  assert.deepEqual([...new Set(chain.urls)], [testnet.evmNetworks.ethereum.rpcUrl]);
+  const asked = chain.urls.length;
+  assert.deepEqual(fee(await receipt(entry)), fee(model));
+  assert.equal(chain.urls.length, asked);
+  // Before it's read, no fee: not the migration's half of it.
+  assert.equal(fee(receiptModel(entry, { cfg: testnet, route: T.migration, url: "x" })), undefined);
+
+  // Two migrations from one approval of 0.01: the first counts it, the next its own gas.
+  const shared = migrationChain();
+  shared.send("approve", { block: 100, gas: 46_194, hash: `0x${"b1".repeat(32)}`, wei: 10n ** 16n });
+  const first = shared.send("migrate", { block: 140, gas: 47_005, hash: `0x${"b2".repeat(32)}`, left: 7n * 10n ** 15n, wei: 3n * 10n ** 15n });
+  const next = shared.send("migrate", { block: 180, gas: 47_005, hash: `0x${"b3".repeat(32)}`, wei: 7n * 10n ** 15n });
+  assert.equal(fee(await receipt({ ...entry, hash: first }, shared))[2], "approval and migration");
+  assert.deepEqual(fee(await receipt({ ...entry, amountLux: "7000000", hash: next, receivedLux: "7000000" }, shared)), ["0.000047 ETH", "0.00004700500075208 ETH", "migration"]);
+
+  // Where the RPC no longer gives logs that old, the migration's own gas, and that the approval can't be read.
+  const pruned = migrationChain({ pruned: true });
+  pruned.send("approve", { block: 100, gas: 46_194, hash: approval, wei: 3n * 10n ** 15n });
+  pruned.send("migrate", { block: 140, gas: 47_005, hash, wei: 3n * 10n ** 15n });
+  assert.deepEqual(fee(await receipt(entry, pruned)), ["0.000047 ETH", "0.00004700500075208 ETH", "migration; its approval can't be read"]);
+  // The approval this browser sent right before it still counts there: the chain's nonces say nothing came between.
+  assert.equal(fee(await receipt({ ...entry, approvalHash: approval }, pruned))[2], "approval and migration");
+
+  // Failed on its chain: its own gas; its approval wasn't spent, and counts with the migration that spends it.
+  const failing = migrationChain();
+  failing.send("approve", { block: 100, gas: 46_194, hash: approval, wei: 3n * 10n ** 15n });
+  failing.send("migrate", { block: 140, failed: true, gas: 30_002, hash, wei: 3n * 10n ** 15n });
+  const failed = await receipt({ ...entry, approvalHash: approval, receivedLux: undefined, sourceFailed: true, status: "failed" }, failing);
+  assert.deepEqual(failed.details.filter((row) => !row.html).map((row) => [row.label, row.value, row.detail]), [["Network fee", "0.00003 ETH", "migration"]]);
+
+  // Cancelled in the wallet after its approval: no migration was mined, and the approval's gas, as this browser read it, is the fee.
+  const cancelled = await receipt({ ...entry, approvalFeeWei: "29106000465696", approvalHash: approval, receivedLux: undefined, replaced: "cancelled", sourceFailed: true, status: "failed" });
   assert.deepEqual(cancelled.details.filter((row) => !row.html).map((row) => [row.label, row.value, row.exact, row.detail]), [["Network fee", "0.000029 ETH", "0.000029106000465696 ETH", "approval"]]);
 });
 

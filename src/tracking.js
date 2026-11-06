@@ -4,7 +4,7 @@
 // Which payout or credit on the other side is a transfer's, each paying one
 // transfer in the order they were sent, @dusk-network/app-core/bridge says.
 
-import { CREDIT_WINDOW_MS, depositArrivals, migrationPayouts, serviceArrivals } from "@dusk-network/app-core/bridge";
+import { CREDIT_WINDOW_MS, depositArrivals, migrationFacts, migrationPayouts, serviceArrivals } from "@dusk-network/app-core/bridge";
 import { WithdrawalError } from "@dusk-network/app-core/duskevm-withdrawals";
 import { isAccount } from "@dusk-network/networks/account";
 import { BRIDGE_FUNCTIONS, decodeBridgeCall } from "@dusk-network/networks/duskevm";
@@ -119,7 +119,8 @@ const isMethodMissing = (error) =>
  * @param {object} [deps.withdrawals] the page's withdrawals (withdrawals.js)
  * @param {(network: string) => object} [deps.receiptClient] viem client, for the adapter path
  * @param {() => number} [deps.now]
- * @param {typeof fetch} [deps.fetch] what the payout searches send their requests with
+ * @param {typeof fetch} [deps.fetch] what the payout searches, and the reads of what a migration paid, send their requests with
+ * @param {{ get: (key: string) => string | null | undefined, set: (key: string, value: string) => void }} [deps.cache] where what a migration paid is kept once it's final
  */
 export function createTracking(deps) {
   const { archive, config, node, rpc } = deps;
@@ -155,9 +156,9 @@ export function createTracking(deps) {
   }
 
   /**
-   * What the approval this browser sent with a migration paid, read once from
-   * its receipt, where `sender` sent it: part of the transfer's fee, whether
-   * the migration was mined or not.
+   * What the approval this browser sent with a migration the wallet then
+   * cancelled or replaced paid, read once from its receipt, where `sender`
+   * sent it: no migration was mined, and that's what the transfer cost.
    */
   async function approvalFee(entry, network, sender) {
     if (!entry.approvalHash || entry.approvalFeeWei !== undefined) return {};
@@ -165,6 +166,25 @@ export function createTracking(deps) {
     return approval?.gasUsed && approval.effectiveGasPrice && sameAddress(approval.from, sender)
       ? { approvalFeeWei: (BigInt(approval.gasUsed) * BigInt(approval.effectiveGasPrice)).toString() }
       : {};
+  }
+
+  /**
+   * What a migration paid on its own chain, with the approval it spent there,
+   * whichever app signed that and whenever (`migrationFacts`): the one this
+   * browser sent with it is named, so its receipt is read at any age. What's
+   * final is kept in `deps.cache`. Null for one the wallet cancelled or
+   * replaced, which was never mined.
+   */
+  async function migrationEvm(entry, route) {
+    if (route.mode !== "migration" || entry.replaced || !entry.hash) return null;
+    const read = await migrationFacts({
+      cache: deps.cache,
+      fetch: deps.fetch,
+      migrations: [{ approval: entry.approvalHash ?? null, hash: entry.hash, route: route.id }],
+      network: config.network,
+      rpcUrl: config.evmNetworks[route.from.id]?.rpcUrl,
+    });
+    return read.get(String(entry.hash).toLowerCase()) ?? null;
   }
 
   async function refreshMigration(entry, route, others) {
@@ -192,9 +212,7 @@ export function createTracking(deps) {
     patch.sourceAt = entry.sourceAt ?? (await blockTime(network, receipt.blockNumber));
     // A migration found by its payout has no sender yet.
     patch.sender ??= entry.sender ?? receipt.from;
-    if (receipt.gasUsed && receipt.effectiveGasPrice)
-      patch.feeWei = (BigInt(receipt.gasUsed) * BigInt(receipt.effectiveGasPrice)).toString();
-    Object.assign(patch, await approvalFee(entry, network, patch.sender));
+    // What it paid, with its approval, is read for its receipt (`migrationEvm`).
     if (receipt.status === "0x0")
       return failed(`The migration failed on ${name(network)}.`, { ...patch, sourceFailed: true });
     const recipient = patch.destination ?? entry.destination;
@@ -464,7 +482,7 @@ export function createTracking(deps) {
     }
   }
 
-  return Object.freeze({ refresh });
+  return Object.freeze({ migrationEvm, refresh });
 }
 
 /**

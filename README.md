@@ -106,9 +106,12 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   and hashes, both transactions in full, the receipt link, and its amounts as
   every Dusk app says them (`transferLedger`): what you sent, the bridge fee,
   the network fee and what you received, to the Lux, and gas as wallets write
-  it. A migration's gas counts the approval this browser sent with it too,
-  whose transaction is listed beside the migration's, and says which it
-  counts. It shows no balances: the link is safe to share. While a transfer is on
+  it. A migration's gas counts the approval it spent, whichever app signed
+  it and whenever, as its chain says (`migrationFacts`), whose transaction is
+  listed beside the migration's, and says which it counts: the migration
+  alone where an earlier transfer spent that approval first, and, saying so,
+  where the approval can't be read, as once the RPC no longer gives logs that
+  old. It shows no balances: the link is safe to share. While a transfer is on
   its way, "Tell me when it arrives" asks the browser for a notification, only
   then, and it stays chosen on this device. Whoever isn't looking at the page
   when one ends gets that, and the tab's title says so until they're back; where
@@ -337,7 +340,8 @@ doesn't run it.
 - The browser talks directly to configured Dusk and EVM RPC endpoints.
 - Data drivers run only when they match their pinned SHA-256.
 - Local storage contains transaction metadata, what was read for My
-  transfers, the chains' times, how each route was doing, per network and
+  transfers, what each migration paid on its own chain once it's final, the
+  chains' times, how each route was doing, per network and
   account, and whether this device was asked to notify; no keys and none of
   your balances. Where the browser denies the
   page storage, they're kept in memory while the page is open.

@@ -169,16 +169,21 @@ function withDuskEvmContracts(net, duskEvm) {
 
 /**
  * The network's file with this deployment's bridge account, fee and time,
- * its chains' tokens and the accounts that pay migrations out in place of
- * its own where they differ, so a payout is looked for where this page's
- * transfers are paid from.
+ * its chains' tokens, migration contracts and the accounts that pay
+ * migrations out in place of its own where they differ, so a payout is
+ * looked for where this page's transfers are paid from, and what a migration
+ * paid is read on the contract it went to.
  */
 function withDeploymentRoutes(net, { evmNetworks, service }) {
   const { chains, migrations, services } = net.routes;
   const routes = {
     ...net.routes,
     chains: Object.fromEntries(Object.entries(chains).map(([id, chain]) => [id, evmNetworks[id] ? { ...chain, token: evmNetworks[id].tokenContract } : chain])),
-    migrations: migrations.map((route) => (evmNetworks[route.chain] ? { ...route, payoutAccount: evmNetworks[route.chain].payoutAccount || null } : route)),
+    migrations: migrations.map((route) =>
+      evmNetworks[route.chain]
+        ? { ...route, contract: evmNetworks[route.chain].migrationContract || route.contract, payoutAccount: evmNetworks[route.chain].payoutAccount || null }
+        : route,
+    ),
     services: services.map((route) =>
       route.chain === service?.network ? { ...route, account: service.account, feeLux: String(service.feeLux), typicalSeconds: service.delaySeconds } : route,
     ),
