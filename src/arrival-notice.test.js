@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { NOTICE_WORDS, createArrivalNotice } from "./arrival-notice.js";
+import { entryId, minedTransfer } from "./activity.js";
+import { NOTICE_WORDS, createArrivalNotice, createEndWatch } from "./arrival-notice.js";
 
 /** A browser: storage, a tab that's looked at or not, and notifications as `permission` and `answer` say. */
 function browser({ answer = "granted", permission = "default" } = {}) {
@@ -140,6 +141,56 @@ test("where a page can't notify, the title alone says it, and nothing breaks", a
   android.focused = false;
   notice.ended(ARRIVED);
   assert.equal(android.title, "1 DUSK arrived on Dusk · Dusk Bridge");
+});
+
+// Transfers as the page keeps them: on their way, or ended.
+const transfer = (id, status = "pending") => ({ id, routeId: "dusk-to-bsc", status });
+const ids = (list) => list.map((entry) => entry.id);
+
+test("opening the page tells of no transfer that had ended before it: Nandini's old arrivals aren't read out", () => {
+  // Discovery finds her old transfers and keeps them on their way until a check reads them, as the page did.
+  const watch = createEndWatch();
+  const found = [transfer("old-1"), transfer("old-2"), transfer("now")];
+  assert.deepEqual(watch.ended([], found), []);
+  // Their first checks: the two old ones had arrived long ago, one is still on its way.
+  const first = [transfer("old-1", "completed"), transfer("old-2", "completed"), transfer("now")];
+  assert.deepEqual(watch.ended(found, first), []);
+  for (const entry of first) watch.checked(entry);
+  // It arrives while the page is open: that one is told.
+  const later = [...first.slice(0, 2), transfer("now", "completed")];
+  assert.deepEqual(ids(watch.ended(first, later)), ["now"]);
+});
+
+test("a transfer sent from the page is told when it ends, even at its first check, and one that failed is told too", () => {
+  const watch = createEndWatch();
+  watch.sent("mine");
+  assert.deepEqual(ids(watch.ended([transfer("mine")], [transfer("mine", "completed")])), ["mine"]);
+  // Kept from another visit on its way, and still on its way when this one checked it: its failure is told.
+  const kept = [transfer("kept")];
+  watch.checked(kept[0]);
+  assert.deepEqual(ids(watch.ended(kept, [transfer("kept", "failed")])), ["kept"]);
+  // One that ended while the page was closed, read at this visit's first check, isn't.
+  assert.deepEqual(watch.ended([transfer("closed")], [transfer("closed", "completed")]), []);
+  // Nor is a check that couldn't read it news of its way: nothing was read.
+  watch.checked(undefined);
+  assert.deepEqual(watch.ended([transfer("unread")], [transfer("unread", "completed")]), []);
+});
+
+test("a migration sent from the page and sped up in the wallet, which goes by its mined hash since, is told when it ends", () => {
+  const watch = createEndWatch();
+  const hash = `0x${"aa".repeat(32)}`;
+  const sentId = entryId("bsc-to-dusk", hash);
+  watch.sent(sentId);
+  const kept = [{ hash, id: sentId, routeId: "bsc-to-dusk", sentHere: true, status: "pending" }];
+  // The wallet mined it repriced, as another transaction: the transfer now goes by that one.
+  const next = minedTransfer(kept, { hash, mined: `0x${"bb".repeat(32)}`, replaced: "repriced", routeId: "bsc-to-dusk" });
+  watch.moved(sentId, next.id);
+  assert.deepEqual(watch.ended(kept, next.items), []);
+  // Its first check finds it arrived: told.
+  assert.deepEqual(ids(watch.ended(next.items, [{ ...next.items[0], status: "completed" }])), [next.id]);
+  // Moved from what was never on its way, nothing is.
+  watch.moved("unseen", "elsewhere");
+  assert.deepEqual(watch.ended([transfer("elsewhere")], [transfer("elsewhere", "completed")]), []);
 });
 
 test.after(() => {

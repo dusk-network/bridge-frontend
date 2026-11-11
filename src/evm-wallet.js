@@ -523,6 +523,12 @@ export function getEvmClients(network) {
 }
 
 export const getEvmState = state;
+/** What moved between two of the wallet's states: its account, its chain, or the wallet itself (another provider at the same address and chain). */
+export const evmMoved = (before, after) => ({
+  account: after?.account !== before?.account,
+  chain: after?.chainId !== before?.chainId,
+  wallet: after?.provider !== before?.provider,
+});
 export const subscribeEvmWallet = (listener) => {
   listeners.add(listener);
   listener(state());

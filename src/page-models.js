@@ -149,14 +149,16 @@ export function revokeReview(route, { cfg, evm, feeWei = null, reads, walletName
  * this address and chain here (`takes`). On the receipt of a transfer to that
  * chain once it arrived there, at the wallet's own address; on the way back's
  * form (`wayBack`: a route out pays DUSK on its chain) while the wallet holds
- * none. Null elsewhere.
+ * none. Once this visit added it (`added`), what's there in its place:
+ * "DUSK added to MetaMask." Null elsewhere.
  */
-export function addDuskOffer(route, { balanceWei = null, entry = null, evm = null, status = "", takes = false, wayBack = false }) {
-  if (!takes || !evm?.account) return null;
+export function addDuskOffer(route, { added = false, balanceWei = null, entry = null, evm = null, status = "", takes = false, wayBack = false }) {
+  if (!(takes || added) || !evm?.account) return null;
   const arrived = Boolean(entry) && route.mode === "service-transfer" && status === "completed" && String(entry.destination ?? "").toLowerCase() === evm.account.toLowerCase();
   const holdsNone = !entry && route.mode === "migration" && wayBack && balanceWei === 0n;
   if (!arrived && !holdsNone) return null;
-  return { label: `Add DUSK to ${evmWalletName(evm)}`, network: holdsNone ? route.from.id : route.to.id };
+  const network = holdsNone ? route.from.id : route.to.id;
+  return added ? { added: `DUSK added to ${evmWalletName(evm)}.`, network } : { label: `Add DUSK to ${evmWalletName(evm)}`, network };
 }
 
 /** Who does what, in one line: the route's steps and the wallets they take. */
@@ -425,7 +427,7 @@ function ledgerRows(entry, { approvalSpentBy = false, cfg, evm = null, from, loc
  * `approvalSpentBy`, for one cancelled in the wallet, the migration that
  * spent its approval since (false for none, null while that's being read).
  * `wallet` is the connected EVM wallet, with whether it takes adding DUSK of
- * the transfer's chain (`addsDusk`).
+ * the transfer's chain (`addsDusk`), and whether this visit added it (`addedDusk`).
  */
 export function receiptModel(entry, { approvalSpentBy = false, cfg, evm = null, gasPrice = 1n, locale, now = Date.now(), own = null, owner = own?.account ?? "", route, submitter = null, timeZone, timing, url, wallet = null }) {
   const view = transferView(entry, { account: own?.account ?? "", cfg, locale, name: own?.name ?? "", now, owner, route, submitter, timeZone, timing, year: true });
@@ -490,7 +492,7 @@ export function receiptModel(entry, { approvalSpentBy = false, cfg, evm = null, 
   return {
     actionFee: view.action ? `Network fee up to ${formatMaxFee(stepMax)} DUSK, from your public balance` : "",
     // Arrived at the connected EVM wallet: it can show the DUSK.
-    addDusk: addDuskOffer(route, { entry, evm: wallet, status: view.status, takes: Boolean(wallet?.addsDusk) }),
+    addDusk: addDuskOffer(route, { added: Boolean(wallet?.addedDusk), entry, evm: wallet, status: view.status, takes: Boolean(wallet?.addsDusk) }),
     // It comes by itself, so there's something to be told of. A withdrawal comes when you claim it.
     arrives: view.status === "pending" && route.mode !== "duskevm-withdrawal",
     caption,

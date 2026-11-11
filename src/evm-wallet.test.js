@@ -329,6 +329,24 @@ test("Add DUSK pressed: the offer is drawn again whatever the wallet answers, an
   delete globalThis.ethereum;
 });
 
+test("DUSK added from the page is said only to the wallet that took it: not to Rabby, connected after MetaMask at the same address", async () => {
+  const { createDuskAdded } = await import("./dusk-offer.js");
+  const bsc = { chainId: 56, chainName: "BNB Smart Chain", tokenContract: "0xB2BD0749DBE21f623d9BABa856D3B0f0e1BFEc9C" };
+  const account = "0x7cDB9a22003e4f89Bc7560C789b815F9a0578e73";
+  const metaMask = { isMetaMask: true, request: async () => null };
+  const rabby = { isRabby: true, request: async () => null };
+  const added = createDuskAdded();
+  assert.equal(added.has(bsc, { account, provider: metaMask }), false);
+  added.remember(bsc, { account, provider: metaMask });
+  // The wallet that took it, its address as any case writes it.
+  assert.equal(added.has(bsc, { account: account.toLowerCase(), provider: metaMask }), true);
+  // Not another wallet at that address, nor another address, nor another chain.
+  assert.equal(added.has(bsc, { account, provider: rabby }), false);
+  assert.equal(added.has(bsc, { account: "0x3E5B8223e638CB414BEF8CF95393460cA1C3a11d", provider: metaMask }), false);
+  assert.equal(added.has({ ...bsc, chainId: 1 }, { account, provider: metaMask }), false);
+  assert.equal(added.has(bsc, null), false);
+});
+
 test("a wallet that can't switch chain from the page keeps the offer, and adds DUSK once the person picks the chain in it", async () => {
   const bsc = { chainId: 56, chainName: "BNB Smart Chain", rpcUrl: "https://bsc-rpc.publicnode.com", tokenContract: "0xB2BD0749DBE21f623d9BABa856D3B0f0e1BFEc9C" };
   for (const code of [4200, -32601]) {
@@ -354,4 +372,16 @@ test("a wallet that can't switch chain from the page keeps the offer, and adds D
   }
   delete globalThis.ethereum;
   delete globalThis.localStorage;
+});
+
+test("another wallet at the same address and chain counts as a change, so the page says nothing it did for the first", async () => {
+  const { evmMoved } = await import("./evm-wallet.js");
+  const account = "0x7cDB9a22003e4f89Bc7560C789b815F9a0578e73";
+  const metaMask = { isMetaMask: true, request: async () => null };
+  const rabby = { isRabby: true, request: async () => null };
+  const before = { account, chainId: 56, provider: metaMask };
+  assert.deepEqual(evmMoved(before, { account, chainId: 56, provider: metaMask }), { account: false, chain: false, wallet: false });
+  assert.deepEqual(evmMoved(before, { account, chainId: 56, provider: rabby }), { account: false, chain: false, wallet: true });
+  assert.deepEqual(evmMoved(before, { account, chainId: 1, provider: metaMask }), { account: false, chain: true, wallet: false });
+  assert.deepEqual(evmMoved(before, { account: null, chainId: 56, provider: null }), { account: true, chain: false, wallet: true });
 });

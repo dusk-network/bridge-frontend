@@ -118,7 +118,10 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   then, and it stays chosen on this device. Whoever isn't looking at the page
   when one ends gets that, and the tab's title says so until they're back; where
   notifications are refused or a page can't send them, as on most phones, it's
-  the title alone, and the receipt says so. A withdrawal waiting for
+  the title alone, and the receipt says so. A transfer's end is told, to
+  screen readers and in the title, only for one the page saw on its way: sent
+  from it, or still on its way when it checked; old ones found as the page
+  opens are listed, not read out. A withdrawal waiting for
   its claim counts down, says when a clock change falls inside the wait, and
   offers an .ics file made in the browser ("Add to calendar"). A transfer to
   BNB Smart Chain that arrived at the connected EVM wallet offers "Add DUSK to
@@ -126,7 +129,8 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   the network file's token, DUSK, 18 decimals), as the way back's form does
   beside the balance while the wallet holds none. Only a wallet that takes
   the request is offered it; one that added DUSK isn't offered it again for
-  that address and chain in this browser, and a refusal says nothing.
+  that address and chain in this browser, and a refusal says nothing. Once
+  it's added, "DUSK added to MetaMask." takes the offer's place for the visit.
 - **My transfers**: the connected accounts' transfers, read from the networks
   (below), plus any sent or looked up on this device, each with whom it pays
   and its transaction's short hash. A withdrawal under way that pays another
