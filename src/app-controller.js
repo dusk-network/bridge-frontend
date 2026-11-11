@@ -21,7 +21,7 @@ import { depositRequest } from "./dusk-deposit.js";
 import { createDuskAdded, createDuskOffer } from "./dusk-offer.js";
 import { createDuskConnection, ensureDuskConnected, sendDuskContractCall, sendDuskTransfer } from "./dusk-wallet.js";
 import { duskEvmNetwork, submitDuskEvmWithdrawal } from "./duskevm-withdrawal.js";
-import { addDusk, canAddDusk, connectEvmWallet, ensureEvmChain, getEvmState, initializeEvmWallet, subscribeEvmWallet } from "./evm-wallet.js";
+import { addDusk, canAddDusk, connectEvmWallet, ensureEvmChain, evmMoved, getEvmState, initializeEvmWallet, subscribeEvmWallet } from "./evm-wallet.js";
 import { createFormReads } from "./form-reads.js";
 import { amountForInput, formatLux, formatDuskPlain } from "./format.js";
 import { approveMigration, minedAs, revokeMigration, submitMigration } from "./legacy-migration.js";
@@ -2019,9 +2019,11 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         if (changed || !isCardPage()) renderMain();
       });
       subscribeEvmWallet((next) => {
-        const chainChanged = next.chainId !== state.evmState.chainId;
-        const accountChanged = next.account !== state.evmState.account;
-        const changed = accountChanged || chainChanged;
+        const moved = evmMoved(state.evmState, next);
+        const chainChanged = moved.chain;
+        const accountChanged = moved.account;
+        // Another wallet at the same address and chain changes what the page says it did, as "DUSK added to <wallet>".
+        const changed = accountChanged || chainChanged || moved.wallet;
         state.evmState = next;
         if (accountChanged) {
           if (next.account) forgetConnectRefusal();

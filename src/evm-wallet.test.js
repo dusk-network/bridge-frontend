@@ -373,3 +373,15 @@ test("a wallet that can't switch chain from the page keeps the offer, and adds D
   delete globalThis.ethereum;
   delete globalThis.localStorage;
 });
+
+test("another wallet at the same address and chain counts as a change, so the page says nothing it did for the first", async () => {
+  const { evmMoved } = await import("./evm-wallet.js");
+  const account = "0x7cDB9a22003e4f89Bc7560C789b815F9a0578e73";
+  const metaMask = { isMetaMask: true, request: async () => null };
+  const rabby = { isRabby: true, request: async () => null };
+  const before = { account, chainId: 56, provider: metaMask };
+  assert.deepEqual(evmMoved(before, { account, chainId: 56, provider: metaMask }), { account: false, chain: false, wallet: false });
+  assert.deepEqual(evmMoved(before, { account, chainId: 56, provider: rabby }), { account: false, chain: false, wallet: true });
+  assert.deepEqual(evmMoved(before, { account, chainId: 1, provider: metaMask }), { account: false, chain: true, wallet: false });
+  assert.deepEqual(evmMoved(before, { account: null, chainId: 56, provider: null }), { account: true, chain: false, wallet: true });
+});
