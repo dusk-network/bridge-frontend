@@ -8,7 +8,7 @@ import { topGap } from "@dusk-network/app-core/history";
 import { toDuskName } from "@duskdomains/sdk/names";
 
 import { entryId, minedTransfer, readActivity, recordActivity, saveActivity, updateActivity, useActivityNetwork } from "./activity.js";
-import { NOTICE_WORDS, createArrivalNotice } from "./arrival-notice.js";
+import { NOTICE_WORDS, createArrivalNotice, createEndWatch } from "./arrival-notice.js";
 import { bridgeRoutes, getBridgeRoute } from "./bridge-routes.js";
 import { cardRoute, choosePair, entryRoutes, flipRoute, followsWallets, fromChoices, handedOverRecipient, primaryButton, routeBetween, toChoices } from "./bridge-card.js";
 import { claimReminder } from "./calendar.js";
@@ -18,7 +18,7 @@ import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js"
 import { followAfterDiscovery, mergeTransfer, mergeTransfers, partyKey } from "./discovery.js";
 import { createDiscoveryRuns } from "./discovery-runs.js";
 import { depositRequest } from "./dusk-deposit.js";
-import { createDuskOffer } from "./dusk-offer.js";
+import { createDuskAdded, createDuskOffer } from "./dusk-offer.js";
 import { createDuskConnection, ensureDuskConnected, sendDuskContractCall, sendDuskTransfer } from "./dusk-wallet.js";
 import { duskEvmNetwork, submitDuskEvmWithdrawal } from "./duskevm-withdrawal.js";
 import { addDusk, canAddDusk, connectEvmWallet, ensureEvmChain, getEvmState, initializeEvmWallet, subscribeEvmWallet } from "./evm-wallet.js";
@@ -157,6 +157,11 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       globalThis.location.hash = href;
     },
   });
+  // Whose ends are told: the transfers this visit saw on their way, so opening the page reads out no old arrivals.
+  const ends = createEndWatch();
+  // DUSK added to the EVM wallet from this page this visit, by chain, address and wallet: said where its offer was.
+  const duskAdded = createDuskAdded();
+  const duskAddedTo = (network) => duskAdded.has(network, state.evmState);
   // How the card's route is doing. It's only said: nothing waits for it.
   const routeStatus = createRouteStatus({ onChange: () => refreshForm(), read: (route) => services.status(route) });
   // The review on screen; a request prepared for it fills nothing else.
@@ -613,7 +618,13 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       // Beside the balance of the way back, while the wallet holds none: it can show the DUSK once there is some.
       addDusk:
         route.mode === "migration"
-          ? addDuskOffer(route, { balanceWei: reads.migration?.balanceWei ?? null, evm: state.evmState, takes: canAddDusk(cfg.evmNetworks[route.from.id]), wayBack: Boolean(routeBetween(routes, route.to.id, route.from.id)) })
+          ? addDuskOffer(route, {
+              added: duskAddedTo(cfg.evmNetworks[route.from.id]),
+              balanceWei: reads.migration?.balanceWei ?? null,
+              evm: state.evmState,
+              takes: canAddDusk(cfg.evmNetworks[route.from.id]),
+              wayBack: Boolean(routeBetween(routes, route.to.id, route.from.id)),
+            })
           : null,
       // What the migration contract may still take, as the chain says, and the word once it's revoked.
       approval: approvalOpen(route),
@@ -730,17 +741,14 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   // -------------------------------------------------------------------------
 
   function setActivity(list) {
-    const before = new Map(state.activity.map((entry) => [entry.id, entry.status]));
+    const before = state.activity;
     state.activity = list;
-    for (const entry of list) {
-      const previous = before.get(entry.id);
-      if (previous && previous !== entry.status && entry.status !== "pending") {
-        const route = routeOf(entry.routeId);
-        if (route) {
-          const { title } = transferView(entry, { cfg, route });
-          announce(`${title}.`);
-          arrivals.ended({ href: transferHref(entry.hash), id: entry.id, title });
-        }
+    for (const entry of ends.ended(before, list)) {
+      const route = routeOf(entry.routeId);
+      if (route) {
+        const { title } = transferView(entry, { cfg, route });
+        announce(`${title}.`);
+        arrivals.ended({ href: transferHref(entry.hash), id: entry.id, title });
       }
     }
   }
@@ -759,6 +767,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
           ? updateActivity(id, { lastCheckedAt: Date.now() })
           : updateActivity(id, { ...patch, lastCheckedAt: Date.now(), parties, trackingError: null }),
       );
+      ends.checked(state.activity.find((item) => item.id === id));
     } catch (error) {
       setActivity(updateActivity(id, { lastCheckedAt: Date.now(), trackingError: error instanceof Error ? error.message : String(error) }));
     }
@@ -948,7 +957,11 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         submitter: proofSubmitterFor(duskAccount()),
         timing: timing(),
         url: receiptUrl(entry.hash),
-        wallet: { ...state.evmState, addsDusk: route.to.kind === "evm" && canAddDusk(cfg.evmNetworks[route.to.id]) },
+        wallet: {
+          ...state.evmState,
+          addedDusk: route.to.kind === "evm" && duskAddedTo(cfg.evmNetworks[route.to.id]),
+          addsDusk: route.to.kind === "evm" && canAddDusk(cfg.evmNetworks[route.to.id]),
+        },
       }),
       canAct: duskState().installed,
       notice: arrivals.state(),
@@ -1503,6 +1516,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     }
     const next = minedTransfer(state.activity, { hash, mined: found.hash, replaced: found.replaced, routeId: route.id });
     if (!next) return;
+    // Sped up, it goes by its mined hash: its end is told as the one sent here.
+    ends.moved(entryId(route.id, hash), next.id);
     setActivity(saveActivity(next.items));
     track(next.id);
     if (state.page.page !== "transfer" || canonicalHash(hash) !== state.page.hash) return;
@@ -1522,6 +1537,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   function sent(entry) {
     if (reviews.current) reviews.current.busy = false;
     closeSheet();
+    ends.sent(entryId(entry.routeId, entry.hash));
     addEntry({ ...entry, sentHere: true });
     state.form = null;
     announce("Sent. The receipt follows it from here.");
@@ -1566,18 +1582,20 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
 
   /**
    * "Add DUSK to <wallet>", pressed: drawn again whatever the wallet answers,
-   * as it then stands. Once it added DUSK, that's said; where the offer went
-   * from under the press, focus goes to the page. A refusal says nothing, and
-   * leaves the offer, and focus, where they were.
+   * as it then stands. Once it added DUSK, that's said, and shown where the
+   * offer was, which focus goes to; where the offer went from under the press
+   * otherwise, focus goes to the page. A refusal says nothing, and leaves the
+   * offer, and focus, where they were.
    */
   const duskOffer = createDuskOffer({
     add: addDusk,
-    redraw: (added) => {
+    redraw: (added, network) => {
+      if (added) duskAdded.remember(network, state.evmState);
       if (isCardPage()) refreshForm();
       else renderMain();
       if (added) announce(`DUSK added to ${evmWalletName(state.evmState)}.`);
       const focused = globalThis.document?.activeElement;
-      if (!focused || focused === globalThis.document?.body) slot("main").querySelector("#main")?.focus({ preventScroll: true });
+      if (!focused || focused === globalThis.document?.body) (slot("main").querySelector("#dusk-added") ?? slot("main").querySelector("#main"))?.focus({ preventScroll: true });
     },
   });
 

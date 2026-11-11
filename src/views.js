@@ -168,9 +168,15 @@ function primaryControl(button) {
   return `<button type="button" class="btn pri full" data-action="${html(button.action ?? "none")}" ${button.enabled ? "" : "disabled"}>${html(button.label)}</button>`;
 }
 
-/** "Add DUSK to MetaMask", for the EVM wallet to show the DUSK of a chain, in the look of where it stands. */
+/**
+ * "Add DUSK to MetaMask", for the EVM wallet to show the DUSK of a chain, in
+ * the look of where it stands; once added from here, "DUSK added to
+ * MetaMask." in its place, which focus can take.
+ */
 const addDuskButton = (offer, look) =>
-  `<button type="button" class="${look}" data-action="add-dusk" data-net="${html(offer.network)}">${html(offer.label)}</button>`;
+  offer.added
+    ? `<span class="small" id="dusk-added" tabindex="-1">${html(offer.added)}</span>`
+    : `<button type="button" class="${look}" data-action="add-dusk" data-net="${html(offer.network)}">${html(offer.label)}</button>`;
 
 /**
  * Above the way back's form, an approval not used up, as the chain says it:

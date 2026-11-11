@@ -703,6 +703,24 @@ test("a transfer to the EVM chain that arrived at the connected wallet offers to
   assert.doesNotMatch(cardRegions(cardVmFor(none))["from-foot"], /add-dusk/u);
 });
 
+test("once DUSK was added from the page, where the offer was says so on screen: Nandini's button just vanished", () => {
+  const service = T["service-transfer"];
+  const entry = { amountLux: "2053082083", destination: EVM, feeLux: "1859281", hash: "ab".repeat(32), id: "s", receivedLux: "1053082083", routeId: service.id, status: "completed" };
+  // Added: the wallet takes it no more, and this visit added it.
+  const wallet = { account: EVM.toLowerCase(), addedDusk: true, addsDusk: false, walletName: "Test MetaMask" };
+  const receipt = (patch = {}, on = wallet) => receiptPage(receiptModel({ ...entry, ...patch }, { cfg: testnet, route: service, url: "x", wallet: on }));
+  assert.match(receipt(), /<\/ol><\/div><div class="action-box"><span class="small" id="dusk-added" tabindex="-1">DUSK added to Test MetaMask\.<\/span><\/div><\/section>/u);
+  assert.doesNotMatch(receipt(), /add-dusk/u);
+  // Only where it was offered: not before it arrived, nor at another address, nor once another visit added it.
+  assert.doesNotMatch(receipt({ receivedLux: undefined, status: "pending" }), /dusk-added/u);
+  assert.doesNotMatch(receipt({ destination: "0x3E5B8223e638CB414BEF8CF95393460cA1C3a11d" }), /dusk-added/u);
+  assert.doesNotMatch(receipt({}, { ...wallet, addedDusk: false }), /dusk-added|add-dusk/u);
+  // The way back's form, beside the balance.
+  const none = { canMax: false, from: { balance: "0 ERC20 DUSK", balanceLabel: "Balance", net: { id: "ethereum", name: "Sepolia" } } };
+  const added = addDuskOffer(T.migration, { added: true, balanceWei: 0n, evm: wallet, wayBack: true });
+  assert.match(cardRegions(cardVmFor({ ...none, addDusk: added }))["from-foot"], /<span class="num">0 ERC20 DUSK<\/span><span class="small" id="dusk-added" tabindex="-1">DUSK added to Test MetaMask\.<\/span><\/span>$/u);
+});
+
 test("a receipt on its way offers to tell you when it arrives, and says what happens where that's refused", () => {
   const url = "https://bridge.example.org/#/transfer/n";
   const sent = { amountLux: "25000000000", destination: EVM, hash: "0e".repeat(32), id: "n", routeId: "dusk-to-dusk-evm", sender: ACCOUNT, status: "pending" };

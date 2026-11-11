@@ -82,3 +82,36 @@ export function createArrivalNotice({ available = () => true, onOpen = () => {} 
     },
   });
 }
+
+/**
+ * Which transfers' ends a visit tells of, aloud and in the tab's title: those
+ * it saw on their way, sent from the page or found still on their way by one
+ * of its checks. One that had ended by its first look this visit, as an old
+ * transfer discovery finds, or one that arrived while the page was closed, is
+ * said on its receipt and in the list, and isn't read out as news.
+ */
+export function createEndWatch() {
+  const onTheirWay = new Set();
+  return Object.freeze({
+    /** Sent from this page: its end is told, whenever it comes. */
+    sent(id) {
+      onTheirWay.add(id);
+    },
+    /** It goes by another ID now, as a migration sped up in the wallet by its mined hash: still watched, if it was. */
+    moved(from, to) {
+      if (onTheirWay.has(from)) onTheirWay.add(to);
+    },
+    /** A check read it as it now stands: still on its way, its end will be told. */
+    checked(entry) {
+      if (entry?.status === "pending") onTheirWay.add(entry.id);
+    },
+    /** The transfers of `after` that ended since `before`, of those seen on their way. */
+    ended(before, after) {
+      const was = new Map(before.map((entry) => [entry.id, entry.status]));
+      return after.filter((entry) => {
+        const previous = was.get(entry.id);
+        return Boolean(previous) && previous !== entry.status && entry.status !== "pending" && onTheirWay.has(entry.id);
+      });
+    },
+  });
+}
