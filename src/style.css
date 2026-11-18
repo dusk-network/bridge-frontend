@@ -336,6 +336,10 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 .token .cm { width: 28px; height: 28px; }
 .token .cm svg.glyph, .token .cm .mk-svg { width: 15px; height: 15px; }
 .token .evm-tag { display: none; }
+.tokbtn { gap: 6px; padding-right: 10px; border: 0; color: var(--text); }
+.tokbtn:hover { background: var(--surface-2); }
+.tokbtn > svg.ic { width: 15px; height: 15px; color: var(--text-2); }
+.netopt .tk { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 999px; background: var(--surface-3); font-size: 13px; font-weight: 600; }
 .panel-f { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 22px; margin-top: 8px; color: var(--text-2); font-size: 13px; }
 .panel-f .mini { height: 24px; padding: 0 10px; font-size: 12.5px; }
 .bal { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
@@ -662,7 +666,7 @@ form.group .l1 { display: block; color: var(--text); font-size: 14px; font-weigh
   .act .trs .pair .cm { width: 26px; height: 26px; }
   .act-h { flex-direction: column; }
   /* Everything a thumb presses is 44 px each way, as in the web wallet. */
-  .skip, .hdr-r .net, .hdr-r .wpill, .tab, .netbtn, .btn.sm, .btn.xs { height: 44px; }
+  .skip, .hdr-r .net, .hdr-r .wpill, .tab, .netbtn, .tokbtn, .btn.sm, .btn.xs { height: 44px; }
   .panel-f .mini { min-width: 44px; height: 44px; }
   .brand { min-width: 44px; }
   .bcard-top .icon-btn, .icon-btn, .icon-btn.round { width: 44px; height: 44px; }

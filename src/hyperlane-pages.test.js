@@ -7,7 +7,8 @@ import { groupTransfers } from "./discovery.js";
 import { duskRecipientHash } from "./hyperlane.js";
 import { balanceLine, receiptModel, reviewChecks, routeLine, routeSteps, transfersModel } from "./page-models.js";
 import { buildQuote } from "./quote.js";
-import { receiptPage, transferRow } from "./views.js";
+import { cardPage, cardRegions, receiptPage, transferRow } from "./views.js";
+import { tokenChoices } from "./bridge-card.js";
 
 globalThis.__DUSK_BRIDGE_CONFIG__ = { VITE_BRIDGE_PROFILE: "testnet" };
 const cfg = loadConfig();
@@ -178,4 +179,102 @@ test("a Hyperlane route's row, steps and checks say its time, its fees' coin, an
       [true, "It goes to 0x8A51…B75d on Sepolia, your MetaMask"],
     ],
   );
+});
+
+test("the card offers the pair's tokens beside the amount, and what the routes hold for the account above it", () => {
+  const route = byId["dusk-to-sepolia-eurd"];
+  const quote = buildQuote(route, "10", { balance: 20_000_000_000n, cfg, gasPrice: 1n, hyperlane: { allowance: 0n, fee: 16_876_000_000n, tokenBalance: 49_805_396_789n } });
+  const vm = {
+    amount: "10",
+    amountError: "",
+    button: { action: "review", enabled: true, label: "Review bridge" },
+    canFlip: true,
+    canMax: true,
+    error: "",
+    escrow: { held: [{ amount: "10 USDd", route: "sepolia-to-dusk-usdd", sent: "" }, { amount: "2 DUSK", route: "sepolia-to-dusk", sent: "Claim sent, waiting for Dusk." }] },
+    from: { balance: "49,805.3967 EURd", balanceLabel: "Balance", net: { id: "dusk", name: "Dusk" } },
+    fromChoices: [],
+    menu: null,
+    needsCount: 0,
+    notice: null,
+    privacy: "Public on Dusk and Sepolia, and linked: your Dusk account xGX8tZ…zQjkw9, 0x8A51…B75d and the amount.",
+    quote,
+    receive: "10",
+    receiveUnit: "EURd",
+    routeLine: routeLine(route, cfg, { fee: 16_876_000_000n, steps: quote.steps }),
+    routeOpen: false,
+    steps: routeSteps(route, quote),
+    tab: "bridge",
+    to: { editing: false, error: "", fix: "", input: "", label: "Recipient on Sepolia", line: "to your MetaMask", looking: "", net: { id: "ethereum", name: "Sepolia" }, placeholder: "0x…", resolved: null },
+    toChoices: [],
+    tokens: tokenChoices(buildRoutes(cfg), route),
+    unit: "EURd",
+  };
+  const page = cardPage(vm);
+  assert.match(page, /<button type="button" class="token tokbtn" data-action="open-menu" data-side="token" aria-haspopup="listbox" aria-expanded="false" aria-label="Token: EURd\. Choose the token">/u);
+  const open = cardPage({ ...vm, menu: "token" });
+  assert.match(open, /<div class="netmenu" role="listbox" aria-label="Token">/u);
+  assert.deepEqual([...open.matchAll(/data-action="pick-token" data-route="([^"]+)" aria-selected="(true|false)"/gu)].map((match) => [match[1], match[2]]), [
+    ["dusk-to-sepolia", "false"],
+    ["dusk-to-sepolia-eurd", "true"],
+    ["dusk-to-sepolia-usdd", "false"],
+  ]);
+  // One token on the pair: no choice, the token as it was.
+  assert.match(cardPage({ ...vm, tokens: [] }), /<span class="token"><span class="cm/u);
+  // What waits for the account, with Claim, or the claim sent in its place.
+  const { escrow, route: row } = cardRegions(vm);
+  assert.match(escrow, /<b>Waiting for you on Dusk:<\/b> <span class="num">10 USDd and 2 DUSK<\/span>\. The bridge holds the first transfer to an account until it&#039;s claimed\.<\/span>/u);
+  assert.match(escrow, /<button type="button" class="btn sec sm" data-action="escrow-claim" data-route="sepolia-to-dusk-usdd">Claim 10 USDd<\/button><span class="small t2">Claim sent, waiting for Dusk\.<\/span>/u);
+  assert.equal(cardRegions({ ...vm, escrow: null }).escrow, "");
+  // Another account's, typed or handed over: claimed for it.
+  const other = cardRegions({ ...vm, escrow: { held: [{ account: ACCOUNT, amount: "10 USDd", route: "sepolia-to-dusk-usdd", sent: "" }], link: "", owner: "xGX8tZ…zQjkw9" } }).escrow;
+  assert.match(other, /<b>Waiting for xGX8tZ…zQjkw9 on Dusk:<\/b> <span class="num">10 USDd<\/span>\. The bridge holds the first transfer to an account until it&#039;s claimed\. You can claim it for that account, paying only the network fee\./u);
+  assert.match(other, new RegExp(`data-action="escrow-claim" data-route="sepolia-to-dusk-usdd" data-account="${ACCOUNT}">Claim 10 USDd for it</button>`, "u"));
+  // Without DUSK for its own claim's fee: the link another account claims it with, in place of Claim.
+  const link = "https://bridge.test/#/move/sepolia-to-dusk-usdd?to=" + ACCOUNT;
+  const stuck = cardRegions({ ...vm, escrow: { held: [{ account: "", amount: "10 USDd", route: "sepolia-to-dusk-usdd", sent: "" }], link, owner: "" } }).escrow;
+  assert.match(stuck, /Your account has no DUSK for the claim&#039;s fee: another Dusk account can claim it for yours with this page&#039;s link\./u);
+  assert.ok(stuck.includes(`data-copy="${link}"`) && !stuck.includes("escrow-claim"), stuck);
+  assert.match(row, /~20 s · two wallet steps · 16\.876 DUSK bridge fee/u);
+  assert.match(row, /Approve, then send, in Dusk Wallet/u);
+  assert.match(page, /data-region="escrow"/u);
+});
+
+test("where Sepolia's own DUSK route runs beside Hyperlane's, the token list says what each DUSK arrives as", () => {
+  globalThis.__DUSK_BRIDGE_CONFIG__ = { VITE_BRIDGE_PROFILE: "testnet", VITE_PAUSED_ROUTES: "none" };
+  const running = loadConfig();
+  delete globalThis.__DUSK_BRIDGE_CONFIG__;
+  const all = buildRoutes(running);
+  const route = all.find((each) => each.id === "dusk-to-sepolia");
+  const page = cardPage({
+    amount: "",
+    amountError: "",
+    button: { action: "review", enabled: false, label: "Enter an amount" },
+    canFlip: true,
+    canMax: false,
+    error: "",
+    escrow: null,
+    from: { balance: "", balanceLabel: "Public balance", net: { id: "dusk", name: "Dusk" } },
+    fromChoices: [],
+    menu: "token",
+    needsCount: 0,
+    notice: null,
+    privacy: "",
+    quote: buildQuote(route, "", { balance: null, cfg: running, gasPrice: 1n, hyperlane: {} }),
+    receive: "",
+    receiveUnit: "DUSK",
+    routeLine: "",
+    routeOpen: false,
+    steps: [],
+    tab: "bridge",
+    to: { editing: false, error: "", fix: "", input: "", label: "Recipient on Sepolia", line: "", looking: "", net: { id: "ethereum", name: "Sepolia" }, placeholder: "0x…", resolved: null },
+    toChoices: [],
+    tokens: tokenChoices(all, route),
+    unit: "DUSK",
+  });
+  const options = [...page.matchAll(/data-action="pick-token" data-route="([^"]+)"[^>]*>.*?<span class="nm">([^<]+)<\/span><span class="sb">([^<]+)<\/span>/gu)].map((match) => [match[1], match[2], match[3]]);
+  assert.deepEqual(options.slice(0, 2), [
+    ["dusk-to-ethereum", "DUSK", "Dusk · Arrives as ERC20 DUSK"],
+    ["dusk-to-sepolia", "DUSK", "Dusk · Arrives as DUSK"],
+  ]);
 });

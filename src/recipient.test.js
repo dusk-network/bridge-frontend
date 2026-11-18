@@ -79,3 +79,23 @@ test("a typed EVM recipient takes its checksum's capitals once it's a whole addr
   assert.equal(settledEvmRecipient("0x5a3d8e"), "0x5a3d8e");
   assert.equal(settledEvmRecipient(MIXED), MIXED);
 });
+
+test("on Hyperlane's EVM chain, every contract in its book is no recipient, whichever of its tokens a deployment runs", async () => {
+  const { loadConfig } = await import("./config.js");
+  const { evmBridgeContracts } = await import("./recipient.js");
+  globalThis.__DUSK_BRIDGE_CONFIG__ = { VITE_BRIDGE_PROFILE: "testnet", VITE_HYPERLANE_TOKENS: "dusk" };
+  let cfg;
+  try {
+    cfg = loadConfig();
+  } finally {
+    delete globalThis.__DUSK_BRIDGE_CONFIG__;
+  }
+  // DUSK alone runs: EURd's and USDd's Sepolia tokens, and the Mailbox, are still Hyperlane's contracts.
+  const running = cfg.hyperlane.tokens.map((token) => token.evm.token.toLowerCase());
+  const others = cfg.hyperlane.evmContracts.filter((address) => !running.includes(address.toLowerCase()));
+  assert.equal(others.length, 3);
+  const contracts = evmBridgeContracts(cfg, cfg.hyperlane.network);
+  for (const address of [...cfg.hyperlane.evmContracts, ...others]) assert.equal(checkEvmRecipient(address, { bridgeContracts: contracts }).error, BRIDGE_CONTRACT_RECIPIENT);
+  // A person's address is still one.
+  assert.equal(checkEvmRecipient(getAddress(MIXED.toLowerCase()), { bridgeContracts: contracts }).address, getAddress(MIXED.toLowerCase()));
+});

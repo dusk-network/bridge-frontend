@@ -13,6 +13,8 @@ import { createDuskNames } from "./dusk-names.js";
 import { createDuskNode } from "./dusk-node.js";
 import { getDuskWallet } from "./dusk-wallet.js";
 import { createEvmReads } from "./evm-reads.js";
+import { getEvmState } from "./evm-wallet.js";
+import { createHyperlaneReads } from "./hyperlane-reads.js";
 import { pageStorage } from "./page-storage.js";
 import { resolveTransfer } from "./resolve.js";
 import { createTracking } from "./tracking.js";
@@ -130,11 +132,16 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
     },
   };
 
+  // Hyperlane's routes, where the network has them: Dusk through this node,
+  // their EVM chain through the EVM wallet while it's on that chain.
+  const hyperlane = cfg.hyperlane?.enabled ? createHyperlaneReads({ cfg, loadDriver, node, rpc, wallet: () => getEvmState() }) : null;
+
   const clients = new Map();
   const tracking = createTracking({
     archive,
     cache: kept,
     config: cfg,
+    hyperlane,
     node,
     receiptClient: (network) => {
       if (!clients.has(network))
@@ -162,15 +169,21 @@ export function createServices(cfg = config, { fetchDriver } = {}) {
   return Object.freeze({
     discovery,
     evmReads,
+    hyperlane,
     // The connected account's verified .dusk name, where Dusk Wallet sends none.
     names: createDuskNames({ chainId: cfg.dusk.chainId, nodeUrl: cfg.dusk.nodeUrl }),
     node,
     resolve: (hash) => resolveTransfer(hash, { cfg, node, rpc }),
     rpc,
     rpcBatch,
-    /** How a route is doing before someone sends: from this deployment's own endpoints. */
+    /**
+     * How a route is doing before someone sends: from this deployment's own
+     * endpoints. Hyperlane's routes have no payout to read it from.
+     */
     status: (route) =>
-      bridgeStatus({
+      route.mode === "hyperlane"
+        ? Promise.resolve(null)
+        : bridgeStatus({
         archive,
         cache: kept,
         network: statusNetwork,
