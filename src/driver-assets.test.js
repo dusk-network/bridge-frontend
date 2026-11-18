@@ -30,6 +30,22 @@ test("bundled data drivers match their reviewed artifacts", async () => {
     assert.equal(createHash("sha256").update(await read(url)).digest("hex"), sha256);
 });
 
+test("the Hyperlane driver is the one built from hyperlane-dusk at ef912e9, and reads what the routes emit", async () => {
+  globalThis.__DUSK_BRIDGE_CONFIG__ = { VITE_BRIDGE_PROFILE: "testnet" };
+  const { hyperlane } = loadConfig();
+  delete globalThis.__DUSK_BRIDGE_CONFIG__;
+  assert.deepEqual(hyperlane.driver, {
+    sha256: "bd4f3025efaf38135b1d72297d73f23e83c3ca7ebfdf29ea454d9f83c4c37eef",
+    url: "/drivers/hyperlane_dusk_data_driver.wasm",
+  });
+  const fetch = async (url) => new Response(await read(url));
+  const driver = await createDriverLoader({ fetch })(hyperlane.driver.url, hyperlane.driver.sha256);
+  // Live transaction 86123720…'s `dispatch_id` event, from the Mailbox: its message ID.
+  const id = "ed2cb1330bb4746d16af2e23b0d68272a74c890459bd4702352de0b294d1213b";
+  assert.equal(toHex(Uint8Array.from(driver.decodeEvent("dispatch_id", Uint8Array.from(Buffer.from(id, "hex"))).message_id)), id);
+  assert.equal(driver.decodeOutputFn("quote_transfer_remote", Uint8Array.from([0x00, 0x53, 0xe3, 0xed, 0x03, 0, 0, 0])), "16876000000");
+});
+
 test("a driver is only run when it matches its pinned hash", async () => {
   const fetch = async (url) => new Response(await read(url));
   const load = createDriverLoader({ fetch });

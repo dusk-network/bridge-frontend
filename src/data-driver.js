@@ -119,6 +119,9 @@ export async function loadDataDriver(bytes) {
       JSON.parse(decoder.decode(twoInputs("decode_output_fn", fnName, bytes))),
     decodeInputFn: (fnName, bytes) =>
       JSON.parse(decoder.decode(twoInputs("decode_input_fn", fnName, bytes))),
+    // An event's data, by its topic, as the contract emitted it.
+    decodeEvent: (topic, bytes) =>
+      JSON.parse(decoder.decode(twoInputs("decode_event", topic, bytes))),
   });
 }
 
