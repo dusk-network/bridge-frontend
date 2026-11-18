@@ -26,8 +26,13 @@ export const tokenName = (id) => (id === "bsc" ? "BEP20 DUSK" : "ERC20 DUSK");
 /** What a network holds of DUSK: ERC20 or BEP20 DUSK on Ethereum and BNB Smart Chain, DUSK on Dusk and DuskEVM. */
 const unitOn = (side) => (side.kind === "evm" && side.id !== "dusk-evm" ? tokenName(side.id) : "DUSK");
 
-/** What a route takes and pays: "ERC20 DUSK" in, "DUSK" out, for a migration from Ethereum. */
-export const routeUnits = (route) => ({ receive: unitOn(route.to), send: unitOn(route.from) });
+/**
+ * What a route takes and pays: "ERC20 DUSK" in, "DUSK" out, for a migration
+ * from Ethereum. A Hyperlane route moves its token by its own symbol on both
+ * sides: "EURd" in, "EURd" out.
+ */
+export const routeUnits = (route) =>
+  route.mode === "hyperlane" ? { receive: route.token.symbol, send: route.token.symbol } : { receive: unitOn(route.to), send: unitOn(route.from) };
 
 /** The name of a network by id: "dusk", "dusk-evm", "ethereum" or "bsc". */
 export const networkName = (cfg, id) => networkNames(cfg)[id] ?? String(id);
@@ -61,14 +66,16 @@ export const notRunning = (cfg) => `Not running on ${networkNames(cfg).badge.toL
  * The bridge's three routes: BNB Smart Chain ↔ Dusk, one route
  * both ways; Ethereum → Dusk, one way, since the ERC20 contract can't mint;
  * and Dusk ↔ DuskEVM. Each lists its directions, the way into Dusk first
- * (or out to DuskEVM); a link to the route opens the first.
+ * (or out to DuskEVM); a link to the route opens the first that runs. A
+ * chain Hyperlane reaches has its routes there too: Sepolia ↔ Dusk on
+ * testnet, each token both ways.
  */
 export function bridgeTasks(cfg, routes) {
   const names = networkNames(cfg);
   const tasks = [];
   const chain = (id) => {
-    const into = routes.filter((route) => route.mode === "migration" && route.from.id === id);
-    const out = routes.filter((route) => route.mode === "service-transfer" && route.to.id === id);
+    const into = routes.filter((route) => (route.mode === "migration" || route.mode === "hyperlane") && route.from.id === id);
+    const out = routes.filter((route) => (route.mode === "service-transfer" || route.mode === "hyperlane") && route.to.id === id);
     if (!into.length && !out.length) return;
     const both = into.length && out.length;
     tasks.push({

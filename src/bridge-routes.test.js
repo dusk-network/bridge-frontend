@@ -27,12 +27,24 @@ test("each route delegates signing to its source wallet", () => {
   for (const route of routes) assert.equal(route.signer, route.from.kind);
 });
 
-test("every route moves whole Lux, the precision Dusk holds", () => {
-  const modes = new Set(["migration", "service-transfer", "duskevm-deposit", "duskevm-withdrawal"]);
+test("every route of DUSK moves whole Lux, the precision Dusk holds, and Hyperlane's tokens their own decimals", () => {
+  const modes = new Set(["migration", "service-transfer", "duskevm-deposit", "duskevm-withdrawal", "hyperlane"]);
   for (const route of routes) {
     assert.ok(modes.has(route.mode));
-    assert.equal(route.amountDecimals, 9);
+    assert.equal(route.amountDecimals, route.token.decimals);
+    if (route.token.symbol === "DUSK") assert.equal(route.amountDecimals, 9);
   }
+  assert.deepEqual(
+    routes.filter((route) => route.mode === "hyperlane").map((route) => [route.id, route.token.symbol, route.amountDecimals, route.signer]),
+    [
+      ["dusk-to-sepolia", "DUSK", 9, "dusk"],
+      ["sepolia-to-dusk", "DUSK", 9, "evm"],
+      ["dusk-to-sepolia-eurd", "EURd", 6, "dusk"],
+      ["sepolia-to-dusk-eurd", "EURd", 6, "evm"],
+      ["dusk-to-sepolia-usdd", "USDd", 6, "dusk"],
+      ["sepolia-to-dusk-usdd", "USDd", 6, "evm"],
+    ],
+  );
 });
 
 test("routes can be selected by their stable identifier", () => {

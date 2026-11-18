@@ -102,6 +102,8 @@ test("the testnet profile stays on Dusk testnet, Sepolia and DuskEVM testnet", (
       "Dusk → Sepolia",
       "Dusk → DuskEVM",
       "DuskEVM → Dusk",
+      // Hyperlane's, DUSK, EURd and USDd each way.
+      ...Array(3).fill(["Dusk → Sepolia", "Sepolia → Dusk"]).flat(),
     ],
   );
 });
@@ -261,7 +263,19 @@ test("a profile takes everything from its network's file: testnet runs DuskEVM w
   assert.deepEqual([cfg.duskEvm.chainId, cfg.duskEvm.rpcUrl, cfg.duskEvm.l1BridgeRpcUrl, cfg.duskEvm.depositSeconds], [745, evm.rpcUrl, evm.l1AdapterUrl, 60]);
   assert.equal(evm.l1AdapterUrl, "https://rpc.testnet.evm.dusk.network/l1");
   assert.deepEqual({ ...cfg.duskEvm.optimismPortalDriver }, { sha256: evm.drivers.optimismPortal.sha256, url: "/drivers/optimism_portal_dd_opt.wasm" });
-  assert.deepEqual(routes.map((route) => route.id), ["ethereum-to-dusk", "dusk-to-ethereum", "dusk-to-dusk-evm", "dusk-evm-to-dusk"]);
+  assert.deepEqual(routes.map((route) => route.id), [
+    "ethereum-to-dusk",
+    "dusk-to-ethereum",
+    "dusk-to-dusk-evm",
+    "dusk-evm-to-dusk",
+    // And Hyperlane's, from its deployment's record.
+    "dusk-to-sepolia",
+    "sepolia-to-dusk",
+    "dusk-to-sepolia-eurd",
+    "sepolia-to-dusk-eurd",
+    "dusk-to-sepolia-usdd",
+    "sepolia-to-dusk-usdd",
+  ]);
   // Its chains, accounts and fee are the file's too.
   assert.equal(cfg.evmNetworks.ethereum.migrationContract, networks.testnet.routes.migrations[0].contract);
   assert.deepEqual([cfg.service.account, cfg.service.feeLux], [TESTNET_REGGIO_BRIDGE_ACCOUNT, 1_000_000_000n]);

@@ -55,10 +55,12 @@ export function contractGroups(cfg) {
   groups.push({ id: "networks", rows: networks, title: "Networks" });
 
   for (const task of bridgeTasks(cfg, buildRoutes(cfg))) {
-    if (task.id === "duskevm") continue;
+    // Hyperlane's routes to the same chain have a group of their own.
+    const own = task.routes.filter((route) => route.mode !== "hyperlane");
+    if (task.id === "duskevm" || !own.length) continue;
     const id = task.id;
     const network = cfg.evmNetworks[id];
-    const migrates = task.routes.some((route) => route.mode === "migration");
+    const migrates = own.some((route) => route.mode === "migration");
     const service = cfg.service?.network === id ? cfg.service : null;
     const payer = migrates ? network.payoutAccount : "";
     const rows = [
@@ -79,7 +81,7 @@ export function contractGroups(cfg) {
     if (payer && payer !== service?.account)
       rows.push(row(cfg, "dusk", "Pays out on Dusk", payer, "Only its transfers count as a migration's payout."));
     if (service?.payoutAddress) rows.push(row(cfg, id, "Pays out from", service.payoutAddress));
-    const paused = task.routes.every((route) => route.paused);
+    const paused = own.every((route) => route.paused);
     groups.push({
       docs: migrates ? cfg.links?.docs?.migration : cfg.links?.docs?.service,
       id: `route-${id}`,
