@@ -177,3 +177,98 @@ test("nothing a transaction takes is read back from a formatted amount: those fo
     assert.doesNotMatch(readFileSync(new URL(name, import.meta.url), "utf8"), formatted, name);
   }
 });
+
+// Hyperlane's routes on testnet, by ID.
+const byId = Object.fromEntries(buildRoutes(cfg).map((route) => [route.id, route]));
+const BRIDGE_FEE = 16_876_000_000n;
+
+test("an amount of a token takes its own decimals, within what one transfer carries", () => {
+  assert.deepEqual(parseAmount("95.085867", 6), { error: "", lux: 95_085_867n });
+  assert.equal(parseAmount("1.1234567", 6).error, "Use at most 6 decimals.");
+  assert.deepEqual(parseAmount("0,5", 6), { error: "", lux: 500_000n });
+  const eurd = byId["dusk-to-sepolia-eurd"];
+  assert.equal(buildQuote(eurd, "18446744073709.551616", { cfg }).error, "That's more than one transfer can carry.");
+  assert.equal(buildQuote(eurd, "18446744073709.551615", { cfg }).error, "");
+});
+
+test("DUSK to Sepolia pays the route's own quote and the network fee on top, in DUSK", () => {
+  const route = byId["dusk-to-sepolia"];
+  const quote = buildQuote(route, "1", { balance: 20n * DUSK, cfg, gasPrice: 1n, hyperlane: { fee: BRIDGE_FEE } });
+  assert.deepEqual(rows(quote), {
+    arrives: "~20 s",
+    bridge: "16.876 DUSK | on top of the amount",
+    fee: "up to 0.005 DUSK | usually about 0.0022 DUSK",
+    receive: "1 DUSK on Sepolia",
+    send: "1 DUSK",
+  });
+  assert.equal(quote.leaves, "up to 17.881 DUSK");
+  // Max leaves the bridge fee and the network fee at its limit.
+  assert.equal(quote.maxLux, 20n * DUSK - BRIDGE_FEE - 5_000_000n);
+  const over = buildQuote(route, "4", { balance: 20n * DUSK, cfg, gasPrice: 1n, hyperlane: { fee: BRIDGE_FEE } });
+  assert.deepEqual([over.insufficient, over.error], [true, "That's more than you have after the fees. You can send up to 3.119 DUSK."]);
+  // Before the route's quote is read, no fee is guessed: a dash, and no Max.
+  const unread = buildQuote(route, "1", { balance: 20n * DUSK, cfg, gasPrice: 1n });
+  assert.deepEqual([rows(unread).bridge, unread.maxLux, unread.leaves], ["— | on top of the amount", null, ""]);
+});
+
+test("EURd to Sepolia approves the route first where it can't take the amount, and pays its fees in DUSK", () => {
+  const route = byId["dusk-to-sepolia-eurd"];
+  const ctx = { balance: 20n * DUSK, cfg, gasPrice: 1n, hyperlane: { allowance: 0n, fee: BRIDGE_FEE, tokenBalance: 49_805_396_789n } };
+  const quote = buildQuote(route, "10", ctx);
+  assert.deepEqual(rows(quote), {
+    arrives: "~20 s",
+    bridge: "16.876 DUSK | paid in DUSK",
+    fee: "up to 0.008 DUSK | usually about 0.0041 DUSK, for two wallet steps",
+    receive: "10 EURd on Sepolia",
+    send: "10 EURd",
+  });
+  assert.deepEqual([quote.steps, quote.maxLux, quote.leaves], [2, 49_805_396_789n, "10 EURd and up to 16.884 DUSK"]);
+  // An approval that covers it: one step.
+  assert.equal(buildQuote(route, "10", { ...ctx, hyperlane: { ...ctx.hyperlane, allowance: 10_000_000n } }).steps, 1);
+  // More than it holds, or too little DUSK for the fees.
+  const more = buildQuote(route, "50000", ctx);
+  assert.deepEqual([more.insufficient, more.short, more.error], [true, undefined, "That's more than the 49,805.396789 EURd you have."]);
+  const poor = buildQuote(route, "10", { ...ctx, balance: 10n * DUSK });
+  assert.deepEqual([poor.insufficient, poor.short, poor.error], [true, "DUSK", "The fees take up to 16.884 DUSK, more than the 10 DUSK you have."]);
+});
+
+test("from Sepolia, one call pays the token's delivery fee as its value, in ETH", () => {
+  const route = byId["sepolia-to-dusk-usdd"];
+  const evm = { deliveryFeeWei: 132_000_000_001n, gas: 276_237n, gasCoinWei: 29_971_344_846_295_543n, priceWei: 2_000_000_000n };
+  const quote = buildQuote(route, "32.156353", { balance: 71_508_029n, cfg, evm });
+  assert.deepEqual(rows(quote), {
+    arrives: "~1 min",
+    bridge: "less than 0.000001 ETH | paid in ETH, with the transfer",
+    fee: "about 0.00055 ETH | one wallet step",
+    receive: "32.156353 USDd on Dusk",
+    send: "32.156353 USDd",
+  });
+  assert.deepEqual([quote.maxLux, quote.bridgeFeeWei, quote.evmFeeWei], [71_508_029n, 132_000_000_001n, 552_474_000_000_000n]);
+  assert.equal(buildQuote(route, "72", { balance: 71_508_029n, cfg, evm }).error, "That's more than the 71.508029 USDd in this wallet.");
+  const poor = buildQuote(route, "1", { balance: 71_508_029n, cfg, evm: { ...evm, gasCoinWei: 1_000n } });
+  assert.deepEqual([poor.short, poor.error], ["ETH", "The fees take about 0.00055 ETH, more than the 0.000000000000001 ETH in this wallet."]);
+  // Unread, the fees are said in what pays them.
+  assert.deepEqual(rows(buildQuote(route, "1", { cfg })).fee, "paid in ETH | one wallet step");
+});
+
+test("a Hyperlane route's time is said to the 10 seconds under a minute, and what this browser's transfers took once there are two", () => {
+  const out = byId["dusk-to-sepolia-eurd"];
+  const now = Date.parse("2026-11-18T12:00:00Z");
+  const took = (seconds, minutesAgo) => ({ destinationAt: now - minutesAgo * 60_000 + seconds * 1_000, routeId: out.id, sourceAt: now - minutesAgo * 60_000, status: "completed" });
+  assert.equal(rows(buildQuote(out, "1", { cfg, timing: { now, transfers: [took(31, 9), took(44, 5)] } })).arrives, "~50 s");
+  assert.equal(rows(buildQuote(byId["sepolia-to-dusk"], "1", { cfg, timing: { now, transfers: [] } })).arrives, "~1 min");
+});
+
+test("an approval not read yet, or not readable, decides no steps: the review waits for it, never two steps by default", () => {
+  const route = byId["dusk-to-sepolia-eurd"];
+  const ctx = { balance: 20n * DUSK, cfg, gasPrice: 1n, hyperlane: { allowance: null, fee: BRIDGE_FEE, tokenBalance: 49_805_396_789n } };
+  const reading = buildQuote(route, "10", ctx);
+  assert.deepEqual([reading.steps, reading.waiting, reading.error], [null, "reading", ""]);
+  assert.doesNotMatch(rows(reading).fee, /two wallet steps/u);
+  const failed = buildQuote(route, "10", { ...ctx, hyperlane: { ...ctx.hyperlane, allowanceFailed: true } });
+  assert.deepEqual([failed.steps, failed.waiting], [null, "failed"]);
+  // Read: one step or two, nothing to wait for.
+  assert.deepEqual([buildQuote(route, "10", { ...ctx, hyperlane: { ...ctx.hyperlane, allowance: 10_000_000n } })].map((quote) => [quote.steps, quote.waiting]), [[1, undefined]]);
+  // DUSK's route takes no approval.
+  assert.equal(buildQuote(byId["dusk-to-sepolia"], "1", { ...ctx, hyperlane: { fee: BRIDGE_FEE } }).waiting, undefined);
+});

@@ -154,9 +154,11 @@ export function flipRoute(routes, route) {
 /**
  * The card's one button, as the state stands: what it says, whether it can
  * be pressed, and what it does then ("review", "connect-dusk", "connect-evm",
- * "switch-chain", or "get-dusk", a link to Dusk Wallet). A paused route sends
- * nothing. `switchTo` names the chain a route sends from, where the wallet
- * that signs it is on another, and `switching` says the wallet was asked.
+ * "switch-chain", "read-again", or "get-dusk", a link to Dusk Wallet). A
+ * paused route sends nothing. `switchTo` names the chain a route sends from,
+ * where the wallet that signs it is on another, and `switching` says the
+ * wallet was asked. `waiting` is a route's approval not read yet ("reading")
+ * or that couldn't be read ("failed"): the steps aren't known.
  */
 export function primaryButton({
   amountLux = null,
@@ -173,6 +175,7 @@ export function primaryButton({
   switchTo = "",
   switching = false,
   unit = "DUSK",
+  waiting = "",
 }) {
   if (route.paused) return { action: null, enabled: false, label: "Not running right now" };
   if (!signerConnected) {
@@ -186,6 +189,9 @@ export function primaryButton({
   if (amountLux === null) return { action: null, enabled: false, label: amountError ? "Enter a valid amount" : "Enter an amount" };
   if (insufficient) return { action: null, enabled: false, label: `Not enough ${unit}` };
   if (amountError) return { action: null, enabled: false, label: "Check the amount" };
+  // A route's approval not read yet decides how many steps there are: nothing to review until it is.
+  if (waiting === "reading") return { action: null, enabled: false, label: "Checking the approval…" };
+  if (waiting === "failed") return { action: "read-again", enabled: true, label: "Couldn't read the approval. Try again" };
   if (looking) return { action: null, enabled: false, label: `Looking up ${looking}…` };
   if (destinationError) return { action: null, enabled: false, label: "Fix the recipient" };
   if (!destination)

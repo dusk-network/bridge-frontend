@@ -92,6 +92,9 @@ test("the button says what's missing, then Review bridge", () => {
   assert.equal(label({ destination: "", looking: "alice.dusk" }), "Looking up alice.dusk…");
   assert.equal(label({ destination: "", destinationError: "That isn't an EVM address" }), "Fix the recipient");
   assert.equal(label({ destination: "" }), "Add a recipient");
+  // A route's approval not read yet: nothing to review until it is, or a way to read it again.
+  assert.deepEqual(primaryButton({ ...ready, waiting: "reading" }), { action: null, enabled: false, label: "Checking the approval…" });
+  assert.deepEqual(primaryButton({ ...ready, waiting: "failed" }), { action: "read-again", enabled: true, label: "Couldn't read the approval. Try again" });
   // No wallet to pay and none typed: the way to one, where a narrow page has no header button.
   assert.deepEqual(primaryButton({ ...ready, connectsRecipient: true, destination: "" }), {
     action: "connect-evm",
