@@ -1,7 +1,8 @@
 # Dusk Bridge
 
 A dedicated bridge dApp for moving DUSK between Ethereum, BNB Smart Chain,
-Dusk and DuskEVM.
+Dusk and DuskEVM, and on testnet DUSK, EURd and USDd between Dusk and Sepolia
+through Hyperlane.
 
 The application coordinates bridge transactions but never owns wallet keys:
 
@@ -12,8 +13,10 @@ The application coordinates bridge transactions but never owns wallet keys:
 - Reown AppKit provides browser-wallet discovery and WalletConnect when
   `VITE_REOWN_PROJECT_ID` is configured.
 - The source-chain wallet signs each transaction.
-- Chain state is read from the deployment's own Dusk node and EVM RPCs, never
-  through a wallet.
+- Chain state is read from the deployment's own Dusk node and EVM RPCs, not
+  through a wallet. Hyperlane's routes are the exception: Sepolia is read
+  through the EVM wallet while it's on Sepolia, since a public RPC can answer
+  from a block or two back.
 
 Keeping this application separate prevents the EVM bridge dependency tree from
 becoming part of the Dusk wallet extension. The extension can link here and
@@ -22,13 +25,16 @@ remain a narrowly scoped wallet and signer.
 ## Routes
 
 One deployment serves one network (`VITE_BRIDGE_PROFILE`), and every route
-stays on that network's counterparts. There are three routes:
+stays on that network's counterparts. There are three routes, and a fourth on
+testnet:
 
 - **BNB Smart Chain ↔ Dusk**, both ways: BEP20 DUSK migrates to Dusk, and
   DUSK sent to the bridge account is paid out as BEP20 DUSK;
 - **Ethereum → Dusk**, one way, since the ERC20 contract can't mint: ERC20
   DUSK migrates to Dusk;
-- **Dusk ↔ DuskEVM**, both ways, with DuskEVM's own deposit and withdrawal.
+- **Dusk ↔ DuskEVM**, both ways, with DuskEVM's own deposit and withdrawal;
+- **Dusk ↔ Sepolia through Hyperlane**, on testnet: DUSK, EURd and USDd, each
+  both ways ([Hyperlane](#hyperlane)).
 
 | Mainnet | Testnet |
 | --- | --- |
@@ -38,6 +44,8 @@ stays on that network's counterparts. There are three routes:
 | | Dusk → Sepolia, not running |
 | Dusk → DuskEVM, once DuskEVM is on mainnet | Dusk → DuskEVM |
 | DuskEVM → Dusk, once DuskEVM is on mainnet | DuskEVM → Dusk |
+| | Dusk → Sepolia through Hyperlane: DUSK, EURd, USDd |
+| | Sepolia → Dusk through Hyperlane: DUSK, EURd, USDd |
 
 Each chain has one name per network: Dusk and DuskEVM keep theirs next to the
 network badge, and Ethereum and BNB Smart Chain go by what the network's file
@@ -67,10 +75,125 @@ The app supports:
 - the ERC20/BEP20 approve-and-migrate sequence;
 - native Dusk-to-BSC transfers with a validated EVM memo;
 - native Dusk-to-DuskEVM deposits;
-- DuskEVM withdrawal initiation, proof and claim on Dusk; and
+- DuskEVM withdrawal initiation, proof and claim on Dusk;
+- Hyperlane transfers both ways, with an approval first for EURd and USDd
+  where needed, and claims of what a route holds in escrow; and
 - following every transfer to its end, with links to both explorers.
 
-Amounts move in whole Lux (9 decimals), the precision Dusk holds.
+DUSK moves in whole Lux (9 decimals), the precision Dusk holds. EURd and USDd
+move in their own 6 decimals, the same on both sides.
+
+## Hyperlane
+
+Testnet's Hyperlane deployment runs between Dusk testnet (Hyperlane domain
+1146442572) and Sepolia (11155111), with three routes: DUSK, locked in a
+native route on Dusk and minted as a token on Sepolia (9 decimals both
+sides), and EURd and USDd, issued on Dusk as canonical DRC20s and locked in a
+collateral route each (6 decimals). Sepolia is viem's `sepolia`, and the
+network file's chain with its ID, so it keeps one name, its RPC and its
+explorer. Sepolia's own routes stay listed as they were, not running.
+
+Its address book is the deployment's record,
+`deploy/out/dusk-testnet-sepolia/deployment.json` in
+[hyperlane-dusk](https://github.com/dusk-network/hyperlane-dusk), copied into
+`src/hyperlane-testnet.json` under the record's own paths, with the record's
+sha256: each side's Mailbox, Dusk's gas paymaster, and per token its route,
+its token on Dusk and its token on Sepolia. Nothing is derived.
+`node scripts/check-hyperlane-book.mjs <deployment.json>` compares the two.
+Mainnet has no deployment. The Hyperlane data driver
+(`public/drivers/hyperlane_dusk_data_driver.wasm`, built from hyperlane-dusk
+at ef912e9 with `make data-driver`) is pinned by its SHA-256 and runs only
+when it matches; it writes the routes' and Mailboxes' queries and reads their
+answers and events.
+
+On the card, a pair that moves more than one token offers them beside the
+amount; where Sepolia's own DUSK route runs too, each DUSK says what
+arrives. A transfer is checked before any wallet opens, since a Dusk call
+that fails pays its whole gas limit:
+
+- **Dusk → Sepolia**: `transfer_remote` on the token's route, its 48 bytes
+  as the routes read them (the recipient first, a 20-byte address padded to
+  32, then the domain and the amount). Its deposit is the route's own quote,
+  `quote_transfer_remote`, read as the request is built and again as it's
+  signed, and for DUSK the amount too. A quote that moved since the review
+  is shown, and nothing is sent until it's confirmed again. EURd and USDd
+  are approved for the route first, exactly the amount, only where the
+  route's allowance is short: the token's `approve`, and the transfer once
+  that's in a block; the approval's fee counts in the transfer's network fee
+  on its receipt, and its review shows the bridge fee read with it: one that
+  moved by the time it's sent is shown again first. Until the allowance is
+  read there's nothing to review, and one that couldn't be read is said,
+  with Try again: the steps are never guessed. Before each step, and again
+  as it's sent: an amount above 0 that fits a u64, a 20-byte EVM recipient,
+  the routers both ways (the route's to the book's Sepolia token, and that
+  token's `routers` for Dusk to the route) and the route's kind
+  (`state_version` 5 for DUSK's native route, 7 for a collateral route that
+  locks the book's token), read again for every request, as either owner can
+  enroll another router, the Mailbox's room for a new payer, the token held
+  and not paused, DUSK for the fees, and both steps' gas limits within
+  `VITE_GAS_LIMIT_UPPER`.
+- **Sepolia → Dusk**: `transferRemote(1146442572, recipient, amount)` on the
+  Sepolia token, which burns it, with its whole charge as the token quotes
+  it (`quoteTransferRemote`, HypERC20 12.3.0) as the call's value, read as
+  it's sent, and simulated as the page reads Sepolia. A fee in the token on
+  top of the amount, which the page can't show yet, is refused. At review
+  and again as it's sent, the routers both ways are checked, and Dusk's
+  token isn't paused, since the route couldn't pay it out. A fee that moved
+  since the review shows on all of it, its fee, checks and wallet lines, and
+  nothing is sent until it's confirmed again. The recipient is the Dusk
+  account's hash, keccak256 of its 96-byte key; the review lists the account
+  it stands for, and reads for it whether it waits for a claim. Sepolia is
+  among the chains a WalletConnect wallet is offered. A send cancelled or
+  replaced in the wallet ends there.
+- **Escrow**: a route holds the first transfer to a Dusk account until it's
+  claimed, which also registers the account, so later ones arrive directly.
+  The card shows what each route holds for the connected Dusk account
+  (`pending_balance`), with Claim: `claim_pending`, signed by that account.
+  On the way into Dusk, a recipient typed, or handed over in a link
+  (`?to=`), shows that account's instead, with Claim for it:
+  `claim_pending_for` its key, from any Dusk account, which pays only the
+  network fee. An account without DUSK for its own claim's fee is given that
+  link, for another account to claim it with. A transfer's receipt offers
+  the claim too, either way, and says it waits to be claimed. While a
+  transfer to the account is on its way, the card reads what the routes hold
+  every 15 seconds, and at once when a check finds it held. A claim is built
+  again as it's sent: what it pays out changed, it's reviewed again. Sent,
+  it's followed by its transaction, on the card and on every transfer it
+  pays out, across reloads, until that's in a block or failed, or isn't
+  found in ten minutes; meanwhile neither the card nor a receipt offers
+  another. One that failed on Dusk says so, and what it cost, on the receipt
+  and in the list. A claim of EURd or USDd isn't sent while the token is
+  paused. A transfer to an account the route doesn't pay yet
+  (`is_registered`) says so on its review and receipt.
+- **Following**: a transfer's message ID is the Mailbox's on the sending
+  side, Dusk's `dispatch_id` event in the transfer's own transaction or
+  Sepolia's `DispatchId` log in its receipt. It's on its way until the other
+  side's Mailbox says it's delivered (`delivered`), with Sepolia's
+  transaction where its `ProcessId` log is found; an RPC can trail the
+  chain, so one that arrived without it is looked at again on its receipt,
+  and while the page follows it, until it's found or 20 checks have passed.
+  Sepolia is read through the EVM wallet while it's on Sepolia, and the
+  deployment's RPC otherwise, or where the wallet can't answer the read: a
+  public RPC behind a load balancer can answer from a block or two back. A
+  call the wallet reverts is its answer, never asked of the RPC again. A
+  read that says it isn't delivered, or finds no receipt, never ends a
+  transfer, and one that arrived is only looked at again for its delivering
+  transaction, never for whether it arrived. On Dusk, the transaction that
+  delivered it is the origin of the Mailbox's `process_id` event for its
+  message, found in the blocks since the check before (`contractEvents` per
+  height) or, for one not watched, around a minute after it was sent; the
+  receipt links it. A transfer to Dusk then waits for its claim where the
+  route holds it.
+- **Times**: about 20 seconds to Sepolia and a minute back, the medians of
+  107 testnet transfers on 18 Nov 2026, until this browser's own transfers
+  say otherwise: back, to their delivery, however long a claim waited.
+  Under a minute, a time is written to the 10 seconds: "~20 s".
+- **Links**: the Dusk testnet explorer and sepolia.etherscan.io. Hyperlane's
+  own explorer doesn't index Dusk.
+
+A transfer is looked up by its hash on either side. My transfers lists those
+sent or looked up here; it doesn't read Hyperlane transfers from the
+networks yet.
 
 ## Pages
 
@@ -91,7 +214,9 @@ Amounts move in whole Lux (9 decimals), the precision Dusk holds.
   nowhere, shows above the form as an open approval, with Finish, the review
   of what it still lets go, and Revoke, an approval of 0 reviewed as any
   request is. Where it covers the amount, the route under the form says one
-  wallet step.
+  wallet step. Where a pair moves more than one token, as Hyperlane's do,
+  the token is chosen beside the amount; what Hyperlane's routes hold in
+  escrow for the account shows above the form, with Claim.
 - **Review**: what moves and what becomes public, the checked facts
   (balances, gas, where the payout goes, and the earlier approval that covers
   the amount where Approve is skipped, with what stays approved), then each
@@ -264,6 +389,7 @@ only this network's:
   route's typical time in the network's file. `VITE_ETHEREUM_MIGRATION_SECONDS`,
   `VITE_BSC_MIGRATION_SECONDS`, `VITE_SERVICE_BRIDGE_DELAY_SECONDS` and
   `VITE_DUSKEVM_DEPOSIT_SECONDS` set a deployment's own; `none` clears one.
+  Hyperlane's routes take their measured times ([Hyperlane](#hyperlane)).
 
 A route whose time isn't known on this network shows none.
 
@@ -271,7 +397,11 @@ A route whose time isn't known on this network shows none.
 
 Dusk contract calls ask the wallet for their own limit at the node's price:
 5M for a deposit, 50M plus the withdrawal's own gas for a proof or claim. A
-claim that would need more than `VITE_GAS_LIMIT_UPPER` isn't sent. Transfers
+claim that would need more than `VITE_GAS_LIMIT_UPPER` isn't sent. A
+Hyperlane transfer takes 5M (it spends 2.13M to 2.22M), an approval 3M
+(1.84M), a claim of a route's escrow 3M (1.9M), and one for another account
+80M, its key decoded on chain (about 59M), each refused where it's past
+`VITE_GAS_LIMIT_UPPER`. Transfers
 to the bridge account carry the wallet's public-transfer limit, 2.5M, at the
 node's price. The quote shows each limit as "up to" and the measured usual
 cost next to it. The node's price is the one the page last read: the quote,
@@ -302,6 +432,10 @@ For local testnet use:
 ```dotenv
 VITE_BRIDGE_PROFILE=testnet
 ```
+
+`VITE_HYPERLANE_TOKENS` keeps the Hyperlane tokens listed, by symbol
+(`dusk,eurd`), all of them unless set; `none` runs none. `VITE_PAUSED_ROUTES`
+pauses any of their routes by ID (`dusk-to-sepolia-usdd`).
 
 The page writes times, IDs and fees as every Dusk app does
 (`@dusk-network/networks/format`): times in English words on the viewer's
@@ -348,10 +482,19 @@ proofs and claims this checkout and another hand Dusk Wallet for user2's
 withdrawals, byte for byte, with a stand-in wallet that signs nothing. CI
 doesn't run it.
 
+`node scripts/hyperlane-live.mjs check <dusk account> <sepolia address>
+[amount]` checks, on testnet, each Hyperlane route as the page does before
+a send, and reads what a transfer of each token costs both ways and what the
+accounts hold for it, a read that failed said as unknown; `follow <hash>`
+follows one as its receipt does, to the Dusk transaction that delivered it.
+Neither signs or sends anything. CI doesn't run them.
+
 ## Trust boundaries
 
 - Wallet extensions retain keys and display every signing request.
-- The browser talks directly to configured Dusk and EVM RPC endpoints.
+- The browser talks directly to configured Dusk and EVM RPC endpoints. For
+  Hyperlane's routes, it reads Sepolia through the EVM wallet while the wallet
+  is on Sepolia.
 - Data drivers run only when they match their pinned SHA-256.
 - Local storage contains transaction metadata, what was read for My
   transfers, what each migration paid on its own chain once it's final, the
