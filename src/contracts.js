@@ -6,6 +6,7 @@
 import { formatContractId } from "@dusk-network/networks/format";
 
 import { buildRoutes } from "./bridge-routes.js";
+import { evmChains } from "./config.js";
 import { bridgeTasks, networkNames, notRunning, tokenName } from "./names.js";
 
 const trim = (url) => String(url ?? "").replace(/\/+$/u, "");
@@ -50,8 +51,7 @@ export function contractGroups(cfg) {
       ? { label: names["dusk-evm"], value: `chain ${cfg.duskEvm.chainId}` }
       : { label: names["dusk-evm"], muted: true, value: `not on ${names.badge} yet` },
   );
-  const evmIds = [...new Set([...cfg.migrations, ...(cfg.service ? [cfg.service.network] : [])])];
-  for (const id of evmIds) networks.push({ label: names[id], value: `chain ${cfg.evmNetworks[id].chainId}` });
+  for (const id of evmChains(cfg)) networks.push({ label: names[id], value: `chain ${cfg.evmNetworks[id].chainId}` });
   groups.push({ id: "networks", rows: networks, title: "Networks" });
 
   for (const task of bridgeTasks(cfg, buildRoutes(cfg))) {
@@ -108,6 +108,24 @@ export function contractGroups(cfg) {
       title: `${names.dusk} ↔ ${names["dusk-evm"]}`,
     });
 
+  if (cfg.hyperlane?.enabled) {
+    const { dusk, evm, network, tokens } = cfg.hyperlane;
+    const chain = names[network];
+    const rows = tokens.flatMap((token) => [
+      contractRow(`${token.symbol} route on Dusk`, token.dusk.route, `Takes the ${token.symbol} sent to ${chain}, and pays out what comes back.`),
+      ...(token.native ? [] : [contractRow(`${token.symbol} on Dusk`, token.dusk.token, "The token, issued on Dusk.")]),
+      row(cfg, network, `${token.symbol} on ${chain}`, token.evm.token, "Mints what comes from Dusk, and burns what goes back."),
+    ]);
+    rows.push(contractRow("Mailbox on Dusk", dusk.mailbox), contractRow("Gas paymaster on Dusk", dusk.igp, "Takes the bridge fee for what's sent from Dusk."), row(cfg, network, `Mailbox on ${chain}`, evm.mailbox));
+    const routes = buildRoutes(cfg).filter((route) => route.mode === "hyperlane");
+    groups.push({
+      id: "hyperlane",
+      note: routes.every((route) => route.paused) ? `${notRunning(cfg)}.` : "",
+      rows,
+      title: `${names.dusk} ↔ ${chain}, through Hyperlane`,
+    });
+  }
+
   if (cfg.multicall?.contractId)
     groups.push({
       id: "reads",
@@ -131,8 +149,7 @@ export function serversLine(cfg) {
   const names = networkNames(cfg);
   const parts = [`${hostOf(cfg.dusk.nodeUrl)} (the Dusk node and its archive)`];
   if (cfg.duskEvm.enabled) parts.push(`${hostOf(cfg.duskEvm.rpcUrl)} (${names["dusk-evm"]})`);
-  const evmIds = [...new Set([...cfg.migrations, ...(cfg.service ? [cfg.service.network] : [])])];
-  for (const id of evmIds) {
+  for (const id of evmChains(cfg)) {
     const host = hostOf(cfg.evmNetworks[id]?.rpcUrl);
     if (host) parts.push(`${host} (${names[id]})`);
   }

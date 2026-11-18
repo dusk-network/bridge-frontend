@@ -279,4 +279,8 @@ export function loadConfig() {
   });
 }
 
+/** The EVM chains a deployment's routes reach: its migrations', its payout's, and Hyperlane's. */
+export const evmChains = (cfg) =>
+  [...new Set([...cfg.migrations, ...(cfg.service ? [cfg.service.network] : []), ...(cfg.hyperlane?.enabled ? [cfg.hyperlane.network] : [])])];
+
 export const config = loadConfig();

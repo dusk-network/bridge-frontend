@@ -837,7 +837,7 @@ test("the top bar names each wallet's account, in the form its wallet writes it,
 
 test("the Contracts sheet lists every address in full, per route, and names no one as running it", () => {
   const groups = contractGroups(testnet);
-  assert.deepEqual(groups.map((group) => group.title), ["Networks", "Sepolia ↔ Dusk", "Dusk ↔ DuskEVM", "Used to read Dusk"]);
+  assert.deepEqual(groups.map((group) => group.title), ["Networks", "Sepolia ↔ Dusk", "Dusk ↔ DuskEVM", "Dusk ↔ Sepolia, through Hyperlane", "Used to read Dusk"]);
   // The Sepolia routes are listed, as not running.
   assert.equal(groups[1].note, "Not running on testnet right now.");
   assert.deepEqual(groups[0].rows.map((row) => [row.label, row.value]), [
@@ -860,10 +860,30 @@ test("the Contracts sheet lists every address in full, per route, and names no o
     "0x4200000000000000000000000000000000000010",
     "0x4200000000000000000000000000000000000016",
     testnet.multicall.contractId,
+    // Hyperlane's, from its deployment's record: each token's route, the tokens issued on Dusk, and both Mailboxes.
+    ...testnet.hyperlane.tokens.flatMap((token) => [token.dusk.route, token.evm.token, ...(token.dusk.token ? [token.dusk.token] : [])]),
+    testnet.hyperlane.dusk.mailbox,
+    testnet.hyperlane.dusk.igp,
+    testnet.hyperlane.evm.mailbox,
   ]) {
     assert.ok(html.includes(`<code class="mono">${value}</code>`), value);
     assert.ok(html.includes(`data-copy="${value}"`), value);
   }
+  assert.deepEqual(groups[3].rows.map((row) => row.label), [
+    "DUSK route on Dusk",
+    "DUSK on Sepolia",
+    "EURd route on Dusk",
+    "EURd on Dusk",
+    "EURd on Sepolia",
+    "USDd route on Dusk",
+    "USDd on Dusk",
+    "USDd on Sepolia",
+    "Mailbox on Dusk",
+    "Gas paymaster on Dusk",
+    "Mailbox on Sepolia",
+  ]);
+  assert.equal(groups[3].rows[1].href, `https://sepolia.etherscan.io/address/${testnet.hyperlane.tokens[0].evm.token}`);
+  assert.equal(groups[3].note, "");
   assert.ok(html.includes(`https://explorer.testnet.dusk.network/accounts/?key=${testnet.service.account}`));
   // The Terms of use and Privacy policy, and nothing more: no operator, and no contract said to hold or keep DUSK.
   assert.match(
