@@ -45,6 +45,25 @@ export async function createDuskConnection() {
   };
 }
 
+/** Why this page is still connected to Dusk Wallet after asking it to let go. */
+const NOT_DISCONNECTED = "Dusk Wallet didn't disconnect this page. Try again, or disconnect it in Dusk Wallet.";
+
+/**
+ * Lets go of the profile this page uses (`connection`, `createDuskConnection`'s):
+ * "" once Dusk Wallet did, else why not, as one that refuses or doesn't
+ * answer may still have this page connected.
+ */
+export async function disconnectDusk(connection) {
+  try {
+    if (!connection) throw new Error("no wallet");
+    // Dusk Connect resolves with the wallet's answer: false where it didn't let go.
+    if ((await connection.disconnect()) === false) throw new Error("not disconnected");
+    return "";
+  } catch {
+    return NOT_DISCONNECTED;
+  }
+}
+
 export function getDuskWallet() {
   if (!wallet) throw new Error("The Dusk wallet is not initialized.");
   return wallet;

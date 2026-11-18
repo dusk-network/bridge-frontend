@@ -21,7 +21,7 @@ import { followAfterDiscovery, mergeTransfer, mergeTransfers, partyKey } from ".
 import { createDiscoveryRuns } from "./discovery-runs.js";
 import { depositRequest } from "./dusk-deposit.js";
 import { createDuskAdded, createDuskOffer } from "./dusk-offer.js";
-import { createDuskConnection, ensureDuskConnected, sendDuskContractCall, sendDuskTransfer } from "./dusk-wallet.js";
+import { createDuskConnection, disconnectDusk, ensureDuskConnected, sendDuskContractCall, sendDuskTransfer } from "./dusk-wallet.js";
 import { duskEvmNetwork, submitDuskEvmWithdrawal } from "./duskevm-withdrawal.js";
 import { addDusk, canAddDusk, connectEvmWallet, ensureEvmChain, evmMoved, getEvmState, initializeEvmWallet, subscribeEvmWallet } from "./evm-wallet.js";
 import { createFormReads } from "./form-reads.js";
@@ -72,6 +72,7 @@ import {
   cardRegions,
   contractsSheet,
   copyFaces,
+  duskSheet,
   footer,
   header,
   lookupPage,
@@ -1174,6 +1175,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     } else if (state.sheet === "wallets") {
       dialog.className = "sheet narrow";
       dialog.innerHTML = walletsSheet({ wallets: state.dusk?.choices ?? [] });
+    } else if (state.sheet === "dusk") {
+      dialog.className = "sheet narrow";
+      dialog.innerHTML = duskSheet({ account: duskAccount(), name: duskName() });
     }
   }
 
@@ -2418,6 +2422,23 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       // Not in the moment the review or its next step comes up (review-session.js).
       confirm: () => (reviews.confirmable ? confirmReview() : undefined),
       "choose-dusk": () => chooseDusk(target.dataset.wallet),
+      // The connected Dusk Wallet: another profile, or none.
+      "open-dusk": () => openSheet("dusk", target),
+      "dusk-disconnect": async () => {
+        closeSheet();
+        const failed = await disconnectDusk(state.dusk);
+        if (failed) return showError(failed);
+        announce("Dusk Wallet is disconnected.");
+        render();
+      },
+      "dusk-other-profile": async () => {
+        closeSheet();
+        // The wallet asks which profile again once this page let go of this one, and only then.
+        const failed = await disconnectDusk(state.dusk);
+        if (failed) return showError(failed);
+        await connectDusk(target);
+        render();
+      },
       "connect-dusk": () => connectDusk(target),
       "connect-evm": connectEvm,
       "discover-more": () => discover({ more: true }),

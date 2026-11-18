@@ -83,8 +83,21 @@ function duskPill(dusk) {
   if (dusk.state !== "connected")
     return `<button type="button" class="wpill cta" data-action="connect-dusk">${dusk.state === "locked" ? "Unlock Dusk Wallet" : "Connect Dusk Wallet"}</button>`;
   // The account by its .dusk name where it has one; a long one ends in an ellipsis, in full on hover.
+  // Pressed, it offers another profile, or to disconnect (`duskSheet`).
   const who = dusk.name ? `<span class="nm" title="${html(dusk.name)}">${html(dusk.name)}</span>` : `<code class="mono">${shortLabel(dusk.account)}</code>`;
-  return `<button type="button" class="wpill" data-action="connect-dusk" aria-label="Dusk Wallet, account ${html(dusk.name ? `${dusk.name}, ${dusk.account}` : dusk.account)}"><span class="av">${chainMark("dusk", "xs")}</span>${who}</button>`;
+  return `<button type="button" class="wpill" data-action="open-dusk" aria-haspopup="dialog" aria-label="Dusk Wallet, account ${html(dusk.name ? `${dusk.name}, ${dusk.account}` : dusk.account)}"><span class="av">${chainMark("dusk", "xs")}</span>${who}</button>`;
+}
+
+/**
+ * The connected Dusk Wallet: the profile this page uses, another profile
+ * (the page lets go of this one and asks the wallet again, where it lets you
+ * choose), or none. A wallet whose own profile switch doesn't reach the page
+ * is changed here.
+ */
+export function duskSheet({ account, name }) {
+  const who = name ? `<b>${html(name)}</b> (<code class="mono">${html(short(account))}</code>)` : `<code class="mono">${html(short(account))}</code>`;
+  return `<div class="sheet-head"><div><h2 id="sheet-title">Dusk Wallet</h2><p class="sub">This page uses ${who}.</p></div><button type="button" class="icon-btn round" data-action="close-sheet" aria-label="Close">${icon("close")}</button></div>
+  <div class="sheet-body"><div class="btn-row"><button type="button" class="btn sec sm" data-action="dusk-other-profile">Use another profile</button><button type="button" class="btn sec sm" data-action="dusk-disconnect">Disconnect</button></div></div>`;
 }
 
 function evmPill(evm) {
