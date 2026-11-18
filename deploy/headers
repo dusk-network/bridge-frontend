@@ -1,0 +1,19 @@
+# Cloudflare's, for every file it serves of deploy/site/ (wrangler.jsonc):
+# the bridge's build, which deploy/stage.js places there, writing this beside
+# it as deploy/site/_headers. Cloudflare reads that and doesn't serve it.
+# What no file answers, deploy/worker.js does, with the same but its own
+# policy, as its answers are no pages.
+#
+# The Content-Security-Policy is the one the build's page carries
+# (vite.config.js, from scripts/csp.js), which stage.js puts in place of
+# PAGE_POLICY: the bridge's own scripts alone, WebAssembly, what the bridge
+# reads from, and frame-ancestors, which a page's own policy can't say.
+/*
+  Strict-Transport-Security: max-age=31536000
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Content-Security-Policy: PAGE_POLICY
+  X-Frame-Options: DENY
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

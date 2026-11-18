@@ -1,0 +1,28 @@
+{
+  "https://bridge.dusk.network/": {
+    "VITE_BRIDGE_PROFILE": "mainnet",
+    "VITE_BSC_EXPLORER_URL": "https://bscscan.com",
+    "VITE_BSC_RPC_URL": "https://bsc-rpc.publicnode.com",
+    "VITE_DUSK_EXPLORER_URL": "https://explorer.dusk.network",
+    "VITE_DUSK_NODE_URL": "https://nodes.dusk.network",
+    "VITE_ETHEREUM_EXPLORER_URL": "https://etherscan.io",
+    "VITE_ETHEREUM_RPC_URL": "https://ethereum-rpc.publicnode.com",
+    "VITE_MAINNET_BRIDGE_URL": "https://bridge.dusk.network",
+    "VITE_PAGE_POLICY": "true",
+    "VITE_REOWN_PROJECT_ID": "b5303e1c8374b100fbb7f181884fef28",
+    "VITE_TESTNET_BRIDGE_URL": "https://bridge.testnet.dusk.network"
+  },
+  "https://bridge.testnet.dusk.network/": {
+    "VITE_BRIDGE_PROFILE": "testnet",
+    "VITE_DUSKEVM_EXPLORER_URL": "https://explorer.testnet.evm.dusk.network",
+    "VITE_DUSKEVM_L1_BRIDGE_RPC_URL": "https://rpc.testnet.evm.dusk.network/l1",
+    "VITE_DUSKEVM_RPC_URL": "https://rpc.testnet.evm.dusk.network",
+    "VITE_DUSK_EXPLORER_URL": "https://explorer.testnet.dusk.network",
+    "VITE_DUSK_NODE_URL": "https://testnet.nodes.dusk.network",
+    "VITE_ETHEREUM_EXPLORER_URL": "https://sepolia.etherscan.io",
+    "VITE_ETHEREUM_RPC_URL": "https://ethereum-sepolia-rpc.publicnode.com",
+    "VITE_PAGE_POLICY": "true",
+    "VITE_REOWN_PROJECT_ID": "b5303e1c8374b100fbb7f181884fef28",
+    "VITE_TESTNET_BRIDGE_URL": "https://bridge.testnet.dusk.network"
+  }
+}

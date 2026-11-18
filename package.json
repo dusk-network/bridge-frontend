@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "homepage": "https://github.com/dusk-network/dusk-bridge",
   "engines": {
     "npm": ">=11.18.0"
   },
@@ -11,7 +12,7 @@
     "fsevents": false
   },
   "scripts": {
-    "build": "vite build",
+    "build": "node scripts/build.js",
     "check": "npm test && npm run build && npm run audit:prod",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "dev": "vite",

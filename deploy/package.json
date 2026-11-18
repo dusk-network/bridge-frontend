@@ -1,0 +1,12 @@
+{
+  "name": "dusk-bridge-deploy",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare's CLI for the deploy workflow, on a lockfile of its own and out of the app's dependencies.",
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "wrangler": "4.163.0"
+  }
+}

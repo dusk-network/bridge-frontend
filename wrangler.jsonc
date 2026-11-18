@@ -1,0 +1,32 @@
+{
+  // Each network is its own build, with its settings in deployments.json, at
+  // its own address. deploy/site/ is what's served: the build, where
+  // deploy/stage.js places it, and the headers for it. deploy/worker.js
+  // answers what no file does. An address mustn't change: browsers keep what
+  // the bridge follows, the transfers sent from it, by its origin.
+  "name": "dusk-bridge",
+  "main": "deploy/worker.js",
+  "account_id": "73fe1e33bc30f9350533005be8c1d297",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./deploy/site",
+  },
+  // At its own address alone, never at a workers.dev one too.
+  "workers_dev": false,
+  "preview_urls": false,
+  "env": {
+    // Deployed as main is pushed (.github/workflows/deploy.yml).
+    "testnet": {
+      "name": "dusk-bridge-testnet",
+      "routes": [
+        { "pattern": "bridge.testnet.dusk.network", "custom_domain": true },
+      ],
+    },
+    // Deployed from a bridge-v* tag, once the DEPLOY_MAINNET repository
+    // variable is "true" (.github/workflows/deploy.yml).
+    "mainnet": {
+      "name": "dusk-bridge-mainnet",
+      "routes": [{ "pattern": "bridge.dusk.network", "custom_domain": true }],
+    },
+  },
+}
