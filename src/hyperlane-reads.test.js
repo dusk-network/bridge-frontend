@@ -218,6 +218,25 @@ test("a route's router is read again for every transfer: one enrolled since the 
   await assert.rejects(reads.checkRoute(T.DUSK), { message: ROUTE_NOT_AS_BOOKED });
 });
 
+test("the Dusk transaction that delivered a message is the origin of the Mailbox's process_id for it, in the blocks asked", async () => {
+  const id = "8bfceee4fc2bb2d10246a3b7c7ac8f75538cded9501f44382df39123c0f86db6";
+  const delivery = "bbf13d74c6451e0d5042b550ad543f359db88b8ec40916f0fb5f298bfe457a25";
+  const event = (patch) => ({ data: id, origin: delivery, reverted: false, source: cfg.hyperlane.dusk.mailbox, topic: "process_id", ...patch });
+  let selection = "";
+  const node = {
+    query: async (asked) => {
+      selection = asked;
+      // Block 4888146's events, as the live chain has them; another message's, another contract's and a reverted one before.
+      return { h4888145: { json: [event({ data: "11".repeat(32), origin: "22".repeat(32) })] }, h4888146: { json: [event({ source: "33".repeat(32) }), event({ reverted: true }), event({})] } };
+    },
+  };
+  const reads = createHyperlaneReads({ cfg, loadDriver, node, rpc: async () => null });
+  assert.deepEqual(await reads.processedOnDusk(`0x${id}`, { from: 4_888_144n, to: 4_888_147n }), { hash: delivery, height: 4_888_146n });
+  // One query, a block an alias, from the first to the last asked.
+  assert.equal(selection, [4_888_144, 4_888_145, 4_888_146, 4_888_147].map((h) => `h${h}: contractEvents(height: ${h}) { json }`).join(" "));
+  assert.equal(await reads.processedOnDusk("0x" + "44".repeat(32), { from: 4_888_144n, to: 4_888_147n }), null);
+});
+
 test("both routers name each other before anything is locked or burned: Dusk's route enrolled to the Sepolia token, the token's router for Dusk the route", async () => {
   const reads = (override) => createHyperlaneReads({ cfg, loadDriver, node: fakeNode(bookedAnswers()).node, rpc: bookedRpc(override) });
   for (const token of Object.values(T)) await reads().checkRoute(token);

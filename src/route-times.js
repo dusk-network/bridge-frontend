@@ -18,21 +18,25 @@ const RECENT_COUNT = 5;
 /**
  * What this browser's recent completed transfers on `route` took, sent to
  * arrived: the median of the last five of the past 30 days, or null with
- * fewer than two.
+ * fewer than two. A Hyperlane transfer to Dusk took until its delivery,
+ * however long a claim of it waited after: one whose delivery wasn't seen
+ * says nothing.
  */
 export function measuredSeconds(route, transfers = [], now = Date.now()) {
+  const delivery = route.mode === "hyperlane" && route.to.id === "dusk";
+  const arrivedAt = (entry) => (delivery ? entry.deliveredAt : entry.destinationAt);
   const took = transfers
     .filter(
       (entry) =>
         entry.routeId === route.id &&
         entry.status === "completed" &&
         entry.sourceAt &&
-        entry.destinationAt > entry.sourceAt &&
+        arrivedAt(entry) > entry.sourceAt &&
         now - entry.sourceAt < RECENT_MS,
     )
     .sort((a, b) => b.sourceAt - a.sourceAt)
     .slice(0, RECENT_COUNT)
-    .map((entry) => (entry.destinationAt - entry.sourceAt) / 1_000)
+    .map((entry) => (arrivedAt(entry) - entry.sourceAt) / 1_000)
     .sort((a, b) => a - b);
   return took.length < 2 ? null : took[Math.floor(took.length / 2)];
 }

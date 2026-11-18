@@ -155,3 +155,16 @@ test("every page says the same time for the same route", () => {
   const checks = reviewChecks(byId(testnet, "dusk-to-ethereum"), { cfg: testnet, destination: "0x1", duskAccount: "a", evm: {}, quote: buildQuote(byId(testnet, "dusk-to-ethereum"), "10", { cfg: testnet }), reads: {} });
   assert.ok(checks.every((check) => !/arrive|usually|within/iu.test(check.html)));
 });
+
+test("a Hyperlane transfer into Dusk took as long as its delivery, however long its claim waited", () => {
+  globalThis.__DUSK_BRIDGE_CONFIG__ = { VITE_BRIDGE_PROFILE: "testnet" };
+  const testnet = loadConfig();
+  delete globalThis.__DUSK_BRIDGE_CONFIG__;
+  const route = buildRoutes(testnet).find((each) => each.id === "sepolia-to-dusk");
+  const now = Date.parse("2026-11-18T12:00:00Z");
+  // Delivered a minute after it was sent; claimed hours later.
+  const held = (minutesAgo) => ({ deliveredAt: now - minutesAgo * 60_000 + 60_000, destinationAt: now, routeId: route.id, sourceAt: now - minutesAgo * 60_000, status: "completed" });
+  assert.deepEqual(routeTime(route, testnet, { now, transfers: [held(600), held(500)] }), { inSeconds: true, seconds: 60, source: "measured" });
+  // A transfer whose delivery wasn't seen says nothing of it.
+  assert.deepEqual(routeTime(route, testnet, { now, transfers: [held(600), { ...held(500), deliveredAt: undefined }] }), { inSeconds: true, seconds: 60, source: "config" });
+});

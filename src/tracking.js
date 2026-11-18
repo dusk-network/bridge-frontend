@@ -11,6 +11,7 @@ import { BRIDGE_FUNCTIONS, decodeBridgeCall } from "@dusk-network/networks/duske
 import { observeDepositStatus } from "@dusk/evm-sdk";
 import { decodeFunctionData, toHex } from "viem";
 
+import { createHyperlaneTracking } from "./hyperlane-tracking.js";
 import { MIGRATION_ABI } from "./legacy-migration.js";
 import { networkName } from "./names.js";
 import { normalizeEvmAddress } from "./validation.js";
@@ -98,10 +99,15 @@ export function takenDestinations(entry, others = []) {
   );
 }
 
-/** Whether `patch` completes `entry` with a destination another transfer has. */
+/**
+ * Whether `patch` completes `entry` with a destination another transfer has.
+ * Never where the delivery was matched by the transfer's own message ID
+ * (Hyperlane's): a relayer can deliver several messages in one transaction.
+ */
 export const takenByAnother = (entry, patch, others = []) =>
   patch?.status === "completed" &&
   Boolean(patch.destinationHash) &&
+  !(patch.messageId ?? entry.messageId) &&
   takenDestinations(entry, others).has(String(patch.destinationHash).toLowerCase());
 
 const sameAddress = (a, b) => String(a ?? "").toLowerCase() === String(b ?? "").toLowerCase();
@@ -121,10 +127,12 @@ const isMethodMissing = (error) =>
  * @param {() => number} [deps.now]
  * @param {typeof fetch} [deps.fetch] what the payout searches, and the reads of what a migration paid, send their requests with
  * @param {{ get: (key: string) => string | null | undefined, set: (key: string, value: string) => void }} [deps.cache] where what a migration paid is kept once it's final
+ * @param {object} [deps.hyperlane] Hyperlane's reads (hyperlane-reads.js), where the network has its routes
  */
 export function createTracking(deps) {
   const { archive, config, node, rpc } = deps;
   const now = deps.now ?? Date.now;
+  const hyperlane = deps.hyperlane ? createHyperlaneTracking({ cfg: config, feeOf: duskFeePaid, node, now, reads: deps.hyperlane, replaced: REPLACED }) : null;
   const name = (id) => networkName(config, id);
   let adapterLookup = "unknown";
   // Each chain's block times, as the payout searches read them, and the
@@ -477,6 +485,9 @@ export function createTracking(deps) {
         return refreshDeposit(entry, others);
       case "duskevm-withdrawal":
         return refreshWithdrawal(entry, route);
+      case "hyperlane":
+        if (!hyperlane) throw new Error(`Unknown route ${route.id}.`);
+        return hyperlane.refresh(entry, route);
       default:
         throw new Error(`Unknown route ${route.id}.`);
     }
@@ -488,9 +499,10 @@ export function createTracking(deps) {
 /**
  * Re-checks pending entries until they end: often while an action waits, or
  * while `due` says an entry's arrival is looked out for now, less when the
- * page is hidden.
+ * page is hidden. One that ended is checked on while `more` says the page
+ * still looks for something of it, as the transaction that delivered it.
  */
-export function createScheduler({ check, due = () => false, intervals = {} }) {
+export function createScheduler({ check, due = () => false, intervals = {}, more = () => false }) {
   const delays = { action: 5_000, active: 15_000, due: 5_000, hidden: 60_000, ...intervals };
   const timers = new Map();
   // Entries being checked now. Tracking one again then asks for one more
@@ -518,7 +530,7 @@ export function createScheduler({ check, due = () => false, intervals = {} }) {
     }
     if (stopped) return;
     if (state.again) timers.set(id, setTimeout(() => void run(id), 0));
-    else if (entry && entry.status === "pending") timers.set(id, setTimeout(() => void run(id), delayFor(entry)));
+    else if (entry && (entry.status === "pending" || more(entry))) timers.set(id, setTimeout(() => void run(id), delayFor(entry)));
   }
 
   return Object.freeze({

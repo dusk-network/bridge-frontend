@@ -171,6 +171,29 @@ export function createHyperlaneReads({ cfg, loadDriver, node, rpc, wallet = () =
     return `0x${bytesHex(Uint8Array.from(read.message_id))}`;
   }
 
+  /**
+   * The Dusk transaction that delivered a message, and its block: the origin
+   * of Dusk's Mailbox's `process_id` event for it, in the blocks `from` to
+   * `to`, asked in one query, a block an alias, at most 41. Null where none
+   * of them has it.
+   */
+  async function processedOnDusk(messageId, { from, to }) {
+    const heights = [];
+    for (let height = BigInt(from); height <= BigInt(to) && heights.length < 41; height += 1n) heights.push(height);
+    if (!heights.length) return null;
+    const data = await node.query(heights.map((height) => `h${height}: contractEvents(height: ${height}) { json }`).join(" "));
+    const dd = await driver();
+    for (const height of heights) {
+      const events = Array.isArray(data?.[`h${height}`]?.json) ? data[`h${height}`].json : [];
+      for (const event of events) {
+        if (bare(event.source) !== hyperlane.dusk.mailbox || event.topic !== "process_id" || event.reverted) continue;
+        const read = dd.decodeEvent("process_id", fromHex(event.data));
+        if (bytesHex(Uint8Array.from(read.message_id)) === bare(messageId)) return { hash: bare(event.origin), height };
+      }
+    }
+    return null;
+  }
+
   // ---- The EVM chain ----------------------------------------------------------
 
   /**
@@ -317,6 +340,7 @@ export function createHyperlaneReads({ cfg, loadDriver, node, rpc, wallet = () =
     evmTransfer,
     evmValue,
     paused,
+    processedOnDusk,
     processedOnEvm,
     tokenBalance,
     transferCharge,
