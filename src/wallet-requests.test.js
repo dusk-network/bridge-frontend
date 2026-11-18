@@ -33,6 +33,34 @@ const { depositRequest } = await import("./dusk-deposit.js");
 const { submitDuskEvmWithdrawal } = await import("./duskevm-withdrawal.js");
 const { connectEvmWallet, getEvmState, heldAccount, initializeEvmWallet } = await import("./evm-wallet.js");
 const { APPROVAL_CANCELLED, NOT_REVOKED, REVOKE_CANCELLED, approveMigration, minedAs, revokeMigration, submitMigration } = await import("./legacy-migration.js");
+const { sendToDusk } = await import("./hyperlane-evm.js");
+const { HYPERLANE_EVM_ABI, duskRecipientHash } = await import("./hyperlane.js");
+const { ROUTE_NOT_AS_BOOKED } = await import("./hyperlane-reads.js");
+const { decodeFunctionData, pad, toFunctionSelector, toHex: hexOf } = await import("viem");
+
+/**
+ * Reads of Sepolia as the page makes them, stood in for: a token's delivery
+ * fee for `quoteGasPayment`, and a call that goes through for anything else.
+ */
+const sepoliaReads = (fee) => async (method, params) => {
+  if (method !== "eth_call") return null;
+  return params[0].data.startsWith(toFunctionSelector("quoteGasPayment(uint32)")) ? pad(hexOf(fee)) : pad("0x01");
+};
+
+/**
+ * The page's Hyperlane reads, stood in for: the routers as booked (or a
+ * `route` refusal), the token's pause on Dusk, the whole charge the token
+ * quotes (its ETH the delivery fee unless `charge` says otherwise), and
+ * Sepolia read as `sepoliaReads` does.
+ */
+const sepoliaSide = (fee, { charge = null, paused = false, route = null } = {}) => ({
+  checkRoute: async () => {
+    if (route) throw new Error(route);
+  },
+  evm: sepoliaReads(fee),
+  paused: async () => paused,
+  transferCharge: async (_token, { amount }) => charge ?? { native: fee, token: amount },
+});
 
 // What the review prepares and then sends, as the account it was reviewed for.
 const submitServiceTransfer = async ({ account, ...options }) => sendDuskTransfer(await serviceTransferRequest(options), { account });
@@ -193,7 +221,7 @@ function fakeEvmWallet({ onAccounts = () => {}, onSwitch = () => {}, signsFrom =
         return null;
       }
       if (method === "eth_sendTransaction") {
-        wallet.sent.push({ from: params[0].from, signer: signsFrom ? params[0].from : wallet.accounts[0] });
+        wallet.sent.push({ from: params[0].from, signer: signsFrom ? params[0].from : wallet.accounts[0], tx: params[0] });
         return `0x${"ab".repeat(32)}`;
       }
       throw new Error(`Unexpected method: ${method}`);
@@ -231,6 +259,7 @@ const sends = {
   migrate: (account) => submitMigration(config.evmNetworks.ethereum, "1", DUSK, { account }),
   revoke: (account) => revokeMigration(config.evmNetworks.ethereum, { account }),
   withdraw: (account) => submitDuskEvmWithdrawal({ account, amount: "1", duskAccount: DUSK }),
+  "transfer back to Dusk": (account) => sendToDusk(config, { account, amount: 1n, reads: sepoliaSide(1n), recipient: DUSK, token: config.hyperlane.tokens[1] }),
 };
 
 test("an EVM withdrawal, approval, revoke or migration goes out from the account it was reviewed for, or not at all", async () => {
@@ -289,6 +318,75 @@ test("an EVM withdrawal, approval, revoke or migration isn't sent on another cha
     assert.deepEqual(moves.sent, [], `${name}, moves`);
   }
   delete globalThis.ethereum;
+});
+
+test("a transfer back to Dusk is the token's transferRemote to the account's hash, its value the fee read as it's sent", async () => {
+  const [, eurd] = config.hyperlane.tokens;
+  const wallet = await useEvmWallet();
+  const hash = await sendToDusk(config, { account: REVIEWED, amount: 10_000_000n, reads: sepoliaSide(132_000_000_001n), recipient: DUSK, reviewedFee: 132_000_000_001n, token: eurd });
+  assert.equal(hash, `0x${"ab".repeat(32)}`);
+  const [{ tx }] = wallet.sent;
+  assert.deepEqual([tx.to.toLowerCase(), BigInt(tx.value)], [eurd.evm.token.toLowerCase(), 132_000_000_001n]);
+  assert.deepEqual(decodeFunctionData({ abi: HYPERLANE_EVM_ABI, data: tx.data }), { args: [1146442572, duskRecipientHash(DUSK), 10_000_000n], functionName: "transferRemote" });
+  // A fee that moved since the review sends nothing; nor does a recipient that isn't a Dusk account.
+  const moved = await useEvmWallet();
+  await assert.rejects(sendToDusk(config, { account: REVIEWED, amount: 1n, reads: sepoliaSide(2n), recipient: DUSK, reviewedFee: 1n, token: eurd }), { code: "FEE_CHANGED", fee: 2n });
+  await assert.rejects(sendToDusk(config, { account: REVIEWED, amount: 1n, reads: sepoliaSide(1n), recipient: REVIEWED, token: eurd }), /isn't a Dusk account/u);
+  await assert.rejects(sendToDusk(config, { account: REVIEWED, amount: 0n, reads: sepoliaSide(1n), recipient: DUSK, token: eurd }), /above 0/u);
+  assert.deepEqual(moved.sent, []);
+  delete globalThis.ethereum;
+});
+
+test("a transfer back to Dusk's review reads what its send checks: both routers, the token's pause on Dusk and the whole charge", async () => {
+  const { inboundCharge } = await import("./hyperlane-evm.js");
+  const [, eurd] = config.hyperlane.tokens;
+  const read = (side) => inboundCharge(side, eurd, { amount: 10_000_000n, recipientHash: duskRecipientHash(DUSK) });
+  assert.deepEqual(await read(sepoliaSide(132_000_000_001n)), { native: 132_000_000_001n, token: 10_000_000n });
+  await assert.rejects(read(sepoliaSide(132_000_000_001n, { route: ROUTE_NOT_AS_BOOKED })), { message: ROUTE_NOT_AS_BOOKED });
+  await assert.rejects(read(sepoliaSide(132_000_000_001n, { paused: true })), { message: "EURd is paused on Dusk, so it couldn't be paid out there. Nothing was sent." });
+});
+
+test("a transfer back to Dusk checks both routers, the token's pause on Dusk and the whole charge before the wallet is asked", async () => {
+  const [, eurd] = config.hyperlane.tokens;
+  const wallet = await useEvmWallet();
+  const send = (side) => sendToDusk(config, { account: REVIEWED, amount: 10_000_000n, reads: side, recipient: DUSK, reviewedFee: 132_000_000_001n, token: eurd });
+  await assert.rejects(send(sepoliaSide(132_000_000_001n, { route: ROUTE_NOT_AS_BOOKED })), { message: ROUTE_NOT_AS_BOOKED });
+  // Dusk's EURd paused: the route couldn't pay it out, so nothing is burned.
+  await assert.rejects(send(sepoliaSide(132_000_000_001n, { paused: true })), { message: "EURd is paused on Dusk, so it couldn't be paid out there. Nothing was sent." });
+  // The token's own quote of the whole charge: its ETH must be what the review showed.
+  await assert.rejects(send(sepoliaSide(132_000_000_001n, { charge: { native: 150_000_000_000n, token: 10_000_000n } })), { code: "FEE_CHANGED", fee: 150_000_000_000n });
+  const fee = "The bridge would also take 0.005 EURd as a fee, which this page can't show yet, so nothing was sent.";
+  await assert.rejects(
+    send({
+      ...sepoliaSide(132_000_000_001n),
+      transferCharge: async () => {
+        throw new Error(fee);
+      },
+    }),
+    { message: fee },
+  );
+  assert.deepEqual(wallet.sent, []);
+  delete globalThis.ethereum;
+});
+
+test("a transfer back to Dusk is simulated as the page read the chain, through the wallet, not as a public RPC a block behind sees it", async () => {
+  const [, eurd] = config.hyperlane.tokens;
+  const wallet = await useEvmWallet();
+  // The public RPC doesn't see the tokens yet: the call reverts there.
+  const fetch = globalThis.fetch;
+  globalThis.fetch = async (_url, { body }) => {
+    const calls = JSON.parse(body);
+    const answer = ({ id, method }) =>
+      method === "eth_call" ? { error: { code: 3, message: "execution reverted" }, id, jsonrpc: "2.0" } : { id, jsonrpc: "2.0", result: method === "eth_chainId" ? "0xaa36a7" : "0x10" };
+    return Response.json(Array.isArray(calls) ? calls.map(answer) : answer(calls));
+  };
+  try {
+    await sendToDusk(config, { account: REVIEWED, amount: 1n, reads: sepoliaSide(132_000_000_001n), recipient: DUSK, token: eurd });
+    assert.equal(wallet.sent.length, 1);
+  } finally {
+    globalThis.fetch = fetch;
+    delete globalThis.ethereum;
+  }
 });
 
 test("a revoke is an approval of 0, and asks the wallet nothing once the chain says nothing's approved", async () => {
