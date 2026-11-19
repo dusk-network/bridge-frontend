@@ -3,4 +3,6 @@ node_modules/
 .env
 .env.*
 !.env.example
-
+# The build as Cloudflare serves it (deploy/stage.js), and Wrangler's own.
+/deploy/site/
+.wrangler/

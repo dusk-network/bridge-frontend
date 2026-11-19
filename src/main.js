@@ -1,3 +1,4 @@
+import "./no-eval.js";
 import "./style.css";
 
 import { createAppController } from "./app-controller.js";

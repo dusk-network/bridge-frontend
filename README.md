@@ -292,7 +292,10 @@ blacklisted and the challenger hasn't won.
 
 The same keys can be provided before the app loads through
 `window.__DUSK_BRIDGE_CONFIG__`, which allows one immutable build to be
-deployed with environment-specific configuration.
+deployed with environment-specific configuration. Such a build leaves
+`VITE_PAGE_POLICY` unset: its page then carries no Content-Security-Policy,
+as one made from the build's settings would refuse the addresses given at
+runtime, and its host sends one for those.
 
 For local testnet use:
 
@@ -322,8 +325,7 @@ a Status link, and a guide per route (`VITE_DOCS_MIGRATION_URL`,
 `VITE_DOCS_SERVICE_URL`, `VITE_DOCS_DUSKEVM_URL`; the docs' bridge guides
 describe the web wallet's bridge).
 
-The page uses the system's fonts: the Söhne files the mockups used aren't
-licensed for this repository.
+The page uses the web wallet's Söhne files.
 
 ## Development
 
@@ -360,3 +362,72 @@ doesn't run it.
   page storage, they're kept in memory while the page is open.
 - Contract IDs, RPC endpoints and this site's origin are deployment trust
   inputs. Review them before publishing.
+
+## Deploying
+
+Each network has its own site on Cloudflare (`wrangler.jsonc`), deployed by
+the Deploy workflow:
+
+| Site | Network | Deployed from |
+| --- | --- | --- |
+| `https://bridge.testnet.dusk.network` | testnet | `main`, as it's pushed |
+| `https://bridge.dusk.network` | mainnet | a `bridge-v*` tag, once `DEPLOY_MAINNET` is `true` |
+
+Each is built with its settings in `deployments.json`, never with secrets:
+Vite builds every `VITE_` setting into the code. They name the profile, the
+endpoints its network's file gives (a test holds them to it, so a bump of
+`@dusk-network/networks` that moves one moves them too), the sites' own
+addresses, the Reown project, and `VITE_PAGE_POLICY=true`, so the built page
+carries its Content-Security-Policy (`scripts/csp.js`, from what
+`src/config.js` makes of those settings): its own scripts alone, with
+WebAssembly, and requests only to its Dusk node, its EVM chains' RPCs,
+DuskEVM's where its routes run, Dusk Domains' site and WalletConnect.
+Cloudflare sends it as a header too, with frame-ancestors. `deploy/worker.js`
+answers what no file does: the page's routes are in its fragment, so anything
+else is a 404. The workflow runs the commit's tests and production audit
+(`npm run check`) itself before it attests or deploys anything.
+
+To release mainnet:
+
+1. Set the version (`npm version 1.0.0 --no-git-tag-version`) in a pull
+   request, and merge it.
+2. Make the repository public, so the Deploy workflow attests the release's
+   build.
+3. Tag the merge `bridge-v1.0.0` and push the tag. The workflow refuses a tag
+   that doesn't name `package.json`'s version.
+4. The tag deploys only while the `DEPLOY_MAINNET` repository variable is
+   `true`. One pushed before that deploys nothing: once the variable is set,
+   run the Deploy workflow on the tag. Once mainnet is live, add
+   `VITE_MAINNET_BRIDGE_URL` to testnet's settings, so testnet links to it.
+
+Each build writes `dist/build-manifest.json`, served beside the app: the
+version, commit, settings and every file's SHA-256. To rebuild what a site
+serves and compare, from a clone:
+
+```sh
+node scripts/verify-build.js https://bridge.dusk.network/ [--attested]
+```
+
+A site is its address's root: a transfer's link (`/#/transfer/…`) is the
+same site, and any other path or a query is refused, as is a build with
+uncommitted changes. The script builds only a commit from where the site is
+deployed from, fetched from this repository on GitHub whatever `origin` is:
+for testnet, one in `main`'s history; for mainnet, the commit of the
+release's `bridge-v*` tag. Any other site's needs `--trusted-ref <ref>`, a
+branch, tag or commit you trust whose history has it. The site must be built
+with the settings `deployments.json` lists for it at that commit; where your
+checkout's differ, the script says so as drift, which fails nothing.
+
+`--attested` first checks with GitHub's CLI that the Deploy workflow built
+the manifest from the commit it names, from `main` for testnet or the
+release's tag for mainnet. The workflow attests a build only while the
+repository is public. To serve testnet's build as Cloudflare does, built with
+its settings in a mode of their own, which no other build reads, and with
+Wrangler from its own lockfile:
+
+```sh
+npm ci --ignore-scripts --prefix deploy
+node scripts/deployment-env.js https://bridge.testnet.dusk.network/ > .env.testnet.local
+npm run build -- --mode testnet && node deploy/stage.js
+deploy/node_modules/.bin/wrangler dev --env testnet
+```
