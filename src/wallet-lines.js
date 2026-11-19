@@ -11,7 +11,7 @@ import { decodeBridgeCall } from "@dusk-network/networks/duskevm";
 import { formatContractId, formatEvmAddress, shortAccount } from "@dusk-network/networks/format";
 
 import { sha256Hex } from "./data-driver.js";
-import { aboutFee, formatDusk, formatLux, formatMaxFee } from "./format.js";
+import { aboutFee, formatDusk, formatLux, formatMaxFee, formatToken, formatUnitsGrouped } from "./format.js";
 import { networkName, tokenName } from "./names.js";
 
 const WEI_PER_LUX = 1_000_000_000n;
@@ -134,6 +134,33 @@ export function withdrawLines({ amountLux, cfg, duskAccount, fee }) {
       note: "Inside the call's data, so the wallet shows it as bytes.",
     },
     evmFeeLine(fee, "DUSK"),
+  ];
+}
+
+/**
+ * A Hyperlane transfer back to Dusk: `transferRemote` on the chain's token,
+ * which burns what it sends. The Dusk account is paid by its hash, which the
+ * wallet shows as the call's `recipient`; the account itself is listed under
+ * it. The call's value is the bridge's fee for delivery.
+ */
+export function transferRemoteLines({ amount, cfg, fee, recipient, recipientHash, token, value }) {
+  const network = cfg.hyperlane.network;
+  const coin = cfg.evmNetworks[network].currency?.symbol ?? "ETH";
+  return [
+    chainLine(cfg, network),
+    { address: token.evm.token, label: "Interacting with", network, value: `${token.symbol} on ${networkName(cfg, network)}` },
+    { label: "Method", mono: true, value: "transferRemote" },
+    { label: "destination", mono: true, note: "Dusk, as Hyperlane numbers it.", value: String(cfg.hyperlane.dusk.domain) },
+    { label: "recipient", mono: true, note: "The Dusk account below, as the hash of its key.", value: recipientHash },
+    { address: recipient, label: "Pays on Dusk", network: "dusk" },
+    {
+      label: "amount",
+      mono: true,
+      note: `= ${formatToken(amount, token)}. Wallets show the token's smallest unit.`,
+      value: BigInt(amount).toString(),
+    },
+    { label: "Value", note: "The bridge fee, for delivery to Dusk.", value: `${formatUnitsGrouped(value, 18)} ${coin}` },
+    evmFeeLine(fee, coin),
   ];
 }
 

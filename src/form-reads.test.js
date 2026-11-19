@@ -86,3 +86,151 @@ test("the gas price read again draws what quotes it, where it moved", async () =
   assert.equal(await reads.price(), false);
   assert.equal(drawn, 1);
 });
+
+test("a Hyperlane route's form reads its quote and a token's balance and allowance, and what the routes hold for the account", async () => {
+  const ACCOUNT = "xGX8tZ9zvamEVKM9vb8GeUQ3xihLd7fQP4w3RSZMD1R61YasXZsgRYRmjStAePvqd4ykZ3mGQhk76e4rvRQ35U2fdS1NGJEvxzKYjB8fD9zShiYphcMmgL6LowdnTzQjkw9";
+  const token = { native: false, symbol: "EURd" };
+  const asked = [];
+  const hyperlane = {
+    allowance: async (_token, account) => (asked.push(["allowance", account]), 7n),
+    dispatchFee: async (_token, args) => (asked.push(["fee", args]), 16_876_000_000n),
+    escrow: async (hash, tokens) => (asked.push(["escrow", hash, tokens?.length ?? "all"]), [{ pending: 10n, registered: false, token }]),
+    evmState: async (_token, owner) => (asked.push(["evm", owner]), { balance: 5n, deliveryFeeWei: 132n, gasCoinWei: 9n, gasPriceWei: 2n }),
+    tokenBalance: async (_token, account) => (asked.push(["balance", account]), 49n),
+    transferGas: async (_token, { value }) => (asked.push(["gas", value]), 250_000n),
+  };
+  const services = { hyperlane, node: { accountBalance: async () => 20n, gasPrice: async () => 1n } };
+  const reads = createFormReads({ services });
+  const out = { hyperlane: token, mode: "hyperlane", signer: "dusk" };
+  await reads.load({ dusk: ACCOUNT, gas: { amount: 3n, recipient: "0x8A51d0619286d937699D85c1a2c88D67A5a1B75d" }, route: out });
+  await settle();
+  assert.deepEqual(reads.reads.hyperlane, { allowance: 7n, fee: 16_876_000_000n, tokenBalance: 49n });
+  assert.equal(reads.reads.duskBalance, 20n);
+  // The route's quote takes the transfer's own amount and recipient.
+  assert.deepEqual(asked.find(([kind]) => kind === "fee")[1], { amount: 3n, recipient: "0x8A51d0619286d937699D85c1a2c88D67A5a1B75d" });
+  // Every route's escrow for the connected account, by its hash, and, with something held, its DUSK for a claim's fee.
+  assert.deepEqual(reads.reads.escrow, { account: ACCOUNT, balance: 20n, held: [{ pending: 10n, registered: false, token }] });
+  assert.deepEqual(asked.find(([kind]) => kind === "escrow"), ["escrow", "0x2acf0348cca26cf2d0a4ecbddde6e7abd3d54b2e581a73a7741301e1b411b69b", "all"]);
+
+  // Back to Dusk: the EVM side, the transfer's gas with the delivery fee as its value, and whether the route pays the recipient yet.
+  asked.length = 0;
+  const back = { hyperlane: token, mode: "hyperlane", signer: "evm" };
+  await reads.load({ evm: "0x8A51d0619286d937699D85c1a2c88D67A5a1B75d", gas: { amount: 3n, recipientHash: "0x2acf" }, route: back });
+  assert.deepEqual(reads.reads.hyperlane, { evm: { balance: 5n, deliveryFeeWei: 132n, gasCoinWei: 9n, gasPriceWei: 2n }, gas: 250_000n, registered: false });
+  assert.deepEqual(asked.find(([kind]) => kind === "gas"), ["gas", 132n]);
+});
+
+test("on the way into Dusk, the escrow read is the typed recipient's, which anyone can claim for", async () => {
+  const OTHER = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
+  const hashes = [];
+  const hyperlane = {
+    escrow: async (hash) => (hashes.push(hash), [{ pending: 0n, registered: true, token: {} }]),
+    evmState: async () => ({ balance: 0n, deliveryFeeWei: null, gasCoinWei: 0n, gasPriceWei: 1n }),
+  };
+  const reads = createFormReads({ services: { hyperlane, node: { accountBalance: async () => 0n, gasPrice: async () => 1n } } });
+  const back = { hyperlane: { native: true }, mode: "hyperlane", signer: "evm" };
+  await reads.load({ dusk: "xGX8tZ9zvamEVKM9vb8GeUQ3xihLd7fQP4w3RSZMD1R61YasXZsgRYRmjStAePvqd4ykZ3mGQhk76e4rvRQ35U2fdS1NGJEvxzKYjB8fD9zShiYphcMmgL6LowdnTzQjkw9", escrowFor: OTHER, evm: "0x1", route: back });
+  await settle();
+  assert.equal(reads.reads.escrow.account, OTHER);
+  // Nothing held: its balance isn't asked.
+  assert.equal(reads.reads.escrow.balance, null);
+  assert.equal(hashes.length, 1);
+});
+
+test("a Hyperlane form's load that answers after a newer estimate doesn't put back its older quote", async () => {
+  const dispatchFee = deferred();
+  const hyperlane = { allowance: async () => 0n, dispatchFee, escrow: async () => [], tokenBalance: async () => 0n };
+  const reads = createFormReads({ services: { hyperlane, node: { accountBalance: async () => 0n, gasPrice: async () => 1n } } });
+  const out = { hyperlane: { native: false, symbol: "EURd" }, mode: "hyperlane", signer: "dusk" };
+  // The card loads for the route; then the amount is typed, and its estimate answers first.
+  const loading = reads.load({ dusk: "account", gas: {}, route: out });
+  await settle();
+  const typed = reads.estimate({ gas: { amount: 5n, dusk: "account", recipient: "0x1" }, route: out });
+  await settle();
+  const [old, current] = dispatchFee.pending;
+  assert.deepEqual([old.args[1], current.args[1]], [{}, { amount: 5n, recipient: "0x1" }]);
+  current.resolve(2n);
+  await typed;
+  old.resolve(1n);
+  await loading;
+  assert.equal(reads.reads.hyperlane.fee, 2n);
+  // A reset drops both.
+  const again = reads.estimate({ gas: { amount: 6n, dusk: "account", recipient: "0x1" }, route: out });
+  await settle();
+  reads.reset(["hyperlane"]);
+  dispatchFee.pending.at(-1).resolve(3n);
+  await again;
+  assert.equal(reads.reads.hyperlane, null);
+});
+
+test("what the routes hold is read again on its own, and an older read that answers late doesn't put back what it found", async () => {
+  const ACCOUNT = "xGX8tZ9zvamEVKM9vb8GeUQ3xihLd7fQP4w3RSZMD1R61YasXZsgRYRmjStAePvqd4ykZ3mGQhk76e4rvRQ35U2fdS1NGJEvxzKYjB8fD9zShiYphcMmgL6LowdnTzQjkw9";
+  const escrow = deferred();
+  const reads = createFormReads({ services: { hyperlane: { escrow }, node: { accountBalance: async () => 5n, gasPrice: async () => 1n } } });
+  const first = reads.escrow(ACCOUNT);
+  const second = reads.escrow(ACCOUNT);
+  await settle();
+  const [old, current] = escrow.pending;
+  // The newer read finds the transfer delivered into escrow; the older one, from before, nothing.
+  current.resolve([{ pending: 7n, registered: false, token: {} }]);
+  await second;
+  old.resolve([{ pending: 0n, registered: false, token: {} }]);
+  await first;
+  assert.deepEqual([reads.reads.escrow.account, reads.reads.escrow.held.map((each) => each.pending), reads.reads.escrow.balance], [ACCOUNT, [7n], 5n]);
+});
+
+test("an allowance that couldn't be read says so, not that nothing is approved", async () => {
+  const hyperlane = {
+    allowance: async () => {
+      throw new Error("node down");
+    },
+    dispatchFee: async () => 1n,
+    escrow: async () => [],
+    tokenBalance: async () => 5n,
+  };
+  const reads = createFormReads({ services: { hyperlane, node: { accountBalance: async () => 0n, gasPrice: async () => 1n } } });
+  await reads.load({ dusk: "account", gas: {}, route: { hyperlane: { native: false, symbol: "EURd" }, mode: "hyperlane", signer: "dusk" } });
+  assert.deepEqual(reads.reads.hyperlane, { allowance: null, allowanceFailed: true, fee: 1n, tokenBalance: 5n });
+});
+
+test("an older load whose gas price answers late starts no reads of its own, and never leaves the card without the newer load's", async () => {
+  const gasPrice = deferred();
+  const dispatchFee = deferred();
+  const hyperlane = { allowance: async () => 9n, dispatchFee, escrow: async () => [], tokenBalance: async () => 5n };
+  const reads = createFormReads({ services: { hyperlane, node: { accountBalance: async () => 0n, gasPrice } } });
+  const route = { hyperlane: { native: false, symbol: "EURd" }, mode: "hyperlane", signer: "dusk" };
+  const older = reads.load({ dusk: "account", gas: {}, route });
+  const newer = reads.load({ dusk: "account", gas: {}, route });
+  await settle();
+  const [oldPrice, newPrice] = gasPrice.pending;
+  // The newer load reads the route; then the older one's gas price comes in.
+  newPrice.resolve(1n);
+  await settle();
+  oldPrice.resolve(2n);
+  await settle();
+  assert.equal(dispatchFee.pending.length, 1);
+  for (const each of dispatchFee.pending) each.resolve(16_876_000_000n);
+  await Promise.all([older, newer]);
+  assert.deepEqual(reads.reads.hyperlane, { allowance: 9n, fee: 16_876_000_000n, tokenBalance: 5n });
+});
+
+test("a load whose gas price answers after a newer estimate started doesn't put back its older quote", async () => {
+  const gasPrice = deferred();
+  const dispatchFee = deferred();
+  const hyperlane = { allowance: async () => 0n, dispatchFee, escrow: async () => [], tokenBalance: async () => 0n };
+  const reads = createFormReads({ services: { hyperlane, node: { accountBalance: async () => 0n, gasPrice } } });
+  const out = { hyperlane: { native: false, symbol: "EURd" }, mode: "hyperlane", signer: "dusk" };
+  const loading = reads.load({ dusk: "account", gas: {}, route: out });
+  await settle();
+  // The amount is typed while the load still waits for the gas price, and its estimate answers.
+  const typed = reads.estimate({ gas: { amount: 5n, dusk: "account", recipient: "0x1" }, route: out });
+  await settle();
+  dispatchFee.pending[0].resolve(2n);
+  await typed;
+  // Then the load's gas price comes in, and the route read after it.
+  gasPrice.pending[0].resolve(1n);
+  await settle();
+  for (const each of dispatchFee.pending.slice(1)) each.resolve(1n);
+  await loading;
+  assert.equal(reads.reads.hyperlane.fee, 2n);
+});

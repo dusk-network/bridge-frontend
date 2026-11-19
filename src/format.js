@@ -19,6 +19,15 @@ const LUX_DECIMALS = 9;
 /** Lux for an amount field, as the field reads it back. */
 export const amountForInput = (lux) => amountForField(formatDuskPlain(lux));
 
+/** Units of a token with `decimals` for an amount field, as the field reads them back: Lux for DUSK. */
+export function amountForUnits(units, decimals = LUX_DECIMALS) {
+  if (decimals === LUX_DECIMALS) return amountForInput(units);
+  const scale = 10n ** BigInt(decimals);
+  const value = BigInt(units);
+  const fraction = (value % scale).toString().padStart(decimals, "0").replace(/0+$/u, "");
+  return amountForField(`${value / scale}${fraction ? `.${fraction}` : ""}`);
+}
+
 export { decimalSeparator, formatDuskPlain };
 
 /** "1,483.92", or "1.483,92" on a Dutch browser: base units in decimal, trailing zeros dropped. */
@@ -41,6 +50,10 @@ export const formatLux = (lux, maxFraction = LUX_DECIMALS) =>
 
 export const formatDusk = (lux, maxFraction = LUX_DECIMALS) =>
   `${formatLux(lux, maxFraction)} DUSK`;
+
+/** An amount of a route's token, from its smallest unit: "95.085867 EURd", or DUSK to the Lux. */
+export const formatToken = (units, token, maxFraction = token.decimals) =>
+  `${formatUnitsGrouped(units, token.decimals, maxFraction)} ${token.symbol}`;
 
 /**
  * A fee to two significant digits: rounded up for a maximum ("up to"), to

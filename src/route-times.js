@@ -18,21 +18,25 @@ const RECENT_COUNT = 5;
 /**
  * What this browser's recent completed transfers on `route` took, sent to
  * arrived: the median of the last five of the past 30 days, or null with
- * fewer than two.
+ * fewer than two. A Hyperlane transfer to Dusk took until its delivery,
+ * however long a claim of it waited after: one whose delivery wasn't seen
+ * says nothing.
  */
 export function measuredSeconds(route, transfers = [], now = Date.now()) {
+  const delivery = route.mode === "hyperlane" && route.to.id === "dusk";
+  const arrivedAt = (entry) => (delivery ? entry.deliveredAt : entry.destinationAt);
   const took = transfers
     .filter(
       (entry) =>
         entry.routeId === route.id &&
         entry.status === "completed" &&
         entry.sourceAt &&
-        entry.destinationAt > entry.sourceAt &&
+        arrivedAt(entry) > entry.sourceAt &&
         now - entry.sourceAt < RECENT_MS,
     )
     .sort((a, b) => b.sourceAt - a.sourceAt)
     .slice(0, RECENT_COUNT)
-    .map((entry) => (entry.destinationAt - entry.sourceAt) / 1_000)
+    .map((entry) => (arrivedAt(entry) - entry.sourceAt) / 1_000)
     .sort((a, b) => a - b);
   return took.length < 2 ? null : took[Math.floor(took.length / 2)];
 }
@@ -72,14 +76,28 @@ export function routeTime(route, cfg, { chain = null, now = Date.now(), transfer
   if (route.mode === "duskevm-deposit" && chain?.deposit)
     return { seconds: chain.deposit.lagSeconds + DUSK_BLOCK_SECONDS, source: "chain" };
   const measured = measuredSeconds(route, transfers, now);
+  // Hyperlane's routes arrive within a minute or about one: their times are
+  // said to the 10 seconds under a minute (`inSeconds`).
+  if (route.mode === "hyperlane") {
+    const usual = measured ?? cfg.hyperlane?.seconds?.[route.from.id === "dusk" ? "out" : "in"];
+    return usual ? { inSeconds: true, seconds: usual, source: measured ? "measured" : "config" } : null;
+  }
   if (measured) return { seconds: measured, source: "measured" };
   if (route.mode === "duskevm-deposit") return configured(cfg.duskEvm?.depositSeconds);
   if (route.mode === "migration") return configured(cfg.evmNetworks?.[route.from.id]?.migrationSeconds);
   return configured(cfg.service?.delaySeconds);
 }
 
-/** The route's time as every page writes it, or "" when it isn't known. */
-export const routeTimeText = (time) => (time ? aboutTime(time.seconds) : "");
+/**
+ * The route's time as every page writes it, or "" when it isn't known: as
+ * every Dusk app writes an estimate, or, for a time said in seconds, "~20 s"
+ * under a minute.
+ */
+export function routeTimeText(time) {
+  if (!time) return "";
+  const tens = Math.max(10, Math.ceil(time.seconds / 10) * 10);
+  return time.inSeconds && tens < 60 ? `~${tens} s` : aboutTime(time.seconds);
+}
 
 /** How long before its usual time a transfer is due, and how long after it it still is. */
 const DUE_BEFORE_MS = 60_000;

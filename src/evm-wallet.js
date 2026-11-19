@@ -6,7 +6,7 @@ import {
   defineChain,
   http,
 } from "viem";
-import { config } from "./config.js";
+import { config, evmChains } from "./config.js";
 import { pageStorage } from "./page-storage.js";
 
 const listeners = new Set();
@@ -139,6 +139,49 @@ async function readWalletChain() {
   }
 }
 
+/**
+ * The networks Reown offers a WalletConnect wallet: only this deployment's,
+ * each EVM chain its routes reach (`evmChains`: Ethereum, BNB Smart Chain,
+ * Hyperlane's chain) and DuskEVM, as configured. A session can only switch
+ * to a chain on this list.
+ */
+export function reownNetworks(cfg) {
+  const network = ({
+    chainId: id,
+    chainName: name,
+    currency: nativeCurrency,
+    explorerUrl,
+    rpcUrl,
+  }) => ({
+    blockExplorers: {
+      default: { name: `${name} Explorer`, url: explorerUrl },
+    },
+    caipNetworkId: `eip155:${id}`,
+    chainNamespace: "eip155",
+    id,
+    name,
+    nativeCurrency,
+    rpcUrls: {
+      default: { http: [rpcUrl] },
+      public: { http: [rpcUrl] },
+    },
+  });
+  return [
+    ...evmChains(cfg).map((id) => network(cfg.evmNetworks[id])),
+    ...(cfg.duskEvm.enabled
+      ? [
+          network({
+            chainId: cfg.duskEvm.chainId,
+            chainName: cfg.duskEvm.name,
+            currency: { decimals: 18, name: "Dusk", symbol: "DUSK" },
+            explorerUrl: cfg.duskEvm.explorerUrl,
+            rpcUrl: cfg.duskEvm.rpcUrl,
+          }),
+        ]
+      : []),
+  ];
+}
+
 async function initializeReown() {
   if (appKit || !config.reown.projectId) return appKit;
   if (appKitPromise) return appKitPromise;
@@ -146,45 +189,7 @@ async function initializeReown() {
     import("@reown/appkit"),
     import("@reown/appkit-adapter-wagmi"),
   ]).then(([{ createAppKit }, { WagmiAdapter }]) => {
-    const network = ({
-      chainId: id,
-      chainName: name,
-      currency: nativeCurrency,
-      explorerUrl,
-      rpcUrl,
-    }) => ({
-      blockExplorers: {
-        default: { name: `${name} Explorer`, url: explorerUrl },
-      },
-      caipNetworkId: `eip155:${id}`,
-      chainNamespace: "eip155",
-      id,
-      name,
-      nativeCurrency,
-      rpcUrls: {
-        default: { http: [rpcUrl] },
-        public: { http: [rpcUrl] },
-      },
-    });
-    // Only this deployment's networks: Ethereum, BNB Smart Chain and DuskEVM, as configured.
-    const evmIds = new Set([
-      ...config.migrations,
-      ...(config.service ? [config.service.network] : []),
-    ]);
-    const networks = [
-      ...[...evmIds].map((id) => network(config.evmNetworks[id])),
-      ...(config.duskEvm.enabled
-        ? [
-            network({
-              chainId: config.duskEvm.chainId,
-              chainName: config.duskEvm.name,
-              currency: { decimals: 18, name: "Dusk", symbol: "DUSK" },
-              explorerUrl: config.duskEvm.explorerUrl,
-              rpcUrl: config.duskEvm.rpcUrl,
-            }),
-          ]
-        : []),
-    ];
+    const networks = reownNetworks(config);
     const adapter = new WagmiAdapter({
       networks,
       projectId: config.reown.projectId,

@@ -129,7 +129,7 @@ test("a withdrawal shows its three steps, their times and the next action", () =
   const unread = transferView({ hash: L2_HASH, sourceAt: sentAt, stage: "waiting_for_output", status: "pending" }, { cfg, now, route: withdrawal, locale: GB, timeZone: AMS });
   assert.deepEqual(unread.steps.slice(1).map(({ detail }) => detail), ["", ""]);
   assert.equal(transferSubline(unread, { sourceAt: sentAt, stage: "waiting_for_output" }, withdrawal, cfg, { locale: GB, now, timeZone: AMS }), "Sent 23 Oct, 16:20 CEST");
-  assert.deepEqual(ready.action, { blocked: "", failure: "", kind: "prove", label: "Prove on Dusk", quiet: false });
+  assert.deepEqual(ready.action, { blocked: "", command: "withdrawal-prove", failure: "", kind: "prove", label: "Prove on Dusk", quiet: false });
   assert.equal(ready.title, "Prove the withdrawal of 200 DUSK");
   assert.deepEqual(ready.tracker.map(({ label }) => label), ["Sent", "Prove now", "Claim"]);
 

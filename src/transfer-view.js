@@ -14,7 +14,9 @@ import {
   formatDusk,
   formatShort,
   formatShortDay,
+  formatToken,
 } from "./format.js";
+import { duskRecipientHash } from "./hyperlane.js";
 import { networkName, tokenName } from "./names.js";
 import { lateAfterSeconds, routeTime } from "./route-times.js";
 import { STATUS_WORDS } from "./tracking.js";
@@ -319,9 +321,100 @@ function sourceSteps(entry, route, cfg, { locale, now, timeZone, year }) {
   return steps;
 }
 
+/** What a transfer a route holds for its account's claim says it is, in place of pending. */
+export const HELD_WORD = "To claim";
+
+/**
+ * A claim of escrow that went out and failed on Dusk: that, why, and what it
+ * cost, which a wallet that didn't send it never says.
+ */
+function claimFailedLine(entry) {
+  const why = String(entry.actionError ?? "").replace(/^The claim failed on Dusk:?\s*/u, "");
+  const cost = entry.claimFailedFeeLux ? ` and cost ${formatDusk(BigInt(entry.claimFailedFeeLux))}` : "";
+  return `The claim failed on Dusk${why ? ` (${why})` : ""}${cost}.`;
+}
+
+/** Whether a Hyperlane route holds a transfer to Dusk in escrow, for its account's claim. */
+export const heldInEscrow = (entry, route) => route?.mode === "hyperlane" && entry?.status === "pending" && entry.escrow === "held";
+
+/**
+ * Whether a Hyperlane transfer held in escrow is someone else's to claim: it
+ * pays another account than `owner`, the one the page is for, by its hash.
+ */
+export const heldForAnother = (entry, route, owner) =>
+  heldInEscrow(entry, route) && Boolean(owner) && Boolean(entry.recipientHash) && entry.recipientHash !== duskRecipientHash(owner);
+
+/**
+ * A Hyperlane transfer's steps. To the EVM chain: sent, confirmed on Dusk,
+ * then on its way by its message until it arrived there. To Dusk: sent on
+ * the EVM chain, then on its way until Dusk's Mailbox delivered it, and,
+ * where the route holds it for the account's claim, the claim.
+ */
+function hyperlaneSteps(entry, route, cfg, { locale, now, timeZone, year }) {
+  const time = (ms) => (ms ? formatDateTime(ms, { locale, now, timeZone, year }) : "");
+  const from = networkName(cfg, route.from.id);
+  const to = networkName(cfg, route.to.id);
+  const failed = entry.status === "failed";
+  const arrived = entry.status === "completed";
+  const confirmed = Boolean(entry.sourceAt) || arrived;
+  const message = entry.messageId ? `Message ${short(entry.messageId)}` : "";
+  const confirm = (extra) =>
+    step("confirmed", route.from.id === "dusk" ? `Confirmed on ${from}` : `Sent from ${from}`, confirmed ? "done" : failed ? "failed" : "now", {
+      at: entry.sourceAt ?? null,
+      atText: time(entry.sourceAt),
+      detail: confirmed ? "" : failed ? entry.note ?? "" : `Waiting for ${from}`,
+      ...extra,
+    });
+  if (route.from.id === "dusk")
+    return [
+      step("sent", `Sent from ${from}`, "done", { hash: entry.hash, network: "dusk" }),
+      confirm(),
+      step("arrived", arrived ? `Arrived on ${to}` : `Arriving on ${to}`, arrived ? "done" : failed ? "todo" : confirmed ? "now" : "todo", {
+        at: entry.destinationAt ?? null,
+        atText: time(entry.destinationAt),
+        detail: arrived ? "" : message,
+        hash: entry.destinationHash ?? null,
+        network: route.to.id,
+      }),
+    ];
+  const held = entry.escrow === "held" || entry.escrow === "claimed";
+  const claimed = entry.escrow === "claimed" || (held && arrived);
+  const delivered = Boolean(entry.delivered) || arrived;
+  const steps = [
+    confirm({ hash: entry.hash, network: route.from.id }),
+    step("arrived", held ? "Delivered to Dusk" : delivered ? `Arrived on ${to}` : `Arriving on ${to}`, delivered ? "done" : failed ? "todo" : confirmed ? "now" : "todo", {
+      at: held ? entry.deliveredAt ?? null : entry.destinationAt ?? entry.deliveredAt ?? null,
+      atText: time(held ? entry.deliveredAt : entry.destinationAt ?? entry.deliveredAt),
+      detail: delivered ? (held && !claimed ? "Held for its account until it's claimed" : "") : message,
+      // The transaction Dusk's Mailbox delivered it in, once found.
+      hash: entry.deliveryHash ?? null,
+      network: "dusk",
+    }),
+  ];
+  // The first transfer to an account waits for its claim: said as soon as it's known.
+  if (held || (entry.firstToAccount && !delivered && !failed))
+    steps.push(
+      claimed
+        ? step("claim", "Claimed on Dusk", "done", { at: entry.claimAt ?? null, atText: time(entry.claimAt), hash: entry.claimHash ?? null, network: "dusk" })
+        : step("claim", "Claim on Dusk", !held ? "todo" : entry.pendingAction === "claim" ? "now" : "turn", {
+            detail: !held ? "The first transfer to an account waits until it's claimed" : entry.pendingAction === "claim" ? "Claim sent, waiting for Dusk" : "Ready now",
+            hash: entry.pendingHash ?? null,
+            network: "dusk",
+          }),
+    );
+  return steps;
+}
+
 function titleFor(entry, route, cfg, amount) {
   const from = networkName(cfg, route.from.id);
   const to = networkName(cfg, route.to.id);
+  if (route.mode === "hyperlane") {
+    const moved = amount === null ? route.token.symbol : formatToken(amount, route.token);
+    if (entry.status === "completed") return `${moved} arrived on ${to}`;
+    if (entry.status === "failed") return `${moved} didn't reach ${to}`;
+    if (entry.escrow === "held" && !entry.pendingAction) return `${moved} is ready to claim`;
+    return `Sending ${moved} to ${to}`;
+  }
   const text = amount === null ? "DUSK" : formatDusk(amount);
   const received =
     route.mode === "service-transfer" && amount !== null && cfg.service
@@ -362,12 +455,16 @@ export function transferView(entry, { account = "", cfg, locale, name = "", now 
   const status = entry.status === "completed" || entry.status === "failed" ? entry.status : "pending";
   const amount = amountOf(entry);
   const withdrawal = route.mode === "duskevm-withdrawal";
+  const hyperlane = route.mode === "hyperlane";
+  // Held for another account's claim: anyone can claim it for it, quietly.
+  const held = heldInEscrow({ ...entry, status }, route);
   // Someone else's DUSK: its steps are never the user's turn, and its action is quiet.
-  const forOther = status === "pending" && sentToSomeoneElse(entry, route, owner);
+  const forOther = status === "pending" && (sentToSomeoneElse(entry, route, owner) || heldForAnother({ ...entry, status }, route, owner));
   // How long the route takes on this network, as every page says it.
   const time = routeTime(route, cfg, { ...timing, now });
   const options = { account, locale, name, now, time, timeZone, year };
-  const steps = (withdrawal ? withdrawalSteps(entry, cfg, options) : sourceSteps({ ...entry, status }, route, cfg, options)).map(
+  const built = withdrawal ? withdrawalSteps(entry, cfg, options) : hyperlane ? hyperlaneSteps({ ...entry, status }, route, cfg, options) : sourceSteps({ ...entry, status }, route, cfg, options);
+  const steps = built.map(
     (item) => ({
       ...item,
       href: item.hash && item.network ? explorerTxUrl(cfg, item.network, item.hash) : null,
@@ -376,7 +473,7 @@ export function transferView(entry, { account = "", cfg, locale, name = "", now 
   );
   const fromNetwork = route.from.id;
   const toNetwork = route.to.id;
-  const actionKind = withdrawal && status === "pending" && !entry.pendingAction ? withdrawalNextAction(entry.stage) : null;
+  const actionKind = withdrawal && status === "pending" && !entry.pendingAction ? withdrawalNextAction(entry.stage) : held && !entry.pendingAction ? "claim" : null;
 
   let countdown = null;
   if (withdrawal && status === "pending" && entry.stage === "proven_waiting" && !entry.proofRejected) {
@@ -400,12 +497,14 @@ export function transferView(entry, { account = "", cfg, locale, name = "", now 
 
   const sentAt = entry.sourceAt ?? (entry.createdAt ? Date.parse(entry.createdAt) : null);
   const lateAfter = lateAfterSeconds(route, time);
-  // What arrived, once it has, next to the word that says so.
-  const shown = amount === null ? null : formatShort(status === "completed" && route?.mode === "service-transfer" && cfg?.service?.feeLux && amount > BigInt(cfg.service.feeLux) ? amount - BigInt(cfg.service.feeLux) : amount);
+  // What arrived, once it has, next to the word that says so, in what the route moves.
+  const unit = hyperlane ? route.token.symbol : "DUSK";
+  const shown = amount === null ? null : formatShort(status === "completed" && route?.mode === "service-transfer" && cfg?.service?.feeLux && amount > BigInt(cfg.service.feeLux) ? amount - BigInt(cfg.service.feeLux) : amount, route.token?.decimals ?? 9);
   const late =
     status === "pending" &&
     sentAt &&
     lateAfter &&
+    !held &&
     (!withdrawal || ["submitted", "waiting_for_output"].includes(entry.stage ?? "submitted")) &&
     now - sentAt > lateAfter * 1_000;
 
@@ -414,13 +513,17 @@ export function transferView(entry, { account = "", cfg, locale, name = "", now 
       ? {
           // A claim waits for the account that proved it.
           blocked: actionKind === "finalize" && proverMismatch(entry, submitter) ? switchToProver(entry) : "",
+          // What the action's button does: a withdrawal's step, or an escrow's claim.
+          command: held ? "escrow-claim" : `withdrawal-${actionKind}`,
           // Rejected in the wallet: that, as the deposit says it. Refused for
           // its gas: that, since trying again would be refused too.
           failure: !entry.actionError
             ? ""
-            : entry.actionError === WALLET_CANCELLED || entry.actionError === WITHDRAWAL_GAS_REFUSAL
-              ? entry.actionError
-              : ACTION_FAILURE[entry.stage],
+            : held && entry.claimFailedHash
+              ? claimFailedLine(entry)
+              : entry.actionError === WALLET_CANCELLED || entry.actionError === WITHDRAWAL_GAS_REFUSAL || held
+                ? held && entry.actionError !== WALLET_CANCELLED ? "The claim wasn't sent. Try again." : entry.actionError
+                : ACTION_FAILURE[entry.stage],
           kind: actionKind,
           label: actionKind === "prove" ? "Prove on Dusk" : "Claim on Dusk",
           quiet: forOther,
@@ -428,8 +531,8 @@ export function transferView(entry, { account = "", cfg, locale, name = "", now 
       : null,
     amount,
     // As a list writes it, and in full for whoever asks.
-    amountExact: shown ? `${shown.exact} DUSK` : "",
-    amountText: shown ? `${shown.text} DUSK` : "",
+    amountExact: shown ? `${shown.exact} ${unit}` : "",
+    amountText: shown ? `${shown.text} ${unit}` : "",
     countdown,
     from: { account: entry.sender ?? null, network: fromNetwork },
     late: Boolean(late),
@@ -437,7 +540,8 @@ export function transferView(entry, { account = "", cfg, locale, name = "", now 
     pair: [fromNetwork, toNetwork],
     rowTitle: `${networkName(cfg, fromNetwork)} to ${networkName(cfg, toNetwork)}`,
     status,
-    statusWord: STATUS_WORDS[status],
+    // Delivered into escrow, it waits for its claim.
+    statusWord: held ? HELD_WORD : STATUS_WORDS[status],
     steps,
     time,
     title: titleFor({ ...entry, status }, route, cfg, amount),
@@ -482,6 +586,12 @@ function trackerLabel(item, entry, now) {
 export function transferSubline(view, entry, route, cfg, { account = "", locale, name = "", now = Date.now(), timeZone } = {}) {
   const time = (ms) => formatDateTime(ms, { locale, now, timeZone });
   if (view.status === "failed") return view.note || "This transfer didn't go through.";
+  if (heldInEscrow({ ...entry, status: view.status }, route))
+    return entry.pendingAction === "claim"
+      ? "Claim sent, waiting for Dusk"
+      : entry.claimFailedHash && entry.actionError
+        ? "The claim failed on Dusk"
+        : "Held on Dusk until it's claimed";
   if (route.mode === "duskevm-withdrawal") {
     const stage = entry.stage ?? "submitted";
     if (view.status === "completed")

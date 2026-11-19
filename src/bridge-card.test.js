@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { cardNetworks, cardRoute, choosePair, defaultPair, entryRoutes, flipRoute, followsWallets, fromChoices, handedOverRecipient, primaryButton, routeBetween, toChoices } from "./bridge-card.js";
+import { cardNetworks, cardRoute, choosePair, defaultPair, entryRoutes, flipRoute, followsWallets, fromChoices, handedOverRecipient, primaryButton, routeBetween, toChoices, tokenChoices, tokenOf } from "./bridge-card.js";
 import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 import { bridgeTasks, networkName, notRunning } from "./names.js";
@@ -24,12 +24,14 @@ const DUSKEVM = {
 const testnet = profile("testnet", DUSKEVM);
 // The same, with the Sepolia routes running again.
 const running = profile("testnet", { ...DUSKEVM, VITE_PAUSED_ROUTES: "none" });
+// Testnet without Hyperlane's routes: Sepolia's own are all it has.
+const withoutHyperlane = profile("testnet", { ...DUSKEVM, VITE_HYPERLANE_TOKENS: "none" });
 const mainnet = profile("mainnet");
 const pairs = (routes) => routes.map((route) => `${route.from.id}>${route.to.id}`);
 
 test("the card pairs only the bridge's routes, in both directions where both exist", () => {
   const routes = buildRoutes(running);
-  assert.deepEqual(pairs(routes).sort(), ["dusk-evm>dusk", "dusk>dusk-evm", "dusk>ethereum", "ethereum>dusk"]);
+  assert.deepEqual([...new Set(pairs(routes))].sort(), ["dusk-evm>dusk", "dusk>dusk-evm", "dusk>ethereum", "ethereum>dusk"]);
   assert.deepEqual(cardNetworks(routes), ["ethereum", "dusk", "dusk-evm"]);
   const main = buildRoutes(mainnet);
   assert.deepEqual(pairs(main).sort(), ["bsc>dusk", "dusk>bsc", "ethereum>dusk"]);
@@ -90,6 +92,9 @@ test("the button says what's missing, then Review bridge", () => {
   assert.equal(label({ destination: "", looking: "alice.dusk" }), "Looking up alice.dusk…");
   assert.equal(label({ destination: "", destinationError: "That isn't an EVM address" }), "Fix the recipient");
   assert.equal(label({ destination: "" }), "Add a recipient");
+  // A route's approval not read yet: nothing to review until it is, or a way to read it again.
+  assert.deepEqual(primaryButton({ ...ready, waiting: "reading" }), { action: null, enabled: false, label: "Checking the approval…" });
+  assert.deepEqual(primaryButton({ ...ready, waiting: "failed" }), { action: "read-again", enabled: true, label: "Couldn't read the approval. Try again" });
   // No wallet to pay and none typed: the way to one, where a narrow page has no header button.
   assert.deepEqual(primaryButton({ ...ready, connectsRecipient: true, destination: "" }), {
     action: "connect-evm",
@@ -133,7 +138,7 @@ test("the card stops following the wallets once a recipient is typed, as once an
 });
 
 test("the testnet Sepolia routes are listed but not running, behind one switch", () => {
-  const routes = buildRoutes(testnet);
+  const routes = buildRoutes(withoutHyperlane);
   assert.deepEqual(routes.filter((route) => route.paused).map((route) => route.id), ["ethereum-to-dusk", "dusk-to-ethereum"]);
   const name = (id) => networkName(testnet, id);
   const why = notRunning(testnet);
@@ -145,7 +150,7 @@ test("the testnet Sepolia routes are listed but not running, behind one switch",
   assert.equal(pairs([defaultPair(routes, { evm: true })])[0], "dusk>dusk-evm");
   assert.deepEqual(entryRoutes(routes, routeBetween(routes, "dusk", "dusk-evm")), []);
   // A link to one opens it, and it sends nothing.
-  const sepolia = cardRoute(parseLocation("#/move/migrate"), bridgeTasks(testnet, routes), routes);
+  const sepolia = cardRoute(parseLocation("#/move/migrate"), bridgeTasks(withoutHyperlane, routes), routes);
   assert.equal(sepolia.id, "ethereum-to-dusk");
   assert.deepEqual(primaryButton({ amountLux: 1n, destination: "x", duskInstalled: true, route: sepolia, signerConnected: true }), { action: null, enabled: false, label: "Not running right now" });
   // On its own page the network stays chosen, not disabled.
@@ -161,6 +166,7 @@ test("the testnet Sepolia routes are listed but not running, behind one switch",
   assert.equal(choosePair(ethPaused, { from: "ethereum", to: "dusk" }).id, "ethereum-to-dusk");
   // One switch runs them again; mainnet's all run.
   assert.ok(buildRoutes(running).every((route) => !route.paused));
+  assert.deepEqual(buildRoutes(testnet).filter((route) => route.paused).map((route) => route.id), ["ethereum-to-dusk", "dusk-to-ethereum"]);
   assert.ok(buildRoutes(mainnet).every((route) => !route.paused));
 });
 
@@ -192,4 +198,98 @@ test("a recipient handed over in the link is taken only by a route that pays a D
   assert.equal(takes("dusk", "ethereum"), "");
   assert.equal(handedOverRecipient(parseLocation("#/move/from-duskevm"), routeBetween(routes, "dusk-evm", "dusk")), "");
   assert.equal(handedOverRecipient({ page: "home", to: "21n5nc" }, routeBetween(routes, "dusk-evm", "dusk")), "");
+});
+
+test("Hyperlane's routes run Sepolia ↔ Dusk on testnet, one per token, beside Sepolia's paused ones", () => {
+  const routes = buildRoutes(testnet);
+  const name = (id) => networkName(testnet, id);
+  const why = notRunning(testnet);
+  // Sepolia is offered again, both ways: its routes run through Hyperlane.
+  assert.deepEqual(fromChoices(routes, "dusk", name, why).find((choice) => choice.id === "ethereum"), { id: "ethereum", selected: false });
+  const toSepolia = toChoices(routes, "dusk", "dusk-evm", name, why).find((choice) => choice.id === "ethereum");
+  assert.deepEqual([toSepolia.disabled, toSepolia.route.id], [undefined, "dusk-to-sepolia"]);
+  // A pair's route is the running one, of the token asked for where it moves it.
+  assert.equal(routeBetween(routes, "dusk", "ethereum").id, "dusk-to-sepolia");
+  assert.equal(routeBetween(routes, "dusk", "ethereum", "hyperlane-eurd").id, "dusk-to-sepolia-eurd");
+  assert.equal(routeBetween(routes, "dusk", "dusk-evm", "hyperlane-eurd").id, "dusk-to-dusk-evm");
+  // The flip keeps the token; a From keeps it where it can.
+  assert.equal(flipRoute(routes, routeBetween(routes, "dusk", "ethereum", "hyperlane-usdd")).id, "sepolia-to-dusk-usdd");
+  assert.equal(choosePair(routes, { from: "ethereum", to: "dusk-evm", token: "hyperlane-eurd" }).id, "sepolia-to-dusk-eurd");
+  assert.equal(choosePair(routes, { from: "dusk", to: "ethereum", token: "hyperlane-eurd" }).id, "dusk-to-sepolia-eurd");
+  // With only an EVM wallet, the card opens on the way into Dusk that runs.
+  assert.equal(defaultPair(routes, { evm: true }).id, "sepolia-to-dusk");
+  // A link to the chain, or to a token's route, opens a running one.
+  const tasks = bridgeTasks(testnet, routes);
+  assert.equal(cardRoute(parseLocation("#/move/ethereum"), tasks, routes).id, "sepolia-to-dusk");
+  assert.equal(cardRoute(parseLocation("#/move/dusk-to-sepolia-usdd"), tasks, routes).id, "dusk-to-sepolia-usdd");
+  // Still not offered under the card: that's for DUSK migrating in.
+  assert.deepEqual(entryRoutes(routes, routeBetween(routes, "dusk", "ethereum")), []);
+});
+
+test("the card offers the tokens its pair moves, each by its route, and none for a pair of one", () => {
+  const routes = buildRoutes(testnet);
+  const choices = (route) => tokenChoices(routes, route).map(({ id, name, selected, symbol }) => [symbol, id, name, selected]);
+  assert.deepEqual(choices(routeBetween(routes, "dusk", "ethereum", "hyperlane-eurd")), [
+    ["DUSK", "dusk-to-sepolia", "Dusk", false],
+    ["EURd", "dusk-to-sepolia-eurd", "Dusk Euro (testnet)", true],
+    ["USDd", "dusk-to-sepolia-usdd", "Dusk Dollar (testnet)", false],
+  ]);
+  assert.deepEqual(choices(routeBetween(routes, "ethereum", "dusk")).map(([symbol, id]) => [symbol, id]), [
+    ["DUSK", "sepolia-to-dusk"],
+    ["EURd", "sepolia-to-dusk-eurd"],
+    ["USDd", "sepolia-to-dusk-usdd"],
+  ]);
+  assert.deepEqual(tokenChoices(routes, routeBetween(routes, "dusk", "dusk-evm")), []);
+  // A paused route a link opened is the card's; the running tokens are offered beside it, Hyperlane's DUSK too.
+  const legacy = routes.find((route) => route.id === "dusk-to-ethereum");
+  assert.deepEqual(choices(legacy).map(([symbol, id, , selected]) => [symbol, id, selected]), [
+    ["DUSK", "dusk-to-ethereum", true],
+    ["DUSK", "dusk-to-sepolia", false],
+    ["EURd", "dusk-to-sepolia-eurd", false],
+    ["USDd", "dusk-to-sepolia-usdd", false],
+  ]);
+  // A token paused by the deployment isn't offered.
+  const paused = buildRoutes(profile("testnet", { ...DUSKEVM, VITE_PAUSED_ROUTES: "dusk-to-sepolia-usdd,ethereum-to-dusk,dusk-to-ethereum" }));
+  assert.deepEqual(tokenChoices(paused, routeBetween(paused, "dusk", "ethereum")).map((choice) => choice.symbol), ["DUSK", "EURd"]);
+});
+
+test("a pair's running route is preferred to a paused one of the token asked for", () => {
+  // Hyperlane's EURd alone, beside Sepolia's paused DUSK routes: from a card on DUSK, the pair still runs.
+  const eurdOnly = buildRoutes(profile("testnet", { ...DUSKEVM, VITE_HYPERLANE_TOKENS: "eurd" }));
+  const deposit = routeBetween(eurdOnly, "dusk", "dusk-evm");
+  assert.equal(routeBetween(eurdOnly, "dusk", "ethereum", tokenOf(deposit)).id, "dusk-to-sepolia-eurd");
+  const name = (id) => networkName(testnet, id);
+  const sepolia = toChoices(eurdOnly, "dusk", "dusk-evm", name, notRunning(testnet), tokenOf(deposit)).find((choice) => choice.id === "ethereum");
+  assert.deepEqual([sepolia.disabled, sepolia.route.id], [undefined, "dusk-to-sepolia-eurd"]);
+  // With nothing running there, the paused route of the token, as before.
+  const legacy = buildRoutes(withoutHyperlane);
+  assert.equal(routeBetween(legacy, "dusk", "ethereum", tokenOf(routeBetween(legacy, "dusk", "dusk-evm"))).id, "dusk-to-ethereum");
+});
+
+test("Sepolia's own DUSK routes and Hyperlane's are told apart: in the token list, and by the flip", () => {
+  const all = buildRoutes(running);
+  const hyperlaneDusk = all.find((route) => route.id === "dusk-to-sepolia");
+  // Both send DUSK from Dusk: each says what arrives.
+  assert.deepEqual(
+    tokenChoices(all, hyperlaneDusk).map(({ id, note, selected, symbol }) => [symbol, id, note ?? "", selected]),
+    [
+      ["DUSK", "dusk-to-ethereum", "Arrives as ERC20 DUSK", false],
+      ["DUSK", "dusk-to-sepolia", "Arrives as DUSK", true],
+      ["EURd", "dusk-to-sepolia-eurd", "", false],
+      ["USDd", "dusk-to-sepolia-usdd", "", false],
+    ],
+  );
+  // Back from Sepolia, a Hyperlane DUSK transfer goes back through Hyperlane, not the migration.
+  assert.equal(flipRoute(all, hyperlaneDusk).id, "sepolia-to-dusk");
+  assert.equal(flipRoute(all, all.find((route) => route.id === "dusk-to-ethereum")).id, "ethereum-to-dusk");
+  // From Sepolia they send different tokens: ERC20 DUSK to migrate, Hyperlane's DUSK to bring back.
+  assert.deepEqual(
+    tokenChoices(all, all.find((route) => route.id === "sepolia-to-dusk")).map(({ id, symbol }) => [symbol, id]),
+    [
+      ["ERC20 DUSK", "ethereum-to-dusk"],
+      ["DUSK", "sepolia-to-dusk"],
+      ["EURd", "sepolia-to-dusk-eurd"],
+      ["USDd", "sepolia-to-dusk-usdd"],
+    ],
+  );
 });

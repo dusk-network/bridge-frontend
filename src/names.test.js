@@ -67,7 +67,7 @@ test("routes and tasks use the same names everywhere", () => {
   assert.deepEqual([...labels].sort(), ["Dusk", "DuskEVM", "Sepolia"]);
   assert.deepEqual(
     routes.map((route) => routeTitle(cfg, route)),
-    ["Sepolia to Dusk", "Dusk to Sepolia", "Dusk to DuskEVM", "DuskEVM to Dusk"],
+    ["Sepolia to Dusk", "Dusk to Sepolia", "Dusk to DuskEVM", "DuskEVM to Dusk", ...Array(3).fill(["Dusk to Sepolia", "Sepolia to Dusk"]).flat()],
   );
   assert.equal(networkName(profile("mainnet"), "dusk-evm"), "DuskEVM");
 });
@@ -110,6 +110,13 @@ test("DUSK on an EVM chain is named by its token standard, never old", () => {
   assert.deepEqual(units(profile("testnet", DUSKEVM)).slice(2), [
     ["dusk-to-dusk-evm", "DUSK", "DUSK"],
     ["dusk-evm-to-dusk", "DUSK", "DUSK"],
+    // Hyperlane's move a token by its own symbol, on Sepolia too.
+    ["dusk-to-sepolia", "DUSK", "DUSK"],
+    ["sepolia-to-dusk", "DUSK", "DUSK"],
+    ["dusk-to-sepolia-eurd", "EURd", "EURd"],
+    ["sepolia-to-dusk-eurd", "EURd", "EURd"],
+    ["dusk-to-sepolia-usdd", "USDd", "USDd"],
+    ["sepolia-to-dusk-usdd", "USDd", "USDd"],
   ]);
   for (const cfg of [profile("mainnet"), profile("testnet", DUSKEVM)]) {
     const sheet = JSON.stringify(contractGroups(cfg));

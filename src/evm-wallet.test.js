@@ -385,3 +385,18 @@ test("another wallet at the same address and chain counts as a change, so the pa
   assert.deepEqual(evmMoved(before, { account, chainId: 1, provider: metaMask }), { account: false, chain: true, wallet: false });
   assert.deepEqual(evmMoved(before, { account: null, chainId: 56, provider: null }), { account: true, chain: false, wallet: true });
 });
+
+test("WalletConnect is offered every EVM chain this deployment's routes reach, Hyperlane's too", async () => {
+  const { loadConfig } = await import("./config.js");
+  const { reownNetworks } = await import(`./evm-wallet.js?reown=${Date.now()}`);
+  // A testnet deployment with neither migrations nor the payout route: Hyperlane's routes still reach Sepolia.
+  globalThis.__DUSK_BRIDGE_CONFIG__ = { VITE_BRIDGE_PROFILE: "testnet", VITE_MIGRATION_NETWORKS: "none", VITE_SERVICE_NETWORK: "none" };
+  const hyperlaneOnly = loadConfig();
+  globalThis.__DUSK_BRIDGE_CONFIG__ = { ...globalThis.__DUSK_BRIDGE_CONFIG__, VITE_HYPERLANE_TOKENS: "none" };
+  const nothing = loadConfig();
+  delete globalThis.__DUSK_BRIDGE_CONFIG__;
+  const ids = (cfg) => reownNetworks(cfg).map((network) => network.caipNetworkId);
+  // Sepolia, and DuskEVM's testnet.
+  assert.deepEqual(ids(hyperlaneOnly), ["eip155:11155111", "eip155:745"]);
+  assert.deepEqual(ids(nothing), ["eip155:745"]);
+});

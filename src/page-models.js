@@ -8,12 +8,13 @@ import { formatEvmAddress } from "@dusk-network/networks/format";
 
 import { explorerAddressUrl } from "./contracts.js";
 import { groupTransfers, shownFor } from "./discovery.js";
-import { aboutFee, formatDateTime, formatDusk, formatLux, formatMaxFee, formatShort, formatUnitsGrouped } from "./format.js";
+import { aboutFee, formatDateTime, formatDusk, formatLux, formatMaxFee, formatShort, formatToken, formatUnitsGrouped } from "./format.js";
+import { HYPERLANE_GAS } from "./hyperlane.js";
 import { gasCoin, networkName, routeTitle, routeUnits, tokenName } from "./names.js";
 import { transferHref } from "./permalink.js";
 import { buildQuote, routeDuskFees, stepFeeText, withdrawalStepMax } from "./quote.js";
 import { routeTime, routeTimeText } from "./route-times.js";
-import { explorerTxUrl, html, short, transferSubline, transferView } from "./transfer-view.js";
+import { explorerTxUrl, heldForAnother, heldInEscrow, html, short, transferSubline, transferView } from "./transfer-view.js";
 import { copyButton } from "./views.js";
 import { revokeLines } from "./wallet-lines.js";
 
@@ -35,9 +36,13 @@ export const evmWalletName = (evm) => evm?.walletName || "your EVM wallet";
  * A migration takes the wallet steps its quote counts (`steps`): one where an
  * earlier approval covers the amount.
  */
-export function routeLine(route, cfg, { gasPrice = 1n, steps = 2, timing } = {}) {
+export function routeLine(route, cfg, { fee = null, gasPrice = 1n, steps = 2, timing } = {}) {
   const cost =
-    route.mode === "duskevm-deposit"
+    route.mode === "hyperlane"
+      ? route.signer === "dusk"
+        ? [steps === 2 && !route.hyperlane?.native ? "two wallet steps" : "", fee === null ? "bridge fee in DUSK" : `${formatDusk(fee)} bridge fee`]
+        : [`fee in ${gasCoin(cfg, route.from.id)}`]
+      : route.mode === "duskevm-deposit"
       ? [`fee up to ${formatMaxFee(routeDuskFees(route, { gasPrice }).send.maxLux)} DUSK`]
       : route.mode === "duskevm-withdrawal"
         ? ["three steps", `${stepFeeText({ gasPrice })} on Dusk`]
@@ -163,6 +168,9 @@ export function addDuskOffer(route, { added = false, balanceWei = null, entry = 
 
 /** Who does what, in one line: the route's steps and the wallets they take. */
 export function routeSteps(route, quote = null) {
+  if (route.mode === "hyperlane" && route.signer === "evm") return "One, in your EVM wallet";
+  // Before its approval is read, how many steps a token's transfer takes isn't known.
+  if (route.mode === "hyperlane") return quote?.steps === 2 ? "Approve, then send, in Dusk Wallet" : quote?.steps === null ? "In Dusk Wallet" : "One, in Dusk Wallet";
   if (route.mode === "duskevm-withdrawal") return "Send on DuskEVM, then prove and claim on Dusk";
   if (route.mode === "migration") return quote?.steps === 1 ? "One, in your EVM wallet" : "Approve, then migrate, in your EVM wallet";
   return "One, in Dusk Wallet";
@@ -177,6 +185,7 @@ export function routeSteps(route, quote = null) {
  * balances, to the Lux as what it sends is, gas, and where the payout goes.
  */
 export function reviewChecks(route, { cfg, destination, duskAccount, evm, quote, reads }) {
+  if (route.mode === "hyperlane") return hyperlaneChecks(route, { cfg, destination, duskAccount, evm, quote, reads });
   const checks = [];
   const to = networkName(cfg, route.to.id);
   const from = networkName(cfg, route.from.id);
@@ -229,6 +238,64 @@ export function reviewChecks(route, { cfg, destination, duskAccount, evm, quote,
     html: `It pays Dusk account <code class="mono">${html(short(destination))}</code>${duskAccount && destination === duskAccount ? ", your connected account" : ""}`,
     ok: true,
   });
+  return checks;
+}
+
+/**
+ * A Hyperlane transfer's checked facts: what the sending side holds, to the
+ * unit, and the fees' coin; an approval that covers a token's amount; where
+ * it goes; and, to Dusk, that the first transfer to an account waits for its
+ * claim, where the route says the account isn't paid there yet
+ * (`reads.hyperlane.registered`).
+ */
+function hyperlaneChecks(route, { cfg, destination, duskAccount, evm, quote, reads }) {
+  const checks = [];
+  const { token } = route;
+  const units = quote.amountLux ?? 0n;
+  const read = reads.hyperlane ?? {};
+  const to = networkName(cfg, route.to.id);
+  if (route.signer === "dusk") {
+    const balance = reads.duskBalance;
+    const fees = (quote.bridgeFeeLux ?? 0n) + (quote.gasMaxLux ?? 0n);
+    if (token.symbol !== "DUSK" && read.tokenBalance !== null && read.tokenBalance !== undefined)
+      checks.push({ html: `You have <b class="num">${html(formatToken(read.tokenBalance, token))}</b> on Dusk`, ok: units <= read.tokenBalance });
+    if (balance !== null && balance !== undefined && quote.bridgeFeeLux !== null && quote.bridgeFeeLux !== undefined)
+      checks.push(
+        token.symbol === "DUSK"
+          ? { html: `You have <b class="num">${html(formatDusk(balance))}</b> in your public balance, enough for ${html(formatDusk(units))} and the fees`, ok: quote.maxLux !== null && units <= quote.maxLux }
+          : { html: `You have <b class="num">${html(formatDusk(balance))}</b> for the fees, up to ${html(formatDusk(fees))}`, ok: balance >= fees },
+      );
+    if (token.symbol !== "DUSK" && quote.steps === 1 && read.allowance)
+      checks.push({ html: `An earlier approval of <b class="num">${html(formatToken(read.allowance, token))}</b> covers this, so you aren't asked to approve`, ok: true });
+    checks.push({
+      html: `It goes to <code class="mono">${html(short(destination))}</code> on ${html(to)}${evm?.account && destination?.toLowerCase() === evm.account.toLowerCase() ? `, your ${html(evmWalletName(evm))}` : ""}`,
+      ok: true,
+    });
+    return checks;
+  }
+  const coin = gasCoin(cfg, route.from.id);
+  const state = read.evm ?? {};
+  if (state.balance !== null && state.balance !== undefined)
+    checks.push({ html: `You have <b class="num">${html(formatToken(state.balance, token))}</b> at <code class="mono">${html(short(evm?.account))}</code> on ${html(networkName(cfg, route.from.id))}`, ok: units <= state.balance });
+  if (state.gasCoinWei !== null && state.gasCoinWei !== undefined && quote.bridgeFeeWei !== null && quote.bridgeFeeWei !== undefined) {
+    const held = `<b class="num">${html(formatShort(state.gasCoinWei, 18).text)} ${html(coin)}</b>`;
+    // Gas not known yet is no gas: the check says what it covers.
+    if (quote.evmFeeWei === null || quote.evmFeeWei === undefined)
+      checks.push({ html: `You have ${held} for the delivery fee, ${html(aboutFee(quote.bridgeFeeWei, 18, coin))} needed; the gas isn't known yet`, ok: state.gasCoinWei >= quote.bridgeFeeWei });
+    else {
+      const fees = quote.bridgeFeeWei + quote.evmFeeWei;
+      checks.push({ html: `You have ${held} for the fees, ${html(aboutFee(fees, 18, coin))} needed`, ok: state.gasCoinWei >= fees });
+    }
+  }
+  checks.push({
+    html: `It pays Dusk account <code class="mono">${html(short(destination))}</code>${duskAccount && destination === duskAccount ? ", your connected account" : ""}`,
+    ok: true,
+  });
+  if (read.registered === false)
+    checks.push({
+      html: `It's the first ${html(token.symbol)} to this account through the bridge, so it waits on Dusk until the account claims it, for a network fee of up to ${html(formatMaxFee(HYPERLANE_GAS.claim.limit * (reads.gasPrice ?? 1n)))} DUSK`,
+      ok: true,
+    });
   return checks;
 }
 
@@ -294,7 +361,8 @@ export function pricedReview(route, { amount, cfg, destination, duskAccount, evm
  */
 export function balanceLine(route, holdings) {
   if (holdings === null || holdings === undefined) return { exact: "", text: "" };
-  const { exact, text } = formatShort(holdings, route.signer === "dusk" ? 9 : 18);
+  // A Hyperlane route's token, in its own decimals, on either side.
+  const { exact, text } = formatShort(holdings, route.mode === "hyperlane" ? route.token.decimals : route.signer === "dusk" ? 9 : 18);
   const { send: unit } = routeUnits(route);
   return { exact: `${exact} ${unit}`, text: `${text} ${unit}` };
 }
@@ -306,6 +374,8 @@ export function balanceLine(route, holdings) {
  */
 export function availableLine(route, maxLux) {
   if (maxLux === null || maxLux === undefined) return { available: "", availableLabel: "", canMax: false };
+  if (route.mode === "hyperlane")
+    return { available: formatToken(maxLux, route.token, 4), availableLabel: route.token.symbol === "DUSK" && route.signer === "dusk" ? "Available after fees" : "Available", canMax: maxLux > 0n };
   const migration = route.mode === "migration";
   return {
     available: migration ? `${formatLux(maxLux, 4)} ${tokenName(route.from.id)}` : formatDusk(maxLux, 4),
@@ -385,7 +455,43 @@ function gasCounts(gas, evm) {
  * A migration's gas is what its chain says it and the approval it spent paid
  * (`evm`, from `migrationFacts`), whichever app signed that approval.
  */
+/**
+ * A Hyperlane transfer's amounts on its receipt, each to its smallest unit:
+ * what was sent and received, in its token, the bridge's fee and the
+ * network's, each in the coin it was paid in, with the approval sent for it
+ * on Dusk, and a claim's. What failed on its own chain moved nothing.
+ */
+function hyperlaneLedger(entry, { cfg, from, route, status }) {
+  const { token } = route;
+  const coin = gasCoin(cfg, route.from.id);
+  const amount = entry.amountLux === undefined || entry.amountLux === null ? null : BigInt(entry.amountLux);
+  const wentThrough = !(status === "failed" && failedAtSource(entry));
+  const wei = (value) => `${formatUnitsGrouped(value, 18)} ${coin}`;
+  const rows = [];
+  if (amount !== null && wentThrough) rows.push({ label: "You sent", value: formatToken(amount, token) });
+  if (route.from.id === "dusk") {
+    if (known(entry.bridgeFeeLux) && wentThrough) rows.push({ label: "Bridge fee", value: formatDusk(BigInt(entry.bridgeFeeLux)) });
+    // The approval this browser sent first is part of what the transfer cost.
+    const approved = known(entry.approvalFeeLux);
+    if (known(entry.feeLux))
+      rows.push({
+        ...(approved ? { detail: "approval and transfer" } : {}),
+        label: "Network fee",
+        value: formatDusk(BigInt(entry.feeLux) + (approved ? BigInt(entry.approvalFeeLux) : 0n)),
+      });
+  } else {
+    if (known(entry.bridgeFeeWei) && wentThrough) rows.push({ label: "Bridge fee", value: wei(BigInt(entry.bridgeFeeWei)) });
+    if (known(entry.feeWei)) rows.push({ label: `Fee on ${from}`, value: wei(BigInt(entry.feeWei)) });
+    if (known(entry.claimFeeLux)) rows.push({ label: "Claim fee on Dusk", value: formatDusk(BigInt(entry.claimFeeLux)) });
+    // A claim that failed on Dusk was paid for all the same.
+    if (known(entry.claimFailedFeeLux)) rows.push({ label: "Failed claim fee on Dusk", value: formatDusk(BigInt(entry.claimFailedFeeLux)) });
+  }
+  if (amount !== null && wentThrough && status !== "failed") rows.push({ label: status === "completed" ? "You received" : "You receive", value: formatToken(amount, token) });
+  return rows;
+}
+
 function ledgerRows(entry, { approvalSpentBy = false, cfg, evm = null, from, locale, route, status }) {
+  if (route.mode === "hyperlane") return hyperlaneLedger(entry, { cfg, from, route, status });
   const migration = route.mode === "migration";
   // Cancelled or replaced in the wallet, the migration was never mined: what
   // it cost is the approval this browser sent for it, until a migration
@@ -445,6 +551,8 @@ export function receiptModel(entry, { approvalSpentBy = false, cfg, evm = null, 
     caption = at ? `Arrived ${time(at)}.` : "Completed.";
     if (route.mode === "migration") caption += " It's in the public balance on Dusk.";
   } else if (view.status === "failed") caption = view.note;
+  // Delivered into escrow: it waits for its claim, not for time.
+  else if (heldInEscrow(entry, route)) caption = entry.pendingAction === "claim" ? "Claim sent, waiting for Dusk." : "Held on Dusk until it's claimed.";
   else if (view.time) caption = `Takes ${routeTimeText(view.time)}`;
 
   const sourceNetwork = route.from.kind === "dusk" ? "dusk" : route.from.id;
@@ -452,8 +560,15 @@ export function receiptModel(entry, { approvalSpentBy = false, cfg, evm = null, 
   const details = ledgerRows(entry, { approvalSpentBy, cfg, evm, from, locale, route, status: view.status });
   if (entry.sender) details.push({ html: addressHtml(cfg, sourceNetwork, entry.sender, `sender on ${from}`), label: `From, on ${from}` });
   if (entry.destination) details.push({ html: addressHtml(cfg, destinationNetwork, entry.destination, `recipient on ${to}`), label: `To, on ${to}` });
-  // The approval the migration spent, as its chain says, or the one this browser sent for it.
-  const approval = route.mode !== "migration" ? null : evm?.approvalState === "found" && evm.approval?.hash ? evm.approval.hash : entry.approvalHash;
+  // Paid to a Dusk account by its hash, where this page doesn't know the account.
+  else if (route.mode === "hyperlane" && entry.recipientHash)
+    details.push({ html: `<span class="fullval"><code class="mono">${html(entry.recipientHash)}</code><span class="full-actions">${copyButton(entry.recipientHash, "the Dusk account's hash")}</span></span>`, label: `To, on ${to}, by its hash` });
+  // Hyperlane's message, the one each side's Mailbox knows it by.
+  if (route.mode === "hyperlane" && entry.messageId)
+    details.push({ html: `<span class="fullval"><code class="mono">${html(entry.messageId)}</code><span class="full-actions">${copyButton(entry.messageId, "the message ID")}</span></span>`, label: "Message ID" });
+  // The approval the migration spent, as its chain says, or the one this browser sent for it, as for a Hyperlane transfer of a token issued on Dusk.
+  const approval =
+    route.mode === "migration" ? (evm?.approvalState === "found" && evm.approval?.hash ? evm.approval.hash : entry.approvalHash) : route.mode === "hyperlane" ? entry.approvalHash : null;
   if (approval) details.push({ html: txHtml(cfg, sourceNetwork, approval, `${from} approval`), label: `${from} approval` });
   details.push({ html: txHtml(cfg, sourceNetwork, entry.hash, `${from} transaction`), label: `${from} transaction` });
   if (route.mode === "duskevm-withdrawal") {
@@ -475,9 +590,23 @@ export function receiptModel(entry, { approvalSpentBy = false, cfg, evm = null, 
         : `<span class="t2">${view.status === "failed" ? "None" : entry.stage === "finalized" ? "Claimed" : "Not claimed yet"}</span>`,
       label: "Claim on Dusk",
     });
+  } else if (route.mode === "hyperlane" && route.to.id === "dusk") {
+    // The transaction Dusk's Mailbox delivered it in, found by its message; and a claim made here.
+    details.push({
+      html: entry.deliveryHash
+        ? txHtml(cfg, "dusk", entry.deliveryHash, `${to} transaction`)
+        : `<span class="t2">${view.status === "failed" ? "None" : entry.delivered || view.status === "completed" ? "Delivered" : "Shows when it arrives"}</span>`,
+      label: `${to} transaction`,
+    });
+    const claim = entry.claimHash ?? (entry.pendingAction === "claim" ? entry.pendingHash : null);
+    if (claim) details.push({ html: txHtml(cfg, "dusk", claim, "claim transaction"), label: "Claim on Dusk" });
+    if (entry.claimFailedHash) details.push({ html: txHtml(cfg, "dusk", entry.claimFailedHash, "failed claim transaction"), label: "Failed claim on Dusk" });
   } else
     details.push({
-      html: entry.destinationHash ? txHtml(cfg, destinationNetwork, entry.destinationHash, `${to} transaction`) : `<span class="t2">${view.status === "failed" ? "None" : "Shows when it arrives"}</span>`,
+      // A Hyperlane transfer can arrive before the log of the transaction that delivered it is read.
+      html: entry.destinationHash
+        ? txHtml(cfg, destinationNetwork, entry.destinationHash, `${to} transaction`)
+        : `<span class="t2">${view.status === "failed" ? "None" : view.status === "completed" && route.mode === "hyperlane" ? "Delivered" : "Shows when it arrives"}</span>`,
       label: `${to} transaction`,
     });
   if (entry.sourceAt) details.push({ label: "Sent", value: time(entry.sourceAt) });
@@ -486,15 +615,18 @@ export function receiptModel(entry, { approvalSpentBy = false, cfg, evm = null, 
   if (view.late) notes.push({ html: lateLine(cfg) });
   if (view.trackingError) notes.push({ html: html(view.trackingError) });
 
-  const stepMax = withdrawalStepMax({ gasPrice, withdrawalGas: entry.withdrawalGas ? BigInt(entry.withdrawalGas) : 0n });
+  const stepMax =
+    route.mode === "hyperlane"
+      ? (heldForAnother(entry, route, owner) ? HYPERLANE_GAS.claimFor : HYPERLANE_GAS.claim).limit * BigInt(gasPrice)
+      : withdrawalStepMax({ gasPrice, withdrawalGas: entry.withdrawalGas ? BigInt(entry.withdrawalGas) : 0n });
   // The countdown says when a claim can be made: its step doesn't say it again.
   if (view.countdown) view.steps = view.steps.map((item) => (item.key === "claim" ? { ...item, detail: "" } : item));
   return {
     actionFee: view.action ? `Network fee up to ${formatMaxFee(stepMax)} DUSK, from your public balance` : "",
     // Arrived at the connected EVM wallet: it can show the DUSK.
     addDusk: addDuskOffer(route, { added: Boolean(wallet?.addedDusk), entry, evm: wallet, status: view.status, takes: Boolean(wallet?.addsDusk) }),
-    // It comes by itself, so there's something to be told of. A withdrawal comes when you claim it.
-    arrives: view.status === "pending" && route.mode !== "duskevm-withdrawal",
+    // It comes by itself, so there's something to be told of. A withdrawal, or what a route holds for its claim, comes when you claim it.
+    arrives: view.status === "pending" && route.mode !== "duskevm-withdrawal" && !heldInEscrow(entry, route),
     caption,
     details,
     fromTo: `From ${fromAccount} to ${toAccount}`,

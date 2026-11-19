@@ -7,7 +7,8 @@ import { normalizeAmount, parseDusk, unclearAmount } from "@dusk-network/app-cor
 import { beforeProofText, claimAfterProving, claimText } from "@dusk-network/networks/duskevm";
 import { DEPOSIT_GAS, TRANSFER_GAS, WITHDRAWAL_GAS, withdrawalGasLimit as withdrawalStepGas } from "@dusk-network/networks/gas";
 
-import { aboutFee, decimalSeparator, formatDateTime, formatDusk, formatLux, formatMaxFee, formatTypicalFee, formatUnitsGrouped } from "./format.js";
+import { aboutFee, decimalSeparator, formatDateTime, formatDusk, formatLux, formatMaxFee, formatShort, formatToken, formatTypicalFee, formatUnitsGrouped } from "./format.js";
+import { HYPERLANE_GAS, U64_MAX } from "./hyperlane.js";
 import { gasCoin, networkName, routeUnits, tokenName } from "./names.js";
 import { routeTime, routeTimeText } from "./route-times.js";
 
@@ -32,16 +33,28 @@ function plainTyped(value) {
   return { value: plain };
 }
 
-/** The typed amount in Lux, or why it can't be one. Empty is no error. */
-export function parseAmount(input) {
+/** Plain digits with a point as a whole number of units with `decimals`, or null. */
+function parseUnits(plain, decimals) {
+  if (decimals === 9) return parseDusk(plain);
+  if (!/^(\d+(\.\d*)?|\.\d+)$/u.test(plain)) return null;
+  const [whole, fraction = ""] = plain.split(".");
+  if (fraction.length > decimals) return null;
+  return BigInt(whole || "0") * 10n ** BigInt(decimals) + BigInt(fraction.padEnd(decimals, "0") || "0");
+}
+
+/**
+ * The typed amount in the smallest unit of what's sent, Lux for DUSK, or why
+ * it can't be one; `decimals` are the token's, 9 for DUSK. Empty is no error.
+ */
+export function parseAmount(input, decimals = 9) {
   const read = plainTyped(String(input ?? "").trim());
   if (read.error) return { error: read.error, lux: null };
   const { value } = read;
   if (!value) return { error: "", lux: null };
-  const lux = parseDusk(value);
+  const lux = parseUnits(value, decimals);
   if (lux === null) {
     return /^\d*\.\d+$/u.test(value)
-      ? { error: "Use at most 9 decimals.", lux: null }
+      ? { error: `Use at most ${decimals} decimals.`, lux: null }
       : { error: `Enter an amount like 25 or 0${decimalSeparator()}5.`, lux: null };
   }
   if (lux <= 0n) return { error: "Enter an amount above 0.", lux: null };
@@ -129,6 +142,7 @@ function arrivesRow(route, cfg, { locale, timeZone, timing } = {}) {
  * @param {string} [ctx.timeZone] for tests; the viewer's own otherwise
  */
 export function buildQuote(route, amount, ctx) {
+  if (route.mode === "hyperlane") return hyperlaneQuote(route, amount, ctx);
   const { cfg } = ctx;
   const to = networkName(cfg, route.to.id);
   const from = networkName(cfg, route.from.id);
@@ -243,6 +257,127 @@ export function buildQuote(route, amount, ctx) {
     },
     { key: "receive", label: "You receive", strong: true, value: lux === null ? "—" : `${formatDusk(lux)} on ${to}` },
     ...arrivesRow(route, cfg, ctx),
+  );
+  return quote;
+}
+
+/** Gas for a transfer to the EVM chain on Dusk, with an approval first where the route can't take the amount yet. */
+export function hyperlaneDuskFees({ approves = false, gasPrice = 1n } = {}) {
+  const send = duskFee(HYPERLANE_GAS.transfer.limit, HYPERLANE_GAS.transfer.typical, gasPrice);
+  if (!approves) return send;
+  const approve = duskFee(HYPERLANE_GAS.approve.limit, HYPERLANE_GAS.approve.typical, gasPrice);
+  return { maxLux: send.maxLux + approve.maxLux, typicalLux: send.typicalLux + approve.typicalLux };
+}
+
+/**
+ * A Hyperlane route's quote, in its token's smallest unit (`amountLux`,
+ * `maxLux` and `receiveLux` are Lux for DUSK). From Dusk, the network fee is
+ * DUSK's, for an approval first where a token's route may not take the
+ * amount yet (`hyperlane.allowance`; until that's read, the steps aren't
+ * known and `waiting` says why: "reading", or "failed" where the read
+ * failed), and the bridge's fee is the route's
+ * own quote for delivering it (`hyperlane.fee`), paid in DUSK on top: the
+ * DUSK route takes both with the amount. From the EVM chain, the network fee
+ * is its coin's, and the bridge's fee is the token's quote for delivery
+ * (`evm.deliveryFeeWei`), sent as the call's value. An amount past a u64
+ * can't be carried. Where a fee isn't read yet, it's a dash.
+ *
+ * @param {object} ctx
+ * @param {bigint | null} [ctx.balance] what pays: DUSK on Dusk in Lux, the token on the EVM chain
+ * @param {{ fee?: bigint | null, allowance?: bigint | null, tokenBalance?: bigint | null }} [ctx.hyperlane] read on Dusk
+ * @param {{ deliveryFeeWei?: bigint | null, gas?: bigint | null, gasCoinWei?: bigint | null, priceWei?: bigint | null }} [ctx.evm] read on the EVM chain
+ */
+function hyperlaneQuote(route, amount, ctx) {
+  const { cfg } = ctx;
+  const { token } = route;
+  const to = networkName(cfg, route.to.id);
+  const parsed = parseAmount(amount, token.decimals);
+  const units = parsed.lux !== null && parsed.lux > U64_MAX ? null : parsed.lux;
+  const quote = {
+    amountLux: units,
+    error: parsed.error || (units === null && parsed.lux !== null ? "That's more than one transfer can carry." : ""),
+    leaves: "",
+    maxLux: null,
+    receiveLux: units,
+    rows: [],
+    steps: 1,
+  };
+  const sent = units === null ? "—" : formatToken(units, token);
+  const received = { key: "receive", label: "You receive", strong: true, value: units === null ? "—" : `${formatToken(units, token)} on ${to}` };
+  const time = routeTimeText(routeTime(route, cfg, ctx.timing));
+  const arrives = time ? [{ key: "arrives", label: "Arrives", value: time }] : [];
+
+  if (route.signer === "dusk") {
+    const read = ctx.hyperlane ?? {};
+    const native = Boolean(route.hyperlane?.native);
+    const fee = read.fee ?? null;
+    const allowance = read.allowance ?? null;
+    // What the route may take already decides the steps: an approval not read
+    // yet, or that couldn't be read, decides nothing, and the review waits.
+    const unknown = !native && allowance === null;
+    const approves = !native && !unknown && (units === null || allowance < units);
+    const gas = hyperlaneDuskFees({ approves, gasPrice: ctx.gasPrice });
+    const balance = ctx.balance === null || ctx.balance === undefined ? null : BigInt(ctx.balance);
+    Object.assign(quote, { bridgeFeeLux: fee, gasMaxLux: gas.maxLux, steps: unknown ? null : approves ? 2 : 1 });
+    if (native) {
+      if (balance !== null && fee !== null) quote.maxLux = balance > fee + gas.maxLux ? balance - fee - gas.maxLux : 0n;
+      if (!quote.error && units !== null && quote.maxLux !== null && units > quote.maxLux) {
+        quote.insufficient = true;
+        quote.error = `That's more than you have after the fees. You can send up to ${formatDusk(quote.maxLux)}.`;
+      }
+      if (units !== null && fee !== null) quote.leaves = `up to ${formatDusk(units + fee + gas.maxLux)}`;
+    } else {
+      const held = read.tokenBalance ?? null;
+      quote.maxLux = held;
+      if (!quote.error && units !== null && held !== null && units > held) {
+        quote.insufficient = true;
+        quote.error = `That's more than the ${formatToken(held, token)} you have.`;
+      } else if (!quote.error && units !== null && balance !== null && fee !== null && balance < fee + gas.maxLux) {
+        // The token goes; the fees are DUSK.
+        quote.insufficient = true;
+        quote.short = "DUSK";
+        quote.error = `The fees take up to ${formatDusk(fee + gas.maxLux)}, more than the ${formatDusk(balance)} you have.`;
+      }
+      if (units !== null && fee !== null) quote.leaves = `${formatToken(units, token)} and up to ${formatDusk(fee + gas.maxLux)}`;
+      if (unknown && units !== null && !quote.error) quote.waiting = read.allowanceFailed ? "failed" : "reading";
+    }
+    quote.rows.push(
+      { key: "send", label: "You send", value: sent },
+      {
+        detail: `usually about ${formatTypicalFee(gas.typicalLux)} DUSK${approves ? ", for two wallet steps" : ""}`,
+        key: "fee",
+        label: "Network fee",
+        value: `up to ${formatMaxFee(gas.maxLux)} DUSK`,
+      },
+      { detail: native ? "on top of the amount" : "paid in DUSK", key: "bridge", label: "Bridge fee", value: fee === null ? "—" : formatDusk(fee) },
+      received,
+      ...arrives,
+    );
+    return quote;
+  }
+
+  // From the EVM chain: one call, with the delivery fee as its value.
+  const coin = gasCoin(cfg, route.from.id);
+  const evm = ctx.evm ?? {};
+  const held = ctx.balance === null || ctx.balance === undefined ? null : BigInt(ctx.balance);
+  const fee = evm.deliveryFeeWei ?? null;
+  const gasWei = evm.gas && evm.priceWei ? BigInt(evm.gas) * BigInt(evm.priceWei) : null;
+  Object.assign(quote, { bridgeFeeWei: fee, evmFeeWei: gasWei, maxLux: held });
+  const coins = evm.gasCoinWei ?? null;
+  if (!quote.error && units !== null && held !== null && units > held) {
+    quote.insufficient = true;
+    quote.error = `That's more than the ${formatToken(held, token)} in this wallet.`;
+  } else if (!quote.error && units !== null && coins !== null && fee !== null && gasWei !== null && coins < fee + gasWei) {
+    quote.insufficient = true;
+    quote.short = coin;
+    quote.error = `The fees take ${aboutFee(fee + gasWei, 18, coin)}, more than the ${formatShort(coins, 18).text} ${coin} in this wallet.`;
+  }
+  quote.rows.push(
+    { key: "send", label: "You send", value: sent },
+    { detail: "one wallet step", key: "fee", label: "Network fee", value: gasWei === null ? `paid in ${coin}` : aboutFee(gasWei, 18, coin) },
+    { detail: `paid in ${coin}, with the transfer`, key: "bridge", label: "Bridge fee", value: fee === null ? "—" : aboutFee(fee, 18, coin) },
+    received,
+    ...arrives,
   );
   return quote;
 }

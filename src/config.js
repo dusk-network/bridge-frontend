@@ -7,6 +7,8 @@
 import { networks, routes } from "@dusk-network/networks";
 import { evmAddressOf } from "@dusk-network/networks/duskevm";
 
+import { hyperlaneConfig } from "./hyperlane.js";
+
 const env = import.meta.env ?? {};
 
 // An empty value means "use the default", so a copied .env.example is safe.
@@ -230,6 +232,10 @@ export function loadConfig() {
 
   const multicallId = contractId("VITE_DUSK_MULTICALL_CONTRACT_ID", net.contracts.multicall ?? "");
   const duskEvm = duskEvmConfig(net);
+  // Hyperlane's routes, from this network's deployment record: the tokens
+  // listed, by symbol, or all of them; `none` runs none.
+  const hyperlaneTokens = value("VITE_HYPERLANE_TOKENS");
+  const hyperlane = hyperlaneConfig(profile, { evmNetworks, wanted: hyperlaneTokens ? list("VITE_HYPERLANE_TOKENS", []) : null });
   // The Terms of use and Privacy policy the network's file links, as on the explorer.
   const { privacyUrl, termsUrl } = net.operator;
 
@@ -258,6 +264,7 @@ export function loadConfig() {
     duskEvm,
     evmNetworks,
     gasLimitUpper: BigInt(positiveInteger("VITE_GAS_LIMIT_UPPER", 1_000_000_000)),
+    hyperlane,
     migrations,
     multicall: Object.freeze({ contractId: isContractId(multicallId) ? multicallId : "" }),
     // The network's file, for its routes and labels, with this deployment's
@@ -271,5 +278,9 @@ export function loadConfig() {
     service,
   });
 }
+
+/** The EVM chains a deployment's routes reach: its migrations', its payout's, and Hyperlane's. */
+export const evmChains = (cfg) =>
+  [...new Set([...cfg.migrations, ...(cfg.service ? [cfg.service.network] : []), ...(cfg.hyperlane?.enabled ? [cfg.hyperlane.network] : [])])];
 
 export const config = loadConfig();

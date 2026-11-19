@@ -923,3 +923,26 @@ test("a sent proof the Portal took and then rejected leaves the withdrawal ready
   status = { ...status, provenAt: included - 3_600n };
   assert.equal((await tracking.refresh(proving, ROUTES.withdrawal)).stage, "prove_submitted");
 });
+
+test("the scheduler keeps checking an entry that ended where the page still looks for something of it", { timeout: 2_000 }, async () => {
+  const seen = [];
+  let resolve;
+  const finished = new Promise((r) => {
+    resolve = r;
+  });
+  // Ended on the first check, without the transaction it's given on the third.
+  const scheduler = createScheduler({
+    check: async (id) => {
+      seen.push(id);
+      if (seen.length === 3) resolve();
+      return { id, linked: seen.length >= 3, status: "completed" };
+    },
+    intervals: { active: 1, hidden: 1 },
+    more: (entry) => !entry.linked,
+  });
+  scheduler.track("a");
+  await finished;
+  await new Promise((r) => setTimeout(r, 20));
+  scheduler.stop();
+  assert.deepEqual(seen, ["a", "a", "a"]);
+});

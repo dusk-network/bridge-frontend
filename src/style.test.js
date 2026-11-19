@@ -77,7 +77,7 @@ test("at phone width, everything a thumb presses is 44 px each way", () => {
         .flatMap(([, body]) => properties.map((property) => Number.parseFloat(new RegExp(`(?:^|;)\\s*${property}:\\s*([\\d.]+)px`, "u").exec(body)?.[1] ?? 0))),
       0,
     );
-  const tall = [".hdr-r .net", ".hdr-r .wpill", ".tab", ".netbtn", ".btn.sm", ".btn.xs", ".panel-f .mini", ".bcard-top .icon-btn", ".icon-btn", ".icon-btn.round", ".flip", ".amt-row input", ".linkish", ".lnk", ".topbar .bk", ".foot a", ".about-links a", ".entry a", ".route > summary"];
+  const tall = [".hdr-r .net", ".hdr-r .wpill", ".tab", ".netbtn", ".tokbtn", ".btn.sm", ".btn.xs", ".panel-f .mini", ".bcard-top .icon-btn", ".icon-btn", ".icon-btn.round", ".flip", ".amt-row input", ".linkish", ".lnk", ".topbar .bk", ".foot a", ".about-links a", ".entry a", ".route > summary"];
   for (const selector of tall) assert.ok(size(selector, "height", "min-height") >= 44, `${selector} is ${size(selector, "height", "min-height")} px tall`);
   for (const selector of [".brand", ".panel-f .mini", ".bcard-top .icon-btn", ".icon-btn", ".icon-btn.round", ".flip"]) assert.ok(size(selector, "width", "min-width") >= 44, `${selector} is ${size(selector, "width", "min-width")} px wide`);
 });

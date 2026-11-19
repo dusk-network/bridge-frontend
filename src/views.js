@@ -83,8 +83,21 @@ function duskPill(dusk) {
   if (dusk.state !== "connected")
     return `<button type="button" class="wpill cta" data-action="connect-dusk">${dusk.state === "locked" ? "Unlock Dusk Wallet" : "Connect Dusk Wallet"}</button>`;
   // The account by its .dusk name where it has one; a long one ends in an ellipsis, in full on hover.
+  // Pressed, it offers another profile, or to disconnect (`duskSheet`).
   const who = dusk.name ? `<span class="nm" title="${html(dusk.name)}">${html(dusk.name)}</span>` : `<code class="mono">${shortLabel(dusk.account)}</code>`;
-  return `<button type="button" class="wpill" data-action="connect-dusk" aria-label="Dusk Wallet, account ${html(dusk.name ? `${dusk.name}, ${dusk.account}` : dusk.account)}"><span class="av">${chainMark("dusk", "xs")}</span>${who}</button>`;
+  return `<button type="button" class="wpill" data-action="open-dusk" aria-haspopup="dialog" aria-label="Dusk Wallet, account ${html(dusk.name ? `${dusk.name}, ${dusk.account}` : dusk.account)}"><span class="av">${chainMark("dusk", "xs")}</span>${who}</button>`;
+}
+
+/**
+ * The connected Dusk Wallet: the profile this page uses, another profile
+ * (the page lets go of this one and asks the wallet again, where it lets you
+ * choose), or none. A wallet whose own profile switch doesn't reach the page
+ * is changed here.
+ */
+export function duskSheet({ account, name }) {
+  const who = name ? `<b>${html(name)}</b> (<code class="mono">${html(short(account))}</code>)` : `<code class="mono">${html(short(account))}</code>`;
+  return `<div class="sheet-head"><div><h2 id="sheet-title">Dusk Wallet</h2><p class="sub">This page uses ${who}.</p></div><button type="button" class="icon-btn round" data-action="close-sheet" aria-label="Close">${icon("close")}</button></div>
+  <div class="sheet-body"><div class="btn-row"><button type="button" class="btn sec sm" data-action="dusk-other-profile">Use another profile</button><button type="button" class="btn sec sm" data-action="dusk-disconnect">Disconnect</button></div></div>`;
 }
 
 function evmPill(evm) {
@@ -161,6 +174,56 @@ function netMenu(side, choices) {
   return `<div class="netscrim" data-action="close-menu"></div><div class="netmenu" role="listbox" aria-label="${title}"><p class="netmenu-t">${title}</p>${options}</div>`;
 }
 
+/**
+ * The tokens a pair moves, to choose one: under the token on a computer, a
+ * sheet from the bottom on a phone. Two that send the same say what arrives.
+ */
+function tokenMenu(choices) {
+  const options = choices
+    .map(
+      (choice) =>
+        `<button type="button" class="netopt" role="option" data-action="pick-token" data-route="${html(choice.id)}" aria-selected="${choice.selected ? "true" : "false"}"><span class="tk" aria-hidden="true">${html(choice.symbol.charAt(0))}</span><span><span class="nm">${html(choice.symbol)}</span><span class="sb">${html(choice.note ? `${choice.name} · ${choice.note}` : choice.name)}</span></span>${choice.selected ? icon("check") : ""}</button>`,
+    )
+    .join("");
+  return `<div class="netscrim" data-action="close-menu"></div><div class="netmenu" role="listbox" aria-label="Token"><p class="netmenu-t">Token</p>${options}</div>`;
+}
+
+/** What's sent, by its token: a choice where the pair moves more than one. */
+function tokenControl(vm) {
+  const mark = `${chainMark(vm.from.net.id)}${html(vm.unit)}`;
+  if (!vm.tokens?.length) return `<span class="token">${mark}</span>`;
+  const open = vm.menu === "token";
+  return `<div class="netsel"><button type="button" class="token tokbtn" data-action="open-menu" data-side="token" aria-haspopup="listbox" aria-expanded="${open ? "true" : "false"}" aria-label="Token: ${html(vm.unit)}. Choose the token">${mark}${icon("chev-d")}</button>${open ? tokenMenu(vm.tokens) : ""}</div>`;
+}
+
+/**
+ * Above the card, what Hyperlane's routes hold for the connected Dusk
+ * account: the first transfer to an account waits until it's claimed. Each
+ * token with its Claim; once a claim is sent, that, in its place.
+ */
+function escrowBox(escrow) {
+  if (!escrow?.held?.length) return "";
+  const amounts = escrow.held.map((each) => each.amount);
+  const listed = amounts.length > 1 ? `${amounts.slice(0, -1).join(", ")} and ${amounts.at(-1)}` : amounts[0];
+  // Another account's: anyone can claim it for it. Without DUSK for its own claim's fee, a link for another account.
+  const lead = escrow.owner ? `<b>Waiting for ${html(escrow.owner)} on Dusk:</b>` : "<b>Waiting for you on Dusk:</b>";
+  const why = escrow.owner
+    ? "The bridge holds the first transfer to an account until it's claimed. You can claim it for that account, paying only the network fee."
+    : escrow.link
+      ? "The bridge holds the first transfer to an account until it's claimed. Your account has no DUSK for the claim's fee: another Dusk account can claim it for yours with this page's link."
+      : "The bridge holds the first transfer to an account until it's claimed.";
+  const buttons = escrow.link
+    ? `<button type="button" class="btn sec sm" data-copy="${html(escrow.link)}" aria-label="Copy the link another account claims it with">${copyFaces("Copy link", "Copied")}</button>`
+    : escrow.held
+        .map((each) =>
+          each.sent
+            ? `<span class="small t2">${html(each.sent)}</span>`
+            : `<button type="button" class="btn sec sm" data-action="escrow-claim" data-route="${html(each.route)}"${each.account ? ` data-account="${html(each.account)}"` : ""}>Claim ${html(each.amount)}${each.account ? " for it" : ""}</button>`,
+        )
+        .join("");
+  return `<div class="card notice-box" role="note"><div class="note">${icon("info")}<span>${lead} <span class="num">${html(listed)}</span>. ${html(why)}</span></div><div class="btn-row">${buttons}</div></div>`;
+}
+
 /** The card's one button: a link where it leads to Dusk Wallet's page. */
 function primaryControl(button) {
   if (button.action === "get-dusk")
@@ -201,6 +264,7 @@ export function cardRegions(vm) {
   return {
     approval: approvalBox(vm.approval, vm.approvalNote),
     cta: `${vm.error ? messageLine(vm.error) : ""}${primaryControl(vm.button)}`,
+    escrow: escrowBox(vm.escrow),
     "from-foot": `<span>${html(vm.from.balanceLabel)}</span><span class="bal">${vm.from.balance ? `<span class="num"${exactTitle(vm.from.balanceExact, vm.from.balance)}>${html(vm.from.balance)}</span>` : ""}${vm.canMax ? '<button type="button" class="mini" data-action="max">Max</button>' : ""}${vm.addDusk ? addDuskButton(vm.addDusk, "mini") : ""}</span>`,
     receive: html(vm.receive || "0"),
     "recipient-note": recipientNote(vm.to),
@@ -232,7 +296,7 @@ export function cardPage(vm) {
     ? `<div class="card notice-box" role="note"><div class="note">${icon(vm.notice.icon ?? "info")}<span>${vm.notice.html}</span></div>${vm.notice.actions ?? ""}</div>`
     : "";
   const from = `<div class="panel"><div class="panel-h"><span class="panel-l">From</span><div class="netsel">${netButton("from", vm.from.net, vm.menu === "from")}${vm.menu === "from" ? netMenu("from", vm.fromChoices) : ""}</div></div>
-      <div class="amt-row"><input id="amount" name="amount" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="0" value="${html(vm.amount)}" aria-label="Amount, in ${html(vm.unit)}" aria-describedby="amount-help amount-error"${vm.amountError ? ' aria-invalid="true"' : ""}><span class="token">${chainMark(vm.from.net.id)}${html(vm.unit)}</span></div>
+      <div class="amt-row"><input id="amount" name="amount" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="0" value="${html(vm.amount)}" aria-label="Amount, in ${html(vm.unit)}" aria-describedby="amount-help amount-error"${vm.amountError ? ' aria-invalid="true"' : ""}>${tokenControl(vm)}</div>
       <div class="panel-f" id="amount-help" data-region="from-foot">${regions["from-foot"]}</div>
       <p class="field-error" id="amount-error" role="status">${html(vm.amountError ?? "")}</p>
     </div>`;
@@ -248,7 +312,7 @@ export function cardPage(vm) {
       ${recipient}
     </div>`;
   return `<main class="swap" id="main" tabindex="-1"><h1 class="sr-only">Bridge DUSK</h1>
-    <section class="bcard" aria-label="Bridge">${top}${notice}<div data-region="approval">${regions.approval}</div>${from}${flip}${to}
+    <section class="bcard" aria-label="Bridge">${top}${notice}<div data-region="escrow">${regions.escrow}</div><div data-region="approval">${regions.approval}</div>${from}${flip}${to}
       <details class="route" data-region="route"${vm.routeOpen ? " open" : ""}>${regions.route}</details>
       <div class="cta" data-region="cta">${regions.cta}</div>
     </section>${entryLine(vm.entry)}
@@ -393,7 +457,7 @@ export function receiptPage(vm) {
       ? `<div class="action-box">${actionNeedsWallet(view.action.kind)}<span class="small t2">Dusk Wallet is a browser extension for computers.</span></div>`
       : view.action.blocked
         ? `<div class="action-box"><p class="note">${icon("info")}<span>${html(view.action.blocked)}</span></p></div>`
-        : `<div class="action-box">${view.action.failure ? messageLine(view.action.failure, { live: false }) : ""}<button type="button" class="btn ${view.action.quiet ? "sec" : "pri"}" data-action="withdrawal-${view.action.kind}" data-id="${html(vm.id)}">${html(view.action.label)}</button><span class="small t2">${html(vm.actionFee ?? "")}</span></div>`
+        : `<div class="action-box">${view.action.failure ? messageLine(view.action.failure, { live: false }) : ""}<button type="button" class="btn ${view.action.quiet ? "sec" : "pri"}" data-action="${html(view.action.command ?? `withdrawal-${view.action.kind}`)}" data-id="${html(vm.id)}">${html(view.action.label)}</button><span class="small t2">${html(vm.actionFee ?? "")}</span></div>`
     : "";
   const value = (row) => `<span class="num"${exactTitle(row.exact, row.value)}>${html(row.value)}</span>`;
   const details = vm.details
@@ -445,7 +509,7 @@ export function transferRow(row, { canAct = true } = {}) {
   else if (row.action.blocked) right = `<span class="tag">${icon("info")}Switch account to claim</span>`;
   else
     // Someone else's withdrawal is offered quietly.
-    right = `<button type="button" class="btn ${row.action.quiet ? "sec" : "pri"} xs" data-action="withdrawal-${row.action.kind}" data-id="${html(row.id)}">${html(row.action.kind === "prove" ? "Prove" : "Claim")}<span class="sr-only"> ${html(row.amountText)} from ${html(row.title)}</span></button>`;
+    right = `<button type="button" class="btn ${row.action.quiet ? "sec" : "pri"} xs" data-action="${html(row.action.command ?? `withdrawal-${row.action.kind}`)}" data-id="${html(row.id)}">${html(row.action.kind === "prove" ? "Prove" : "Claim")}<span class="sr-only"> ${html(row.amountText)} from ${html(row.title)}</span></button>`;
   // Whom it pays and its transaction, so equal transfers are told apart.
   const to = row.to ? `To ${row.to.name ? html(row.to.name) : `<code class="mono">${html(row.to.address)}</code>`}` : "";
   const meta = [to, row.hash ? `<code class="mono">${html(row.hash)}</code>` : ""].filter(Boolean).join(" · ");

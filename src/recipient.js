@@ -33,6 +33,18 @@ export function checkEvmRecipient(input, { bridgeContracts = [] } = {}) {
   return { error: EVM_CHECKSUM_MISMATCH, fix: getAddress(lower) };
 }
 
+/**
+ * What nobody could spend from on the EVM network `networkId`, for
+ * `checkEvmRecipient`: its DUSK token and migration contracts, and on
+ * Hyperlane's chain every contract in Hyperlane's book, whichever of its
+ * tokens the deployment runs.
+ */
+export function evmBridgeContracts(cfg, networkId) {
+  const network = cfg.evmNetworks?.[networkId];
+  const hyperlane = cfg.hyperlane && networkId === cfg.hyperlane.network ? (cfg.hyperlane.evmContracts ?? []) : [];
+  return [network?.tokenContract, network?.migrationContract, ...hyperlane].filter(Boolean);
+}
+
 /** A typed EVM recipient once it's an address: with its checksum's capitals. Anything else as typed. */
 export const settledEvmRecipient = (typed) => checkEvmRecipient(typed).address ?? typed;
 

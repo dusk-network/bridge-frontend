@@ -1,0 +1,46 @@
+{
+  "source": {
+    "repository": "https://github.com/dusk-network/hyperlane-dusk",
+    "record": "deploy/out/dusk-testnet-sepolia/deployment.json",
+    "sha256": "552be9e692a601b78dedfa09efcdf3161b4c40a504a0750588c544fd7af666a4",
+    "read": "2026-11-18"
+  },
+  "evm_chain": "sepolia",
+  "evm_domain": 11155111,
+  "dusk_domain": 1146442572,
+  "evm": {
+    "mailbox": "0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766",
+    "token": "0x213fa2a0e69624c70c23156616b813919d040a54"
+  },
+  "dusk": {
+    "igp": "990f30ef9747782fe40bd355d74d044cc8103d6f403267e1b1c3af7c87c22e4b",
+    "mailbox": "d6948f7b67469a2223e16002560ce0f90730104054fd16aced9ec8d7b1613412",
+    "warp_native": "979fb72774e1d45a07abd0d57479578513917ab855bb4027acdfd48ac8ee5a0b"
+  },
+  "token_routes": {
+    "EURd": {
+      "name": "Dusk Euro (testnet)",
+      "symbol": "EURd",
+      "decimals": 6,
+      "dusk": {
+        "token": "1f636d4fe3c7b0692e16f1a357a54ffadd6e5496c31908a9e093ef3d712ffd1a",
+        "route": "78ff6b1dcbccb55020655c0abccdaef3d81f97f5c376519fb3195deaa4d6aef8"
+      },
+      "evm": {
+        "token": "0xcd283386e79006e8e03a8cb6734b14a70733aacc"
+      }
+    },
+    "USDd": {
+      "name": "Dusk Dollar (testnet)",
+      "symbol": "USDd",
+      "decimals": 6,
+      "dusk": {
+        "token": "670e34d05c2f52cede5791ce206d139715babb2ac4fb3cafe92e889e7f595a24",
+        "route": "5399349f33a5b119d91ded159be4d7acfbf067b10dc5590696c129f92bec0998"
+      },
+      "evm": {
+        "token": "0xc2d59c37d94adf346fae6a4fe24f42caafd8fcb6"
+      }
+    }
+  }
+}

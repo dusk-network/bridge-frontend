@@ -18,11 +18,14 @@ export const transferHref = (hash) => `#/transfer/${canonicalHash(hash) ?? ""}`;
  */
 export const moveHref = (route, { to = "" } = {}) => `#/move/${route}${to ? `?to=${encodeURIComponent(to)}` : ""}`;
 
-/** The full receipt link for `hash`, from the page's own address. */
-export function receiptUrl(hash, location = globalThis.location) {
+/** The full link to one of the page's own pages (`href`, a `#/…`), from its address. */
+export function pageUrl(href, location = globalThis.location) {
   const base = location ? `${location.origin}${location.pathname}` : "";
-  return `${base}${transferHref(hash)}`;
+  return `${base}${href}`;
 }
+
+/** The full receipt link for `hash`, from the page's own address. */
+export const receiptUrl = (hash, location = globalThis.location) => pageUrl(transferHref(hash), location);
 
 /**
  * The page a hash names:

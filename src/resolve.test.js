@@ -67,3 +67,18 @@ test("a DuskEVM hash opens as a withdrawal only when it withdraws DUSK through t
   assert.deepEqual(await resolve(token), { message: "That DuskEVM transaction isn't a withdrawal of DUSK." });
   assert.deepEqual(await resolve({ ...dusk, logs: [] }), { message: "That DuskEVM transaction isn't a withdrawal of DUSK." });
 });
+
+test("a Hyperlane transfer's hash opens its route, on either side, and its approval or claim says which to look up", async () => {
+  const [, eurd] = cfg.hyperlane.tokens;
+  const duskTx = (contractId, fnName) => ({ callData: { contractId, data: "", fnName }, json: {} });
+  const onDusk = (tx) => resolveTransfer("ab".repeat(32), { cfg, node: { transaction: async () => tx }, rpc: async () => null });
+  assert.deepEqual(await onDusk(duskTx(eurd.dusk.route, "transfer_remote")), { hash: "ab".repeat(32), routeId: "dusk-to-sepolia-eurd" });
+  assert.deepEqual(await onDusk(duskTx(eurd.dusk.token, "approve")), { message: "That's the approval. The transfer starts with the step after it: look that one up instead." });
+  assert.deepEqual(await onDusk(duskTx(eurd.dusk.route, "claim_pending")), { message: "That's a claim on Dusk. Open the transfer by its Sepolia transaction instead." });
+
+  // On Sepolia, the token's transferRemote, before the paused migration there is asked.
+  const sepolia = (tx) =>
+    resolveTransfer(TX, { cfg, node: { transaction: async () => null }, rpc: async (network, method) => (network === "ethereum" && method === "eth_getTransactionByHash" ? tx : null) });
+  assert.deepEqual(await sepolia({ input: "0x81b4e8b4" + "00".repeat(96), to: eurd.evm.token.toLowerCase() }), { hash: TX, routeId: "sepolia-to-dusk-eurd" });
+  assert.deepEqual(await sepolia({ input: "0xa9059cbb", to: eurd.evm.token }), { message: "That Sepolia transaction isn't a transfer to Dusk." });
+});

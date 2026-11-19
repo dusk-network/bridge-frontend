@@ -16,7 +16,7 @@ import { formatEvmAddress } from "@dusk-network/networks/format";
 
 import { entryId } from "./activity.js";
 import { pageStorage as defaultStorage } from "./page-storage.js";
-import { sentToSomeoneElse, withdrawalNextAction } from "./transfer-view.js";
+import { heldForAnother, heldInEscrow, sentToSomeoneElse, withdrawalNextAction } from "./transfer-view.js";
 
 const WEI_PER_LUX = 1_000_000_000n;
 const TERMINAL = new Set(["completed", "failed"]);
@@ -192,14 +192,18 @@ const timeOf = (entry) =>
  * Where a transfer goes on My transfers. A withdrawal under way that pays
  * another Dusk account than `owner`, the one the list is for, waits apart
  * while nobody, or another account, has proved it: it needs no one in
- * particular. Once `owner` has, only `owner` can claim it.
+ * particular. Once `owner` has, only `owner` can claim it. A transfer a
+ * Hyperlane route holds in escrow needs its claim, and waits apart where it
+ * pays another account.
  */
 export function transferGroup(entry, route, owner = "") {
   if (entry.status === "completed") return "done";
   if (entry.status === "failed") return "failed";
-  if (sentToSomeoneElse(entry, route, owner)) return "other";
+  if (sentToSomeoneElse(entry, route, owner) || heldForAnother(entry, route, owner)) return "other";
   if (route?.mode === "duskevm-withdrawal" && !entry.pendingAction && withdrawalNextAction(entry.stage))
     return "needs";
+  // Held by a Hyperlane route until it's claimed.
+  if (heldInEscrow(entry, route) && !entry.pendingAction) return "needs";
   return "progress";
 }
 

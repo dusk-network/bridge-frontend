@@ -1,7 +1,8 @@
 // Which bridge transfer a pasted or linked transaction hash is, so a receipt
 // link and "Look up a transfer" need nothing but the hash. A few requests at
-// most: the Dusk node for a Dusk hash, then DuskEVM and the migration chains
-// for an EVM hash, in the order the hash's form suggests.
+// most: the Dusk node for a Dusk hash, then DuskEVM, Hyperlane's chain and
+// the migration chains for an EVM hash, in the order the hash's form
+// suggests.
 
 import { parseWithdrawalReceipt } from "@dusk-network/app-core/duskevm-withdrawals";
 import { BRIDGE_FUNCTIONS } from "@dusk-network/networks/duskevm";
@@ -11,6 +12,8 @@ import { networkName } from "./names.js";
 
 const lower = (value) => String(value ?? "").toLowerCase();
 const EVM_TX_HASH = /^0x[0-9a-f]{64}$/iu;
+/** `transferRemote(uint32,bytes32,uint256)`'s selector, the call a Hyperlane token sends to Dusk with. */
+const TRANSFER_REMOTE = "0x81b4e8b4";
 
 function memoText(hex) {
   try {
@@ -43,6 +46,14 @@ export async function resolveTransfer(input, { cfg, node, rpc }) {
     }
     if (!tx) return null;
     const call = tx.callData;
+    // Hyperlane: a transfer on one of its routes, or a step that isn't the transfer.
+    const contract = lower(call?.contractId).replace(/^0x/u, "");
+    for (const token of cfg.hyperlane?.tokens ?? []) {
+      if (contract === token.dusk.route && call.fnName === "transfer_remote") return { hash: bare, routeId: token.routes.out };
+      if (contract === token.dusk.route) return { message: `That's a claim on Dusk. Open the transfer by its ${networkName(cfg, cfg.hyperlane.network)} transaction instead.` };
+      if (contract === token.dusk.token && call.fnName === "approve")
+        return { message: "That's the approval. The transfer starts with the step after it: look that one up instead." };
+    }
     if (call && cfg.duskEvm.enabled) {
       const contract = lower(call.contractId).replace(/^0x/u, "");
       if (contract === cfg.duskEvm.l1StandardBridgeContractId && call.fnName === BRIDGE_FUNCTIONS.deposit)
@@ -76,6 +87,19 @@ export async function resolveTransfer(input, { cfg, node, rpc }) {
           } catch {
             return { message: `That ${networkName(cfg, "dusk-evm")} transaction isn't a withdrawal of DUSK.` };
           }
+        }
+      } catch {
+        // Not reachable: the other chains may still know it.
+      }
+    }
+    // Hyperlane's chain, before its paused migrations: its tokens' transfers to Dusk.
+    if (cfg.hyperlane?.enabled && !migrationsOnly) {
+      try {
+        const tx = await rpc(cfg.hyperlane.network, "eth_getTransactionByHash", [hash]);
+        const token = tx && cfg.hyperlane.tokens.find((each) => lower(each.evm.token) === lower(tx.to));
+        if (token) {
+          if (lower(tx.input).startsWith(TRANSFER_REMOTE)) return { hash, routeId: token.routes.in };
+          return { message: `That ${networkName(cfg, cfg.hyperlane.network)} transaction isn't a transfer to Dusk.` };
         }
       } catch {
         // Not reachable: the other chains may still know it.
