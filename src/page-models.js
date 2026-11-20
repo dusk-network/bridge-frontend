@@ -95,8 +95,7 @@ export function routeSteps(route, quote = null) {
 
 /**
  * What the card keeps behind its route line, from the quote's rows: the
- * split of the fees it sums, with what each usually comes to, a
- * withdrawal's claim, then the route's steps.
+ * split of the fees it sums, a withdrawal's claim, then the route's steps.
  */
 export function routeDetailRows(route, quote) {
   const rows = quote.rows.filter((row) => ["bridge", "fee", "fee-dusk", "total", "when"].includes(row.key));

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { aboutFee, formatDusk, formatFee, formatLux, formatMaxFee, formatTypicalFee } from "./format.js";
+import { aboutFee, formatDusk, formatFee, formatLux, formatMaxFee } from "./format.js";
 import { amountsIn } from "./pages.fixtures.js";
 
 test("amounts group their digits and keep every Lux", () => {
@@ -22,9 +22,8 @@ test("fees keep two significant digits and never understate a maximum", () => {
   assert.deepEqual(amountsIn(aboutFee(15_000_000n, 18, "ETH")), ["<0.000001 ETH"]);
 });
 
-test("Dusk fees are rounded up where they're the most a step costs, to the nearest as they usually are, and exact once paid", () => {
+test("a Dusk fee before it's paid is the most it can be, rounded up", () => {
   assert.deepEqual([0n, 2_500_000n, 5_000_000n, 50_519_542n, 105_000_001n].map(formatMaxFee), ["0", "0.0025", "0.005", "0.0506", "0.1051"]);
   // Under 0.01 DUSK, two significant digits.
   assert.equal(formatMaxFee(49_999n), "0.00005");
-  assert.deepEqual([1_850_000n, 1_986_599n, 2_209_505n].map(formatTypicalFee), ["0.0019", "0.002", "0.0022"]);
 });

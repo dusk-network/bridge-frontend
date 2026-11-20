@@ -207,8 +207,8 @@ networks yet.
 - **A task**: the amount, where it goes, and under the card one line with the
   route's time and its fees, summed where they're paid in one coin (the most
   a Dusk fee can be, an EVM chain's as estimated). Behind the line: the
-  split, with what each fee usually comes to, a withdrawal's claim date, the
-  steps and what becomes public. With the EVM wallet on another chain than
+  split, each fee one figure, a withdrawal's claim date, the steps and what
+  becomes public. With the EVM wallet on another chain than
   the route sends from, as the wallet itself says, the button offers to
   switch it, here and on the review. Nothing goes out from another chain.
   Under the route, how it's doing, read once as its card opens and kept 10

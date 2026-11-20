@@ -43,7 +43,7 @@ test("a deposit quote shows the fee as a maximum, in DUSK", () => {
   assert.deepEqual(rows(quote), {
     // DuskEVM testnet's configured time, until the chain's own is read.
     arrives: "~1 min",
-    fee: "up to 0.005 DUSK | usually ~0.002 DUSK",
+    fee: "up to 0.005 DUSK",
     receive: "25 DUSK on DuskEVM",
     send: "25 DUSK",
   });
@@ -63,7 +63,8 @@ test("the bridge fee comes off what arrives, and a send at or under it is refuse
   assert.equal(buildQuote(routes["service-transfer"], "5", { balance: 10_000_000_000n, cfg, gasPrice: 1n }).insufficient, undefined);
   // Paid out as the chain's own DUSK token.
   assert.equal(rows(quote).receive, "49 ERC20 DUSK on Sepolia");
-  assert.equal(rows(quote).fee, "up to 0.0025 DUSK | usually ~0.0019 DUSK");
+  assert.equal(rows(quote).fee, "up to 0.0025 DUSK");
+  assert.deepEqual([quote.fees.label, quote.fees.value, quote.fees.detail], ["Fees", "up to 1.0025 DUSK", "1 DUSK of it from the amount"]);
   // No time is known for this testnet payout, so none is quoted.
   assert.equal(rows(quote).arrives, undefined);
   assert.equal(buildQuote(routes["service-transfer"], "1", { cfg }).error, "Send more than the 1 DUSK bridge fee");
@@ -81,12 +82,12 @@ test("a migration prices both wallet steps in ETH until the allowance covers it"
   };
   const both = buildQuote(routes.migration, "1000", ctx);
   assert.equal(rows(both).send, "1,000 ERC20 DUSK");
-  assert.equal(rows(both).fee, "~0.00021 ETH | two wallet steps");
+  assert.equal(rows(both).fee, "~0.00021 ETH");
   assert.equal(rows(both).receive, "1,000 DUSK on Dusk");
   assert.equal(both.steps, 2);
   const approved = buildQuote(routes.migration, "1000", { ...ctx, allowanceWei: 1_000n * 10n ** 18n });
   assert.equal(approved.steps, 1);
-  assert.equal(rows(approved).fee, "~0.00012 ETH | one wallet step");
+  assert.equal(rows(approved).fee, "~0.00012 ETH");
   assert.match(buildQuote(routes.migration, "3000", ctx).error, /^That's more than the 2,500 ERC20 DUSK in this wallet\./u);
   // ERC20 DUSK finer than a Lux can't be migrated, so Max stops at whole Lux.
   assert.equal(buildQuote(routes.migration, "", { ...ctx, balance: 10n ** 18n + 1n }).maxLux, DUSK);
@@ -197,7 +198,7 @@ test("DUSK to Sepolia pays the route's own quote and the network fee on top, in 
   assert.deepEqual(rows(quote), {
     arrives: "~20 s",
     bridge: "16.876 DUSK | on top of the amount",
-    fee: "up to 0.005 DUSK | usually ~0.0022 DUSK",
+    fee: "up to 0.005 DUSK",
     receive: "1 DUSK on Sepolia",
     send: "1 DUSK",
     total: "up to 17.881 DUSK",
@@ -217,8 +218,8 @@ test("EURd to Sepolia approves the route first where it can't take the amount, a
   const quote = buildQuote(route, "10", ctx);
   assert.deepEqual(rows(quote), {
     arrives: "~20 s",
-    bridge: "16.876 DUSK | paid in DUSK",
-    fee: "up to 0.008 DUSK | usually ~0.0041 DUSK, for two wallet steps",
+    bridge: "16.876 DUSK",
+    fee: "up to 0.008 DUSK",
     receive: "10 EURd on Sepolia",
     send: "10 EURd",
   });
@@ -238,8 +239,8 @@ test("from Sepolia, one call pays the token's delivery fee as its value, in ETH"
   const quote = buildQuote(route, "32.156353", { balance: 71_508_029n, cfg, evm });
   assert.deepEqual(rows(quote), {
     arrives: "~1 min",
-    bridge: "<0.000001 ETH | paid in ETH, with the transfer",
-    fee: "~0.00055 ETH | one wallet step",
+    bridge: "<0.000001 ETH",
+    fee: "~0.00055 ETH",
     receive: "32.156353 USDd on Dusk",
     send: "32.156353 USDd",
   });
@@ -248,7 +249,7 @@ test("from Sepolia, one call pays the token's delivery fee as its value, in ETH"
   const poor = buildQuote(route, "1", { balance: 71_508_029n, cfg, evm: { ...evm, gasCoinWei: 1_000n } });
   assert.deepEqual([poor.short, poor.error], ["ETH", "The fees take ~0.00055 ETH, more than the 0.000000000000001 ETH in this wallet."]);
   // Unread, the fees are said in what pays them.
-  assert.deepEqual(rows(buildQuote(route, "1", { cfg })).fee, "paid in ETH | one wallet step");
+  assert.equal(rows(buildQuote(route, "1", { cfg })).fee, "paid in ETH");
 });
 
 test("a Hyperlane route's time is said to the 10 seconds under a minute, and what this browser's transfers took once there are two", () => {

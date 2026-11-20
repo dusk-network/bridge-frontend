@@ -5,9 +5,9 @@
 
 import { normalizeAmount, parseDusk, unclearAmount } from "@dusk-network/app-core/amounts";
 import { beforeProofText, claimAfterProving, claimText } from "@dusk-network/networks/duskevm";
-import { DEPOSIT_GAS, TRANSFER_GAS, WITHDRAWAL_GAS, withdrawalGasLimit as withdrawalStepGas } from "@dusk-network/networks/gas";
+import { DEPOSIT_GAS, TRANSFER_GAS, withdrawalGasLimit as withdrawalStepGas } from "@dusk-network/networks/gas";
 
-import { aboutFee, decimalSeparator, formatDateTime, formatDusk, formatLux, formatMaxFee, formatShort, formatToken, formatTypicalFee, formatUnitsGrouped } from "./format.js";
+import { aboutFee, decimalSeparator, formatDateTime, formatDusk, formatLux, formatMaxFee, formatShort, formatToken, formatUnitsGrouped } from "./format.js";
 import { HYPERLANE_GAS, U64_MAX } from "./hyperlane.js";
 import { gasCoin, networkName, routeUnits, tokenName } from "./names.js";
 import { routeTime, routeTimeText } from "./route-times.js";
@@ -61,28 +61,27 @@ export function parseAmount(input, decimals = 9) {
   return { error: "", lux };
 }
 
-/** The Dusk fee of one transaction: the most it can cost, and the usual. */
-export function duskFee(limit, typical, gasPrice) {
+/** The Dusk fee of one transaction: the most it can cost, what a wallet's window asks for. */
+export function duskFee(limit, gasPrice) {
   const price = BigInt(gasPrice ?? 1n) > 0n ? BigInt(gasPrice) : 1n;
-  return { maxLux: BigInt(limit) * price, typicalLux: BigInt(typical) * price };
+  return { maxLux: BigInt(limit) * price };
 }
 
-/** The most a Dusk fee can be: what a Dusk Wallet window asks for. */
-/** The most a Dusk fee can be, what a Dusk Wallet window asks for, and what it usually comes to. */
-const feeText = ({ maxLux, typicalLux }) => ({ detail: `usually ~${formatTypicalFee(typicalLux)} DUSK`, value: `up to ${formatMaxFee(maxLux)} DUSK` });
+/** The most a Dusk fee can be: what a Dusk Wallet window asks for, the one figure said before sending. */
+const feeText = ({ maxLux }) => ({ value: `up to ${formatMaxFee(maxLux)} DUSK` });
 
 /**
- * What each Dusk-side step of a route costs at most, and usually. A proof
+ * What each Dusk-side step of a route costs at most. A proof
  * and a claim share one limit (`withdrawalStepGas`): the withdrawal's own
  * gas on top, at least a bound above what the bridge's withdrawals ask for.
  */
 export function routeDuskFees(route, { gasPrice = 1n, withdrawalGas = 0n } = {}) {
   if (route.mode === "duskevm-deposit")
-    return { send: duskFee(DEPOSIT_GAS.limit, DEPOSIT_GAS.typical, gasPrice) };
+    return { send: duskFee(DEPOSIT_GAS.limit, gasPrice) };
   if (route.mode === "service-transfer")
-    return { send: duskFee(TRANSFER_GAS.limit, TRANSFER_GAS.typical, gasPrice) };
+    return { send: duskFee(TRANSFER_GAS.limit, gasPrice) };
   if (route.mode === "duskevm-withdrawal") {
-    const step = duskFee(withdrawalStepGas(withdrawalGas), WITHDRAWAL_GAS.typical, gasPrice);
+    const step = duskFee(withdrawalStepGas(withdrawalGas), gasPrice);
     return { claim: step, prove: step };
   }
   return {};
@@ -209,7 +208,7 @@ export function buildQuote(route, amount, ctx) {
     quote.steps = steps;
     rows.push(
       { key: "send", label: "You send", value: lux === null ? "—" : `${formatLux(lux)} ${tokenName(route.from.id)}` },
-      { detail: steps === 2 ? "two wallet steps" : "one wallet step", key: "fee", label: "Network fee", value: evmFee === null ? `paid in ${coin}` : aboutFee(evmFee, 18, coin) },
+      { key: "fee", label: "Network fee", value: evmFee === null ? `paid in ${coin}` : aboutFee(evmFee, 18, coin) },
       { key: "receive", label: "You receive", strong: true, value: lux === null ? "—" : `${formatDusk(lux)} on ${to}` },
       ...arrivesRow(route, cfg, ctx),
     );
@@ -255,10 +254,9 @@ export function buildQuote(route, amount, ctx) {
 
 /** Gas for a transfer to the EVM chain on Dusk, with an approval first where the route can't take the amount yet. */
 export function hyperlaneDuskFees({ approves = false, gasPrice = 1n } = {}) {
-  const send = duskFee(HYPERLANE_GAS.transfer.limit, HYPERLANE_GAS.transfer.typical, gasPrice);
+  const send = duskFee(HYPERLANE_GAS.transfer.limit, gasPrice);
   if (!approves) return send;
-  const approve = duskFee(HYPERLANE_GAS.approve.limit, HYPERLANE_GAS.approve.typical, gasPrice);
-  return { maxLux: send.maxLux + approve.maxLux, typicalLux: send.typicalLux + approve.typicalLux };
+  return { maxLux: send.maxLux + duskFee(HYPERLANE_GAS.approve.limit, gasPrice).maxLux };
 }
 
 /**
@@ -335,8 +333,8 @@ function hyperlaneQuote(route, amount, ctx) {
     }
     quote.rows.push(
       { key: "send", label: "You send", value: sent },
-      { detail: native ? "on top of the amount" : "paid in DUSK", key: "bridge", label: "Bridge fee", value: fee === null ? "—" : formatDusk(fee) },
-      { detail: `usually ~${formatTypicalFee(gas.typicalLux)} DUSK${approves ? ", for two wallet steps" : ""}`, key: "fee", label: "Network fee", value: `up to ${formatMaxFee(gas.maxLux)} DUSK` },
+      { ...(native ? { detail: "on top of the amount" } : {}), key: "bridge", label: "Bridge fee", value: fee === null ? "—" : formatDusk(fee) },
+      { key: "fee", label: "Network fee", value: `up to ${formatMaxFee(gas.maxLux)} DUSK` },
       // DUSK goes with its bridge fee in one deposit, which the wallet asks for: the most that leaves.
       ...(native && units !== null && fee !== null ? [{ key: "total", label: "Total", value: `up to ${formatDusk(units + fee + gas.maxLux)}` }] : []),
       received,
@@ -365,8 +363,8 @@ function hyperlaneQuote(route, amount, ctx) {
   }
   quote.rows.push(
     { key: "send", label: "You send", value: sent },
-    { detail: `paid in ${coin}, with the transfer`, key: "bridge", label: "Bridge fee", value: fee === null ? "—" : aboutFee(fee, 18, coin) },
-    { detail: "one wallet step", key: "fee", label: "Network fee", value: gasWei === null ? `paid in ${coin}` : aboutFee(gasWei, 18, coin) },
+    { key: "bridge", label: "Bridge fee", value: fee === null ? "—" : aboutFee(fee, 18, coin) },
+    { key: "fee", label: "Network fee", value: gasWei === null ? `paid in ${coin}` : aboutFee(gasWei, 18, coin) },
     received,
     ...arrives,
   );
