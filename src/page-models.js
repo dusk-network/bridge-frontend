@@ -83,23 +83,24 @@ export const NETWORK_BUSY = "Network busy: this may take longer";
 /** The busy line, where the network is busy (`busy`, read with the gas price), for what's signed on Dusk. */
 export const busyNotes = (busy) => (busy ? [NETWORK_BUSY] : []);
 
-/** Who does what, in one line: the route's steps and the wallets they take. */
-export function routeSteps(route, quote = null) {
-  if (route.mode === "hyperlane" && route.signer === "evm") return "One, in your EVM wallet";
-  // Before its approval is read, how many steps a token's transfer takes isn't known.
-  if (route.mode === "hyperlane") return quote?.steps === 2 ? "Approve, then send, in Dusk Wallet" : quote?.steps === null ? "In Dusk Wallet" : "One, in Dusk Wallet";
-  if (route.mode === "duskevm-withdrawal") return "Send on DuskEVM, then prove and claim on Dusk";
-  if (route.mode === "migration") return quote?.steps === 1 ? "One, in your EVM wallet" : "Approve, then migrate, in your EVM wallet";
-  return "One, in Dusk Wallet";
+/**
+ * Which step a review's button takes, where it takes more than one: an
+ * approval and the transfer after it, "1 of 2" then "2 of 2"; a withdrawal's
+ * own three (`review.stepOf`). None while the wallet's asked or the chain's
+ * switched (`switching`): those are no step of it.
+ */
+export function stepOfReview(review, { switching = false } = {}) {
+  if (review.busy || switching) return null;
+  if (review.stepOf) return review.stepOf;
+  return review.steps.length > 1 ? { at: review.current + 1, of: review.steps.length } : null;
 }
 
 /**
  * What the card keeps behind its route line, from the quote's rows: the
- * split of the fees it sums, a withdrawal's claim, then the route's steps.
+ * split of the fees it sums, and a withdrawal's claim.
  */
 export function routeDetailRows(route, quote) {
-  const rows = quote.rows.filter((row) => ["bridge", "fee", "fee-dusk", "total", "when"].includes(row.key));
-  return [...rows, { key: "steps", label: "Steps", value: routeSteps(route, quote) }];
+  return quote.rows.filter((row) => ["bridge", "fee", "fee-dusk", "total", "when"].includes(row.key));
 }
 
 // ---------------------------------------------------------------------------
@@ -575,12 +576,12 @@ export function receiptModel(entry, { approvalSpentBy = false, cfg, evm = null, 
   const view = transferView(entry, { account: own?.account ?? "", cfg, locale, name: own?.name ?? "", now, owner, route, submitter, timeZone, timing, year: true });
   const from = networkName(cfg, route.from.id);
   const to = networkName(cfg, route.to.id);
-  // The sender short, the account it pays in full: "mabvHs…yuwwqv → 0x0d7f01…".
-  const payee = !entry.destination ? "" : /^0x[0-9a-f]{40}$/iu.test(entry.destination) ? formatEvmAddress(entry.destination) : entry.destination;
+  const sourceNetwork = route.from.kind === "dusk" ? "dusk" : route.from.id;
+  const destinationNetwork = route.to.kind === "dusk" ? "dusk" : route.to.id;
+  // The sender short, the account it pays in full, with its copy and explorer page: "mabvHs…yuwwqv → 0x0d7f0114…".
   const sender = entry.sender ? `<code class="mono">${html(short(entry.sender))}</code>` : "";
-  const paid = payee ? `<code class="mono wrap">${html(payee)}</code>` : "";
+  const paid = entry.destination ? `<span class="paid">${addressHtml(cfg, destinationNetwork, entry.destination, `recipient on ${to}`)}</span>` : "";
   const fromTo = sender && paid ? `${sender} → ${paid}` : paid ? `To ${paid}` : sender ? `From ${sender}` : "";
-  const time = (ms) => (ms ? formatDateTime(ms, { locale, now, timeZone, year: true }) : "");
   // Its state is its pill: the caption says only why it failed, a claim on its way, or how long it takes
   // while it's on its way. A withdrawal that waits for you, to prove or to claim, says that on its steps.
   const waitsForYou = route.mode === "duskevm-withdrawal" && !["submitted", "waiting_for_output"].includes(entry.stage ?? "submitted");
@@ -589,14 +590,15 @@ export function receiptModel(entry, { approvalSpentBy = false, cfg, evm = null, 
   else if (heldInEscrow(entry, route)) caption = entry.pendingAction === "claim" ? "Claim sent, waiting for Dusk" : "";
   else if (view.status === "pending" && view.time && !waitsForYou) caption = routeTimeText(view.time);
 
-  const sourceNetwork = route.from.kind === "dusk" ? "dusk" : route.from.id;
-  const destinationNetwork = route.to.kind === "dusk" ? "dusk" : route.to.id;
+  // Its details: what the rest of the receipt doesn't say. The title says what moved, the line above
+  // whom it paid, each step its time and its transaction, with their copy and explorer pages. A failed
+  // one says what left the account, if anything did.
   const ledger = ledgerRows(entry, { approvalSpentBy, cfg, evm, from, locale, route, status: view.status });
-  const details = [...ledger];
+  const moved = view.title.split(" · ")[0];
+  const details = ledger.filter((row) => view.status === "failed" || !(["You receive", "You received", "You sent"].includes(row.label) && row.value === moved));
   if (entry.sender) details.push({ html: addressHtml(cfg, sourceNetwork, entry.sender, `sender on ${from}`), label: "From" });
-  if (entry.destination) details.push({ html: addressHtml(cfg, destinationNetwork, entry.destination, `recipient on ${to}`), label: "To" });
   // Paid to a Dusk account by its hash, where this page doesn't know the account.
-  else if (route.mode === "hyperlane" && entry.recipientHash)
+  if (!entry.destination && route.mode === "hyperlane" && entry.recipientHash)
     details.push({ html: fullValue(entry.recipientHash, { copy: "the Dusk account's hash" }), label: "To (account hash)" });
   // Hyperlane's message, the one each side's Mailbox knows it by.
   if (route.mode === "hyperlane" && entry.messageId) details.push({ html: fullValue(entry.messageId, { copy: "the message ID" }), label: "Message ID" });
@@ -604,43 +606,8 @@ export function receiptModel(entry, { approvalSpentBy = false, cfg, evm = null, 
   const approval =
     route.mode === "migration" ? (evm?.approvalState === "found" && evm.approval?.hash ? evm.approval.hash : entry.approvalHash) : route.mode === "hyperlane" ? entry.approvalHash : null;
   if (approval) details.push({ html: txHtml(cfg, sourceNetwork, approval, `${from} approval`), label: `${from} approval` });
-  details.push({ html: txHtml(cfg, sourceNetwork, entry.hash, `${from} transaction`), label: `${from} transaction` });
-  const none = (text) => `<span class="t2">${text}</span>`;
-  if (route.mode === "duskevm-withdrawal") {
-    const pendingProof = entry.pendingAction === "prove" ? entry.pendingHash : null;
-    const pendingClaim = entry.pendingAction === "finalize" ? entry.pendingHash : null;
-    const proof = entry.proveHash ?? pendingProof;
-    const proven = ["proven_waiting", "ready_to_finalize", "finalize_submitted", "finalized"].includes(entry.stage);
-    details.push({
-      html: proof ? txHtml(cfg, "dusk", proof, "proof transaction") : none(proven ? "Proved" : entry.provenByOther ? "By another account" : "Not yet"),
-      label: "Proof",
-    });
-    const claim = entry.claimHash ?? pendingClaim;
-    details.push({
-      // Claimed outside this browser: finalized, without its transaction here.
-      html: claim ? txHtml(cfg, "dusk", claim, "claim transaction") : none(view.status === "failed" ? "None" : entry.stage === "finalized" ? "Claimed" : "Not yet"),
-      label: "Claim",
-    });
-  } else if (route.mode === "hyperlane" && route.to.id === "dusk") {
-    // The transaction Dusk's Mailbox delivered it in, found by its message; and a claim made here.
-    details.push({
-      html: entry.deliveryHash
-        ? txHtml(cfg, "dusk", entry.deliveryHash, `${to} transaction`)
-        : none(view.status === "failed" ? "None" : entry.delivered || view.status === "completed" ? "Delivered" : "Not yet"),
-      label: `${to} transaction`,
-    });
-    const claim = entry.claimHash ?? (entry.pendingAction === "claim" ? entry.pendingHash : null);
-    if (claim) details.push({ html: txHtml(cfg, "dusk", claim, "claim transaction"), label: "Claim" });
-    if (entry.claimFailedHash) details.push({ html: txHtml(cfg, "dusk", entry.claimFailedHash, "failed claim transaction"), label: "Failed claim" });
-  } else
-    details.push({
-      // A Hyperlane transfer can arrive before the log of the transaction that delivered it is read.
-      html: entry.destinationHash
-        ? txHtml(cfg, destinationNetwork, entry.destinationHash, `${to} transaction`)
-        : none(view.status === "failed" ? "None" : view.status === "completed" && route.mode === "hyperlane" ? "Delivered" : "Not yet"),
-      label: `${to} transaction`,
-    });
-  if (entry.sourceAt) details.push({ label: "Sent", value: time(entry.sourceAt) });
+  // A claim that failed on Dusk: no step keeps it.
+  if (route.mode === "hyperlane" && entry.claimFailedHash) details.push({ html: txHtml(cfg, "dusk", entry.claimFailedHash, "failed claim transaction"), label: "Failed claim" });
 
   const notes = [];
   if (view.late) notes.push({ html: lateLine(cfg) });

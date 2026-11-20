@@ -189,16 +189,15 @@ export const PUBLIC_LINE = "Public and linked: both accounts and the amount";
 /**
  * What becomes public, in one line, naming the accounts themselves: the Dusk
  * one by its .dusk name too, when it has one (`name`), as the wallet shows it.
- * For the card's Details, where the accounts aren't named beside it.
+ * For the card's Details, where the accounts aren't named beside it; From and
+ * To say the networks.
  */
-export function privacyLine(route, cfg, { dusk, evm, name = "" } = {}) {
+export function privacyLine(route, { dusk, evm, name = "" } = {}) {
   const duskText = dusk ? `Dusk account ${name ? `${name} (${short(dusk)})` : short(dusk)}` : "Dusk account";
   const evmText = evm ? short(evm) : "your EVM account";
-  const from = networkName(cfg, route.from.id);
-  const to = networkName(cfg, route.to.id);
   // From the sending side to the paid one, then the amount.
   const parties = route.from.kind === "dusk" ? `your ${duskText}, ${evmText}` : `${evmText}, the ${duskText}`;
-  return `Public on ${from} and ${to}, and linked: ${parties} and the amount.`;
+  return `Public and linked: ${parties} and the amount.`;
 }
 
 function step(key, title, state, extra = {}) {

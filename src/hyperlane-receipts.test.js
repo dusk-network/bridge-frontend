@@ -5,7 +5,7 @@ import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 import { duskRecipientHash } from "./hyperlane.js";
 import { receiptModel } from "./page-models.js";
-import { DURATION, NOT_SENT, amountsIn, assertShownInFull, exactly, fieldOf, fieldsOf, linksOf, partsOf, stepsOf, textOf } from "./pages.fixtures.js";
+import { DURATION, NOT_SENT, amountsIn, assertShownInFull, exactly, fieldOf, fieldsOf, partsOf, stepPartsOf, stepsOf, textOf } from "./pages.fixtures.js";
 import { transferSubline, transferView } from "./transfer-view.js";
 import { receiptPage } from "./views.js";
 
@@ -31,8 +31,9 @@ const CLAIM_SENT = /\bclaim sent\b/iu;
 const NEVER_SENT = /\b(?:never|not|wasn't)\b[^.]*\bsent\b/iu;
 const FAILED = /\bfailed\b/iu;
 const NOT = /\bnot\b/iu;
-// The last step of a receipt as it shows: its state, and its text.
+// The last step of a receipt as it shows: its state, and its text; and what its Copy button copies and where its link goes.
 const lastStep = (model) => stepsOf(receiptPage({ ...model, canAct: true })).at(-1);
+const lastStepPart = (model) => stepPartsOf(receiptPage({ ...model, canAct: true })).at(-1);
 // The status a receipt's pill shows: completed, or still on its way.
 const pillOf = (model) => textOf(partsOf(receiptPage({ ...model, canAct: true }), "spill")[0]);
 function assertPill(model, completed) {
@@ -86,21 +87,22 @@ test("a transfer to Dusk links the Dusk transaction that delivered it, and befor
   const model = receipt(entry);
   const arrived = model.view.steps.find((step) => step.key === "arrived");
   assert.equal(arrived.href, `https://explorer.testnet.dusk.network/transactions/transaction?id=${delivery}`);
-  assertShownInFull(field(model, "Dusk transaction"), delivery, DUSK_TX(delivery));
+  // On its step, 6…6, copied in full, on its explorer; Details doesn't list it again.
+  const shown = lastStepPart(model);
+  assert.deepEqual([shown.copies, shown.links], [[delivery], [DUSK_TX(delivery)]]);
+  assert.match(shown.text, exactly("bbf13d…457a25"));
+  assert.ok(!fieldsOf(receiptPage({ ...model, canAct: true })).some((each) => each.label.endsWith("transaction")));
   assertPill(model, true);
   // Delivered, its transaction not found yet; or still on its way: neither links one, and each shows as what it is.
   for (const [still, completed] of [[{ deliveryHash: undefined, status: "pending" }, false], [{ delivered: false, deliveryHash: undefined, status: "pending" }, false]]) assertPill(receipt({ ...entry, ...still }), completed);
   const unfound = receipt({ ...entry, deliveryHash: undefined, status: "pending" });
   const onItsWay = receipt({ ...entry, delivered: false, deliveryHash: undefined, status: "pending" });
   assert.deepEqual([steps(unfound).at(-1), steps(onItsWay).at(-1)], [["arrived", "done"], ["arrived", "now"]]);
-  for (const model of [unfound, onItsWay]) assert.deepEqual([field(model, "Dusk transaction").copies, linksOf(field(model, "Dusk transaction").html)], [[], []]);
+  for (const model of [unfound, onItsWay]) assert.deepEqual([lastStepPart(model).copies, lastStepPart(model).links], [[], []]);
   const [doneState, doneText] = lastStep(unfound);
   assert.deepEqual([doneState, ARRIVED.test(doneText), ARRIVING.test(doneText), NOT.test(doneText)], ["done", true, false, false]);
-  assert.match(field(unfound, "Dusk transaction").text, DELIVERED);
-  assert.doesNotMatch(field(unfound, "Dusk transaction").text, NOT);
   const [wayState, wayText] = lastStep(onItsWay);
-  assert.deepEqual([wayState, ARRIVING.test(wayText), ARRIVED.test(wayText)], ["now", true, false]);
-  assert.doesNotMatch(field(onItsWay, "Dusk transaction").text, DELIVERED);
+  assert.deepEqual([wayState, ARRIVING.test(wayText), ARRIVED.test(wayText), DELIVERED.test(wayText)], ["now", true, false, false]);
 });
 
 test("a transfer to Sepolia that arrived before its transaction was found reads as arrived, not as on its way", () => {
@@ -109,17 +111,14 @@ test("a transfer to Sepolia that arrived before its transaction was found reads 
   const onItsWay = receipt({ ...entry, status: "pending" });
   assert.deepEqual([arrived.view.status, steps(arrived).at(-1)], ["completed", ["arrived", "done"]]);
   assert.deepEqual([onItsWay.view.status, steps(onItsWay).at(-1)], ["pending", ["arrived", "now"]]);
-  // No transaction to link yet; each shows as what it is.
-  for (const model of [arrived, onItsWay]) assert.deepEqual([field(model, "Sepolia transaction").copies, linksOf(field(model, "Sepolia transaction").html)], [[], []]);
+  // No transaction to link yet: its step shows as what it is, with nothing to copy or open.
+  for (const model of [arrived, onItsWay]) assert.deepEqual([lastStepPart(model).copies, lastStepPart(model).links], [[], []]);
   const [doneState, doneText] = lastStep(arrived);
   assert.deepEqual([doneState, ARRIVED.test(doneText), ARRIVING.test(doneText), NOT.test(doneText)], ["done", true, false, false]);
-  assert.match(field(arrived, "Sepolia transaction").text, DELIVERED);
-  assert.doesNotMatch(field(arrived, "Sepolia transaction").text, NOT);
   assertPill(arrived, true);
   assertPill(onItsWay, false);
   const [wayState, wayText] = lastStep(onItsWay);
-  assert.deepEqual([wayState, ARRIVING.test(wayText), ARRIVED.test(wayText)], ["now", true, false]);
-  assert.doesNotMatch(field(onItsWay, "Sepolia transaction").text, DELIVERED);
+  assert.deepEqual([wayState, ARRIVING.test(wayText), ARRIVED.test(wayText), DELIVERED.test(wayText)], ["now", true, false, false]);
 });
 
 test("a transfer held for its claim offers Claim; once the claim is sent, it shows that claim and offers no other", () => {
@@ -146,10 +145,10 @@ test("a transfer held for its claim offers Claim; once the claim is sent, it sho
   assert.equal(lastStep(model)[0], "turn");
   assert.match(pillOf(model), /\bheld\b/iu);
   assert.doesNotMatch(pillOf(model), /\b(?:completed|pending)\b/iu);
-  // Its claim sent: that claim's transaction in full, said as sent (never as not sent), and Claim not offered again.
+  // Its claim sent: that claim's transaction on its step, copied in full, said as sent (never as not sent), and Claim not offered again.
   const sent = receipt({ ...held, pendingAction: "claim", pendingHash: "cd".repeat(32) });
   assert.equal(sent.view.action, null);
-  assertShownInFull(field(sent, "Claim"), "cd".repeat(32), DUSK_TX("cd".repeat(32)));
+  assert.deepEqual([lastStepPart(sent).copies, lastStepPart(sent).links], [["cd".repeat(32)], [DUSK_TX("cd".repeat(32))]]);
   const [sentState, sentText] = lastStep(sent);
   assert.equal(sentState, "now");
   for (const said of [sentText, sent.caption]) {

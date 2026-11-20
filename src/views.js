@@ -71,10 +71,10 @@ export function strip(vm) {
   return `<div class="strip" role="note">Test DUSK has no value${link}</div>`;
 }
 
-/** "0x7568…b72D", its tail in a span a phone leaves out ("0x7568…"), so the header labels both wallets. */
+/** "0x756859…04b72D", its tail in a span a phone leaves out ("0x756859…"), so the header labels both wallets. */
 function shortLabel(value) {
-  // An EVM address as main writes it here: on a phone with both wallets, a longer one is cut off.
-  const text = /^0x[0-9a-f]{40}$/iu.test(String(value ?? "").trim()) ? formatEvmAddress(String(value).trim(), { short: true }) : short(value);
+  // 6…6, as the card writes the same account; a phone shows its head alone.
+  const text = short(value);
   const cut = text.indexOf("…") + 1;
   return cut ? `${html(text.slice(0, cut))}<span class="tail">${html(text.slice(cut))}</span>` : html(text);
 }
@@ -404,32 +404,17 @@ const callRow = (row) =>
       : `<span class="stack"><span class="num">${html(row.value)}</span>${row.detail ? `<span class="small">${html(row.detail)}</span>` : ""}</span>`
   }</dd></div>`;
 
-/**
- * Under Details, the call of the step at hand where Dusk Wallet can't read it
- * and says to check it on the site: folded, by that name.
- */
-const callFold = (call) =>
-  call?.length ? `<details class="wl-more"><summary>Call details, to check against Dusk Wallet</summary><dl class="group kvs">${call.map(callRow).join("")}</dl></details>` : "";
-
 /** A line the review always says, by itself: what's held, what stays approved, a fee past the amount. HTML. */
 const noteLine = (text) => `<p class="note">${icon("info")}<span>${text}</span></p>`;
 
-/**
- * The review: what moves, from whom and to whom in full, the spender of an
- * approval in full, the one line on what's public, what could cost money
- * said once, the fees as one figure and the time, and the steps where there
- * are two. A check is said only where it fails, as what keeps Confirm off.
- * Under Details, for reference: the fees' split (`detailRows`) and what the
- * step's wallet window will show (`lines`); a call the window can't read, it
- * says to check on the site, so that has its own fold (`callFold`).
- */
-/** The fee rows a review sums into one figure, where there's more than one. */
-const FEE_KEYS = ["fee", "bridge", "total", "fee-dusk"];
+/** The fee rows a review sums into one figure, where there's more than one: their split is for reference. */
+const FEE_KEYS = ["fee", "bridge", "fee-dusk"];
 
 /**
- * A review's rows: in view, an approval's spender in full, which the wallet
- * may not name; the fees as one figure, `fees` where they're more than one,
- * the time and the steps. Under Details: the fees' split.
+ * A review's rows: an approval's spender in full, which the wallet may not
+ * name; the fees as one figure, `fees` where they're more than one; then the
+ * rest, as the total where it isn't the amount and the fees, and the time.
+ * For reference (`split`): the fees' split.
  */
 function reviewRows(vm, step) {
   const rows = vm.feeRows ?? [];
@@ -447,15 +432,61 @@ function reviewRows(vm, step) {
         },
       ]
     : [];
-  return { details: split ? fees : [], shown: [...spender, ...(split ? [vm.fees] : fees), ...rest] };
+  return { shown: [...spender, ...(split ? [vm.fees] : fees), ...rest], split: split ? fees : [] };
 }
 
+// A value as the review compares it: an EVM address or a hex ID in any case and with or without 0x, the rest as it reads.
+const sameKey = (value) => {
+  const text = String(value).replace(/\s+/gu, " ").trim();
+  return /^(?:0x)?[0-9a-f]{40,64}$/iu.test(text) ? text.toLowerCase().replace(/^0x/u, "") : text;
+};
+
+// Window lines the review says itself or the screen implies: the network (the badge and From say it), the fee and the total, the change.
+const IMPLIED_LINES = new Set(["Estimated change", "Network", "Network fee", "Total"]);
+
+/**
+ * What a review keeps for reference: the fees' split (`split`), what else
+ * the step's wallet window will show (`lines`), and a call that window can't
+ * read, to check against it (`call`). Nothing the review says already: its
+ * amounts, its accounts and spender, its rows. And nothing twice: the
+ * window's head and fee lines restate them.
+ */
+function reviewReference(vm, step, rows) {
+  const said = new Set();
+  const say = (...values) => {
+    for (const value of values) if (value) said.add(sameKey(value));
+  };
+  for (const side of [vm.send, vm.receive].filter(Boolean)) say(`${side.amount} ${side.unit}`, side.account, ...String(side.where ?? "").split(" · "));
+  if (vm.lead) say(`${vm.lead.amount} ${vm.lead.unit ?? "DUSK"}`, vm.lead.payee);
+  if (step?.spender) say(step.spender.address, step.spender.name);
+  for (const row of [...rows.shown, ...rows.split]) say(row.value);
+  const fresh = (...values) => !values.some((value) => value && said.has(sameKey(value)));
+  const ready = Boolean(step?.ready);
+  return {
+    call: ready && step.call?.length ? step.call.filter((row) => fresh(row.full, row.value)) : [],
+    lines: ready && step.lines?.length && !step.call?.length ? step.lines.filter((line) => !line.kind && !IMPLIED_LINES.has(line.label) && fresh(line.address, line.full, line.value)) : [],
+    split: rows.split,
+  };
+}
+
+const CALL_TITLE = "Call details, to check against Dusk Wallet";
+
+/**
+ * The review: what moves, from whom and to whom in full, the spender of an
+ * approval in full, the one line on what's public, what could cost money
+ * said once, the fees as one figure, the total where it isn't the amount and
+ * the fees, and the time; with two steps, the button says which it takes. A
+ * check is said only where it fails, as what keeps Confirm off. That's whole
+ * by itself. Its reference (`reviewReference`) is under Details, with a call
+ * the window can't read in a fold of its own.
+ */
 export function reviewSheet(vm) {
   const step = vm.steps.find((each) => each.current);
   const rows = reviewRows(vm, step);
-  const preview = step?.ready && step.lines?.length && !step.call?.length ? `<div class="wlh">${html(step.walletName)} will show</div>${walletLines(step.lines, vm.cfgLinks)}` : "";
-  const split = rows.details.length ? `<dl class="group kvs">${quoteRows({ rows: rows.details })}</dl>` : "";
-  const details = split || preview ? `<details class="wl-more"><summary>Details</summary>${split}${preview}</details>` : "";
+  const ref = reviewReference(vm, step, rows);
+  const split = ref.split.length ? `<dl class="group kvs">${quoteRows({ rows: ref.split })}</dl>` : "";
+  const preview = ref.lines.length ? `<div class="wlh">${html(step.walletName)} will also show</div>${walletLines(ref.lines, vm.cfgLinks)}` : "";
+  const callRows = ref.call.length ? `<dl class="group kvs">${ref.call.map(callRow).join("")}</dl>` : "";
   const failing = vm.checks.filter((check) => !check.ok);
   const checks = failing.length
     ? `<ul class="ck" aria-label="Checked">${failing.map((check) => `<li class="bad">${icon("info")}<span>${check.html}</span></li>`).join("")}</ul>`
@@ -465,9 +496,7 @@ export function reviewSheet(vm) {
   const notes = [...vm.checks.filter((check) => check.ok && check.note).map((check) => check.html), ...(vm.notes ?? []).map(html)].map(noteLine).join("");
   // Another account paid: said first, after what's public.
   const notYours = vm.lead ? vm.lead.notYours : vm.notYours;
-  return `<div class="sheet-head"><div><h2 id="sheet-title">Review</h2>${vm.sub ? `<p class="sub">${html(vm.sub)}</p>` : ""}</div><button type="button" class="icon-btn round" data-action="close-sheet" aria-label="Close the review">${icon("close")}</button></div>
-  <div class="sheet-body">
-    ${vm.lead ? actionLead(vm.lead) : `<div class="flow group">
+  const decision = `${vm.lead ? actionLead(vm.lead) : `<div class="flow group">
       <div><div class="k">You send</div><div class="v num">${html(vm.send.amount)}<span class="u">${html(vm.send.unit)}</span></div><div class="w">${flowSide(vm.send)}</div></div>
       <div class="dn" aria-hidden="true">${icon("back", "down")}</div>
       <div><div class="k">You receive</div><div class="v num">${html(vm.receive.amount)}<span class="u">${html(vm.receive.unit)}</span></div><div class="w">${flowSide(vm.receive)}</div></div>
@@ -478,11 +507,14 @@ export function reviewSheet(vm) {
     ${notes}
     ${checks}
     <dl class="group kvs">${quoteRows({ rows: rows.shown })}</dl>
-    ${details}
-    ${step?.ready ? callFold(step.call) : ""}
-    ${step && !step.ready ? `<p class="small t2">${waiting(step.wait ?? "Preparing…")}</p>` : ""}
-  </div>
-  <div class="sheet-foot">${vm.error ? messageLine(vm.error) : ""}<div class="btn-pair"><button type="button" class="btn sec" data-action="close-sheet">Cancel</button><button type="button" class="btn pri" data-action="confirm" ${vm.canConfirm ? "" : "disabled"}>${html(vm.confirmLabel)}</button></div></div>`;
+    ${step && !step.ready ? `<p class="small t2">${waiting(step.wait ?? "Preparing…")}</p>` : ""}`;
+  const body = `<div class="sheet-body">${decision}
+    ${split || preview ? `<details class="wl-more"><summary>Details</summary>${split}${preview}</details>` : ""}
+    ${callRows ? `<details class="wl-more"><summary>${CALL_TITLE}</summary>${callRows}</details>` : ""}
+  </div>`;
+  return `<div class="sheet-head"><div><h2 id="sheet-title">Review</h2>${vm.sub ? `<p class="sub">${html(vm.sub)}</p>` : ""}</div><button type="button" class="icon-btn round" data-action="close-sheet" aria-label="Close the review">${icon("close")}</button></div>
+  ${body}
+  <div class="sheet-foot">${vm.error ? messageLine(vm.error) : ""}<div class="btn-pair"><button type="button" class="btn sec" data-action="close-sheet">Cancel</button><button type="button" class="btn pri" data-action="confirm" ${vm.canConfirm ? "" : "disabled"}>${html(vm.confirmLabel)}${vm.stepOf ? `<span class="of"><span class="sr-only">, step </span>${vm.stepOf.at} of ${vm.stepOf.of}</span>` : ""}</button></div></div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -547,6 +579,7 @@ export function receiptPage(vm) {
   const fees = vm.fees?.text ? `<p class="small t2">Fees <span class="num"${exactTitle(vm.fees.exact, vm.fees.text)}>${html(vm.fees.text)}</span></p>` : "";
   // The transfer and its steps on the left; its details folded in a panel
   // beside them, as the web wallet shows a transaction.
+  const side = details ? `<section class="rc-side" aria-label="Details"><details><summary class="gh">Details</summary><dl class="kvs">${details}</dl></details></section>` : "";
   return `<main class="page rc" id="main" tabindex="-1">
     <div class="rc-main">
       <div class="topbar">${backLink}</div>
@@ -564,7 +597,7 @@ export function receiptPage(vm) {
       <p class="small t2">Anyone with the link can see this transfer.</p>
       <div class="bt"><a class="btn ${view.status === "completed" ? "pri" : "sec"}" href="#/">New transfer</a></div>
     </div>
-    <section class="rc-side" aria-label="Details"><details><summary class="gh">Details</summary><dl class="kvs">${details}</dl></details></section>
+    ${side}
   </main>`;
 }
 

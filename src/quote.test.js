@@ -64,6 +64,8 @@ test("the bridge fee comes off what arrives, and a send at or under it is refuse
   // Paid out as the chain's own DUSK token.
   assert.equal(rows(quote).receive, "49 ERC20 DUSK on Sepolia");
   assert.equal(rows(quote).fee, "up to 0.0025 DUSK");
+  // What leaves the account, as Dusk Wallet asks for it: the amount and the network fee, the bridge's taken from the amount.
+  assert.equal(rows(quote).total, "up to 50.0025 DUSK");
   assert.deepEqual([quote.fees.label, quote.fees.value, quote.fees.detail], ["Fees", "up to 1.0025 DUSK", "1 DUSK of it from the amount"]);
   // No time is known for this testnet payout, so none is quoted.
   assert.equal(rows(quote).arrives, undefined);

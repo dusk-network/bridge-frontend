@@ -207,8 +207,8 @@ networks yet.
 - **A task**: the amount, where it goes, and under the card one line with the
   route's time and its fees, summed where they're paid in one coin (the most
   a Dusk fee can be, an EVM chain's as estimated). Behind the line: the
-  split, each fee one figure, a withdrawal's claim date, the steps and what
-  becomes public. With the EVM wallet on another chain than
+  split, each fee one figure, the total where DUSK pays both, a withdrawal's
+  claim date and what becomes public. With the EVM wallet on another chain than
   the route sends from, as the wallet itself says, the button offers to
   switch it, here and on the review. Nothing goes out from another chain.
   Under the route, how it's doing, read once as its card opens and kept 10
@@ -223,31 +223,34 @@ networks yet.
   as any request is. Where a pair moves more than one token, as Hyperlane's
   do, the token is chosen beside the amount; what Hyperlane's routes hold in
   escrow for the account shows above the form, with Claim.
-- **Review**: what moves, whom it pays, in full (your EVM wallet's account
-  says so), an approval's spender in full, and in one line what becomes
-  public; then what could cost money, said once (another account paid, a
-  first transfer held until claimed, an earlier approval that covers the
-  amount and what stays approved, one an approval replaces), the fees as one
-  figure and the time, and the steps where there are two. A check (balances,
-  gas) is said only where it fails, as what keeps Confirm off. Under
-  Details: the fees' split, and what the step's wallet window will show, in
-  its order and words, with its contract, spender, method and raw units. A
-  call the window can't read and says to check on the site, as Hyperlane's
-  transfer and claims, has its own fold, "Call details, to check against
-  Dusk Wallet": its method, its contract as the window prints it, its call
-  data's size and sha256 as the window's Details print them, and its
-  arguments in plain words, read back from its bytes. Cancel and confirm are
-  equal; a request you reject
+- **Review**: what moves, whom it pays, in full (your account says so), an
+  approval's spender in full, and in one line what becomes public; then what
+  could cost money, said once (another account paid, a first transfer held
+  until claimed, an earlier approval that covers the amount and what stays
+  approved, one an approval replaces), the fees as one figure, the total
+  Dusk Wallet asks for where it isn't the amount and the fees, and the time.
+  With two steps, the button names the one at hand, "1 of 2" beside it. A
+  check (balances, gas) is said only where it fails, as what keeps Confirm
+  off. That's whole by itself. For reference, under Details: the fees'
+  split, and what else the step's wallet window will show, in its order and
+  words, with its contract, method and raw units; nothing the review says
+  already. A call the window can't read and says to check on the site, as
+  Hyperlane's transfer and claims, has its own fold, "Call details, to check
+  against Dusk Wallet": its method, its contract as the window prints it,
+  its call data's size and sha256 as the window's Details print them, and
+  its arguments in plain words, read back from its bytes. Cancel
+  and confirm are equal; a request you reject
   in the wallet is said in grey, not as a failure. A Dusk call is built
   before Confirm can be pressed, and the reviewed request is what is sent.
 - **Receipt**, at `#/transfer/<hash>`: what moved and whom it paid, in full,
-  the steps with times, explorer links and transaction IDs, what its fees
-  came to, the receipt link to copy, and, under Details, both accounts and
-  transactions in full, and its amounts as
-  every Dusk app says them (`transferLedger`): what you sent, the bridge fee,
-  the network fee and what you received, to the Lux, and gas as wallets write
-  it. A migration's gas counts the approval it spent, whichever app signed
-  it and whenever, as its chain says (`migrationFacts`), whose transaction is
+  with its copy and explorer link, the steps with times, explorer links and
+  transaction IDs, what its fees came to and the receipt link to copy. Under
+  Details, only what the rest doesn't say: the sending account in
+  full, Hyperlane's message, an approval, and its amounts as every Dusk app
+  says them (`transferLedger`): the bridge fee, the network fee, and what you
+  sent and received where the title doesn't say it, to the Lux, and gas as
+  wallets write it. A migration's gas counts the approval it spent,
+  whichever app signed it and whenever, as its chain says (`migrationFacts`), whose transaction is
   listed beside the migration's, and says which it counts: the migration
   alone where an earlier transfer spent that approval first, and, saying so,
   where the approval can't be read, as once the RPC no longer gives logs that

@@ -151,7 +151,7 @@ export function transferRemoteLines({ amount, cfg, fee, recipient, recipientHash
     { address: token.evm.token, label: "Interacting with", network, value: `${token.symbol} on ${networkName(cfg, network)}` },
     { label: "Method", mono: true, value: "transferRemote" },
     { label: "destination", mono: true, note: "Dusk's Hyperlane domain.", value: String(cfg.hyperlane.dusk.domain) },
-    { label: "recipient", mono: true, note: "The hash of the Dusk account below.", value: recipientHash },
+    { label: "recipient", mono: true, note: "The hash of the Dusk account it pays.", value: recipientHash },
     { address: recipient, label: "Pays on Dusk", network: "dusk" },
     {
       label: "amount",

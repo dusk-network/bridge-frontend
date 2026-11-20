@@ -260,7 +260,8 @@ h1 { font-size: 28px; font-weight: 500; letter-spacing: -0.01em; line-height: 1.
 
 /* A full address or hash: wraps, and keeps its copy and explorer buttons. */
 .fullval { display: inline-flex; align-items: flex-start; gap: 4px; max-width: 100%; text-align: left; }
-.fullval code { padding-top: 5px; overflow-wrap: anywhere; word-break: break-all; color: var(--text); font-size: 12.5px; line-height: 1.55; }
+/* A long ID breaks into even lines, none of a few characters alone. */
+.fullval code { padding-top: 5px; overflow-wrap: anywhere; word-break: break-all; text-wrap: balance; color: var(--text); font-size: 12.5px; line-height: 1.55; }
 .full-actions { display: inline-flex; gap: 0; }
 
 /* Key and value rows, divided by lines, as the web wallet's summaries. */
@@ -429,6 +430,8 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 .sheet-foot { padding: 14px 22px 18px; border-top: 1px solid var(--hair); display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
 .sheet-foot .hint { margin: 0 auto 0 0; }
 .btn-pair { display: flex; gap: 10px; }
+/* Which step a review's button takes, where there's more than one: small, beside its label. */
+.btn .of { margin-left: 2px; font-size: 12.5px; font-weight: 400; opacity: .7; font-variant-numeric: tabular-nums; }
 .btn-pair .btn { min-width: 160px; }
 .sheet-foot .message { flex: 1 0 100%; margin: 0; }
 
@@ -438,7 +441,9 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 .flow .v .u { margin-left: 6px; color: var(--text-2); font-size: 15px; }
 .flow .w { display: flex; align-items: center; gap: 7px; margin-top: 4px; color: var(--text-2); font-size: 13px; }
 /* Whom it pays, in full: it wraps within its side. */
-.flow .w > span { min-width: 0; }
+/* An account in full, and a wallet line's long value, break into even lines. */
+.flow .w > span { min-width: 0; text-wrap: balance; }
+.wls .mono.wrap { text-wrap: balance; }
 .flow.lead { grid-template-columns: 1fr; }
 .flow .dn { color: var(--text-3); }
 .flow .dn svg { transform: rotate(180deg); }
@@ -648,6 +653,10 @@ form.group .l1 { display: block; color: var(--text); font-size: 14px; font-weigh
   .rc-side .kvs .kv { flex-direction: column; gap: 4px; }
   .rc-side .kvs .v { max-width: 100%; text-align: left; }
   .rc-side .kvs .stack { align-items: flex-start; }
+  /* About: a full ID under its label, the row's width for it, so it breaks into few even lines. */
+  .cgroup .kvs .kv:has(.fullval) { flex-direction: column; gap: 4px; }
+  .cgroup .kvs .kv:has(.fullval) .v { width: 100%; text-align: left; }
+  .cgroup .kvs .fullval { justify-content: space-between; width: 100%; }
   .hero .t { font-size: 22px; }
   .rc .bt { flex-direction: column; }
   .rc .bt .btn { min-width: 0; width: 100%; }
@@ -683,6 +692,13 @@ form.group .l1 { display: block; color: var(--text); font-size: 14px; font-weigh
   .linkish, .lnk, .topbar .bk, .foot a, .about-links a, .entry a, .note a, .strip a { display: inline-flex; align-items: center; min-height: 44px; }
   .route > summary { min-height: 44px; }
   .wl-more > summary { padding: 13px 0; }
+}
+
+/* The narrowest phones: both wallets' accounts keep their 6-character heads. */
+@media (max-width: 389px) {
+  .hdr-r { gap: 4px; }
+  .hdr-r .net { padding: 0 8px; }
+  .hdr-r .wpill { padding-right: 7px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

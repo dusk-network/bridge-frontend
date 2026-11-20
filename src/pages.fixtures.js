@@ -135,6 +135,16 @@ export function fieldOf(fragment, label) {
   return found[0];
 }
 
+/** Whom a receipt says it paid, in the line under its title, as a field: what it shows and what its Copy button copies. */
+export function paidOf(page) {
+  const parts = partsOf(page, "paid");
+  assert.equal(parts.length, 1, `one account paid, not ${parts.length}`);
+  return { copies: copiesOf(parts[0]), html: parts[0], label: "Paid", shown: true, text: textOf(parts[0]) };
+}
+
+/** Each of a receipt's steps, as shown: what it says, what its Copy button copies, and where its link goes. */
+export const stepPartsOf = (page) => partsOf(page, "step").map((part) => ({ copies: copiesOf(part), links: linksOf(part), text: textOf(part) }));
+
 /** A wallet's lines, other than its head, by their labels. */
 export const byLabel = (lines) => Object.fromEntries(lines.filter((line) => !line.kind).map((line) => [line.label, line]));
 

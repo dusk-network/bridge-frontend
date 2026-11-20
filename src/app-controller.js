@@ -52,6 +52,7 @@ import {
   revokeReview,
   routeDetailRows,
   routeLines,
+  stepOfReview,
   transfersModel,
 } from "./page-models.js";
 import { pageStorage } from "./page-storage.js";
@@ -714,7 +715,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       needsCount: transfersVm().needs,
       notice,
       // What becomes public, behind the route line.
-      privacy: privacyLine(route, cfg, {
+      privacy: privacyLine(route, {
         dusk: route.to.kind === "dusk" ? destination : duskAccount(),
         evm: route.to.kind === "dusk" ? evmAccount() : destination,
         name: duskPartyName(route.to.kind === "dusk" ? destination : duskAccount(), resolved),
@@ -1222,16 +1223,16 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const route = routeOf(review.routeId);
     const walletName = route.signer === "dusk" || !evmStep(review) ? "Dusk Wallet" : evmWalletName(state.evmState);
     const step = review.steps[review.current];
+    // On another chain, it's asked for first, as the card does: no step of the transfer.
+    const switching = !review.busy && evmStep(review) && switchTo(route);
     return {
       cfgLinks: explorerFor,
       // Its request built, and nothing it checked failing.
       canConfirm: !review.busy && !review.stale && Boolean(step?.ready) && review.checks.every((check) => check.ok),
       checks: review.checks,
-      // On another chain, it's asked for first, as the card does.
-      confirmLabel: review.busy ? review.busyLabel || `Waiting for ${walletName}…` : (evmStep(review) && switchTo(route) ? `Switch to ${switchTo(route)}` : step?.confirmLabel) ?? "Confirm",
+      confirmLabel: review.busy ? review.busyLabel || `Waiting for ${walletName}…` : (switching ? `Switch to ${switchTo(route)}` : step?.confirmLabel) ?? "Confirm",
       error: review.error,
-      // Two steps: what each does, in a row of its own until the first is done.
-      feeRows: review.stepsLine ? [...review.feeRows, { key: "steps", label: "Steps", value: review.stepsLine }] : review.feeRows,
+      feeRows: review.feeRows,
       // The fees as one figure, where they're split.
       fees: review.fees ?? null,
       lead: review.lead ?? null,
@@ -1241,6 +1242,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       privacy: review.privacy,
       receive: review.receive,
       send: review.send,
+      stepOf: stepOfReview(review, { switching }),
       steps: review.steps.map((item, index) => ({ ...item, current: index === review.current })),
       sub: review.sub,
     };
@@ -1267,7 +1269,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const payeeName =
       route.to.kind === "dusk"
         ? destination === duskAccount() ? duskName() : (typedRecipient(route)?.name ?? "")
-        : evmAccount() && destination === checkEvmRecipient(evmAccount()).address ? `your ${evmWalletName(state.evmState).replace(/^your /u, "")}` : "";
+        : evmAccount() && destination === checkEvmRecipient(evmAccount()).address ? "your account" : "";
     const base = {
       checks,
       error: "",
@@ -1318,7 +1320,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       const gasPrice = migration.gasPriceWei ?? null;
       const fee = (gas) => (gasPrice && gas ? gas * gasPrice : null);
       const chain = cfg.evmNetworks[network];
-      // What each window will show is under Details; an approval's spender, which the wallet doesn't name, in full.
+      // What else each window will show is for reference; an approval's spender, which the wallet doesn't name, in full.
       const steps = [];
       if (needsApproval)
         steps.push({
@@ -1341,7 +1343,6 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         current: 0,
         notes: replaces ? [replaces] : [],
         steps,
-        stepsLine: needsApproval ? `Approve exactly ${amountText} ${token}, then migrate` : "",
         sub: "",
       });
       openSheet("review", opener);
@@ -1360,7 +1361,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
             walletName,
           },
         ],
-        sub: "Step 1 of 3. Then prove and claim on Dusk, with Dusk Wallet.",
+        // Of the withdrawal's three steps, the first.
+        stepOf: { at: 1, of: 3 },
+        sub: "Then prove and claim on Dusk",
       });
       openSheet("review", opener);
       return;
@@ -1491,7 +1494,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       privacy: actionPrivacy(kind),
       routeId: route.id,
       steps: [{ confirmLabel: confirmLabel(view.amount), ready: false, title: kind === "prove" ? "Prove the withdrawal" : "Claim the DUSK", wait: "Preparing…", walletName: "Dusk Wallet" }],
-      sub: kind === "prove" ? "Step 2 of 3: prove" : "Step 3 of 3: claim",
+      stepOf: kind === "prove" ? { at: 2, of: 3 } : { at: 3, of: 3 },
+      sub: "",
     });
     openSheet("review", opener);
     await reviews.fill(
@@ -1657,7 +1661,6 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       ...rest,
       current: 0,
       steps,
-      stepsLine: approves ? `Approve exactly ${amountText} ${unit}, then send` : "",
       sub: "",
     });
     openSheet("review", opener);
@@ -1778,7 +1781,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         if (error?.code === "FAILED_ON_DUSK") review.approvalHash = null;
         throw error;
       }
-      Object.assign(review, { busy: false, busyLabel: "", current: review.current + 1, request: null, stepsLine: "", sub: "Approved. Step 2: send" });
+      Object.assign(review, { busy: false, busyLabel: "", current: review.current + 1, request: null, sub: "Approved" });
       announce("Approved. Step 2 is ready.");
       void loadReads();
       renderSheet();
@@ -2006,8 +2009,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
           // Kept with the transfer: its gas is part of what it cost.
           review.approvalHash = await approveMigration(network, amount, { account: review.signer?.account });
           review.current += 1;
-          review.sub = "Approved. Step 2: migrate";
-          review.stepsLine = "";
+          review.sub = "Approved";
           review.busy = false;
           announce("Approval confirmed. Step 2 is ready.");
           // The allowance changed: read it again, with the migration's gas.

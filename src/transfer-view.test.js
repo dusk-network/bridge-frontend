@@ -227,16 +227,17 @@ test("a waiting withdrawal counts down to its claim time, across a clock change"
   assert.equal(refused.action.failure, WITHDRAWAL_GAS_REFUSAL);
 });
 
-test("what becomes public names the accounts themselves, not a label", () => {
+test("what becomes public names the accounts themselves, not a label, and not the networks From and To say", () => {
   // By its .dusk name too, as the wallet's window says it.
-  const named = privacyLine(deposit, cfg, { dusk: ACCOUNT, evm: EVM, name: "alice.dusk" });
-  for (const shown of ["alice.dusk", "21n5nc…fMMLNz", "0x3E5B82…C3a11d"]) assert.match(named, exactly(shown));
-  const plain = privacyLine(deposit, cfg, { dusk: ACCOUNT, evm: EVM });
-  for (const shown of ["21n5nc…fMMLNz", "0x3E5B82…C3a11d"]) assert.match(plain, exactly(shown));
-  // From the sending side to the paid one, on both networks.
-  const back = privacyLine(migration, cfg, { dusk: ACCOUNT, evm: EVM });
-  for (const shown of ["0x3E5B82…C3a11d", "21n5nc…fMMLNz"]) assert.match(back, exactly(shown));
-  assert.ok(privacyLine(service, cfg, {}));
+  assert.equal(
+    privacyLine(deposit, { dusk: ACCOUNT, evm: EVM, name: "alice.dusk" }),
+    "Public and linked: your Dusk account alice.dusk (21n5nc…fMMLNz), 0x3E5B82…C3a11d and the amount.",
+  );
+  assert.equal(privacyLine(deposit, { dusk: ACCOUNT, evm: EVM }), "Public and linked: your Dusk account 21n5nc…fMMLNz, 0x3E5B82…C3a11d and the amount.");
+  // From the sending side to the paid one.
+  assert.equal(privacyLine(migration, { dusk: ACCOUNT, evm: EVM }), "Public and linked: 0x3E5B82…C3a11d, the Dusk account 21n5nc…fMMLNz and the amount.");
+  // Before the accounts are known, what they are.
+  assert.equal(privacyLine(service, {}), "Public and linked: your Dusk account, your EVM account and the amount.");
 });
 
 test("wallet errors say what happened, naming the wallet", () => {

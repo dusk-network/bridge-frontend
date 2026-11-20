@@ -169,6 +169,8 @@ export function buildQuote(route, amount, ctx) {
       { key: "send", label: "You send", value: shown(lux) },
       ...(bridgeFee ? [{ key: "bridge", label: "Bridge fee", value: `${formatDusk(bridgeFee)}, from the amount` }] : []),
       { key: "fee", label: "Network fee", ...feeText(fee) },
+      // A payout's bridge fee comes from the amount: what leaves is the amount and the network fee, not their sum with it.
+      ...(bridgeFee && lux !== null ? [{ key: "total", label: "Total", value: `up to ${formatDusk(lux + fee.maxLux)}` }] : []),
       {
         key: "receive",
         label: "You receive",
