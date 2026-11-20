@@ -4,6 +4,7 @@ import test from "node:test";
 import { DuskSdkError } from "@dusk/connect";
 
 import { SIGNER_MOVED, createReviewSession, notSent, sameSigner, sentActionPatch } from "./review-session.js";
+import { NOT_SENT } from "./pages.fixtures.js";
 import { LATER_STEP_CANCELLED, WALLET_CANCELLED, friendlyWalletError } from "./transfer-view.js";
 
 test("a request prepared for a closed review never fills the next one, even on the same route", async () => {
@@ -90,18 +91,30 @@ test("a request that wasn't sent says why on the review and in the page's live r
   assert.deepEqual([switched.busy, switched.error, switched.stale], [false, SIGNER_MOVED.evm, true]);
   // Anything else in plain words, naming the wallet that refused.
   notSent({}, { code: 4100 }, { announce, wallet: "evm" });
-  assert.deepEqual(said, [WALLET_CANCELLED, SIGNER_MOVED.dusk, SIGNER_MOVED.evm, "The EVM wallet is locked. Unlock it, reconnect, and try again."]);
+  assert.deepEqual(said, [WALLET_CANCELLED, SIGNER_MOVED.dusk, SIGNER_MOVED.evm, friendlyWalletError({ code: 4100 }, "evm")]);
 });
 
 test("a send Dusk Connect refused because Dusk Wallet changed network or account leaves the review stale, in plain words", () => {
   // As Dusk Connect refuses: nothing went to the wallet.
   const refused = (reason) => new DuskSdkError("Wallet changed before sending", { data: { reason } });
-  const network = notSent({ busy: true }, refused("network_changed"), { announce: () => {} });
-  assert.deepEqual([network.busy, network.stale, network.error], [false, true, "Dusk Wallet switched network, so nothing was sent. Close it and review again."]);
-  const session = notSent({ busy: true }, refused("session_changed"), { announce: () => {} });
-  assert.deepEqual([session.stale, session.error], [true, "Dusk Wallet locked or changed accounts, so nothing was sent. Close it and review again."]);
-  // Refused while connecting, outside a review: try again.
-  assert.equal(friendlyWalletError(refused("session_changed")), "Dusk Wallet locked or changed accounts. Try again.");
+  const said = [];
+  const network = notSent({ busy: true }, refused("network_changed"), { announce: (text) => said.push(text) });
+  const session = notSent({ busy: true }, refused("session_changed"), { announce: (text) => said.push(text) });
+  // Nothing went out, and nothing says it did: no longer busy, stale, no transaction kept, and the same words on the review as announced.
+  for (const review of [network, session]) {
+    assert.deepEqual(Object.keys(review).sort(), ["busy", "error", "stale"]);
+    assert.deepEqual([review.busy, review.stale], [false, true]);
+    assert.match(review.error, NOT_SENT);
+  }
+  // Each for its own reason: the network, or the account; never the other.
+  assert.match(network.error, /\bnetwork\b/iu);
+  assert.doesNotMatch(network.error, /\baccounts?\b/iu);
+  assert.match(session.error, /\baccounts?\b/iu);
+  assert.doesNotMatch(session.error, /\bnetwork\b/iu);
+  assert.deepEqual(said, [network.error, session.error]);
+  // Each said as itself, never as Dusk Connect's own words, also when it refused while connecting, outside a review.
+  for (const words of [network.error, session.error, friendlyWalletError(refused("session_changed"))]) assert.ok(words && words !== "Wallet changed before sending", words);
+  assert.notEqual(network.error, session.error);
   // Any other refusal leaves the review as it was.
   assert.equal(notSent({ busy: true }, new DuskSdkError("Wallet network changed", { data: { reason: "other" } }), { announce: () => {} }).stale, undefined);
 });

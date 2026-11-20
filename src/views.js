@@ -388,7 +388,7 @@ const otherAccount = (text) =>
 // A proof's or a claim's review leads with what moves and whom it pays, in full; a revoke's with what's approved.
 function actionLead(lead) {
   const unit = lead.unit ?? "DUSK";
-  const line = lead.payee ? `To <code class="mono wrap">${html(lead.payee)}</code> on Dusk` : html(lead.line);
+  const line = lead.payee ? `To <code class="mono wrap">${html(lead.payee)}</code> on Dusk${lead.line ? ` · ${html(lead.line)}` : ""}` : html(lead.line);
   return `<div class="flow group lead"><div><div class="k">${html(lead.label)}</div><div class="v num">${html(lead.amount)}${unit ? `<span class="u">${html(unit)}</span>` : ""}</div><div class="w">${lead.chain ? chainMark(lead.chain, "xs") : ""}<span>${line}</span></div></div></div>`;
 }
 
@@ -436,10 +436,12 @@ function reviewRows(vm, step) {
   const fees = rows.filter((row) => FEE_KEYS.includes(row.key));
   const rest = rows.filter((row) => !FEE_KEYS.includes(row.key));
   const split = fees.length > 1 && vm.fees;
+  // In full, with its copy, and its explorer page where it has one (`network`); a Dusk contract has none.
+  const spenderId = step?.spender ? (/^0x/u.test(step.spender.address) ? formatEvmAddress(step.spender.address) : formatContractId(step.spender.address)) : "";
   const spender = step?.spender
     ? [
         {
-          html: `<span class="stack"><span>${html(step.spender.name)}</span><code class="mono wrap">${html(/^0x/u.test(step.spender.address) ? formatEvmAddress(step.spender.address) : formatContractId(step.spender.address))}</code></span>`,
+          html: `<span class="stack"><span>${html(step.spender.name)}</span>${fullValue({ explorer: step.spender.network ? vm.cfgLinks?.explorer(step.spender.network, spenderId) : null, label: "Spender", value: spenderId })}</span>`,
           key: "spender",
           label: "Spender",
         },
@@ -520,7 +522,7 @@ export function receiptPage(vm) {
   if (vm.loading)
     return `<main class="col" id="main" tabindex="-1"><div class="topbar">${backLink}<h1 class="ti">Transfer</h1></div><p class="t2" role="status">${waiting(vm.loading)}</p></main>`;
   if (vm.missing)
-    return `<main class="col" id="main" tabindex="-1"><div class="topbar">${backLink}<h1 class="ti">Transfer</h1></div><div class="group pad"><p>${html(vm.missing)}</p><p class="small t2"><code class="mono" title="${html(vm.hash)}">${html(short(vm.hash))}</code></p></div><p class="links-row"><a class="lnk" href="#/lookup">Look up another ${icon("search")}</a></p></main>`;
+    return `<main class="col" id="main" tabindex="-1"><div class="topbar">${backLink}<h1 class="ti">Transfer</h1></div><div class="group pad"><p>${html(vm.missing)}</p><p class="small t2"><code class="mono wrap">${html(vm.hash)}</code></p></div><p class="links-row"><a class="lnk" href="#/lookup">Look up another ${icon("search")}</a></p></main>`;
   const view = vm.view;
   // When it can be claimed: "Claim from …" or "Claim from about …", counted
   // down. Late, the date is only the soonest and moves on each check: the
@@ -656,15 +658,14 @@ export function lookupPage(vm) {
 // Sheets: contracts, network
 // ---------------------------------------------------------------------------
 
-/** A contract or account in About: short, in full on hover and on copy, with its explorer page where there is one. */
-const idValue = (row) =>
-  `<span class="fullval"><code class="mono" title="${html(row.value)}">${html(short(row.value))}</code><span class="full-actions">${copyButton(row.value, row.label)}${explorerLink(row.href, `${row.label} in the explorer`)}</span></span>`;
+/** A contract or account in About: in full, as main lists them, with copy and its explorer page where there is one. */
+const idValue = (row) => fullValue({ explorer: row.href, label: row.label, value: row.value });
 
 /**
  * About this page: the Terms of use and Privacy policy, the servers it reads
- * from, then the contracts and accounts of each route, short, each in full
- * on copy. What each does is behind Details, once for all that do the same.
- * The networks are the network sheet's.
+ * from, then the contracts and accounts of each route, each in full. What
+ * each does is behind Details, once for all that do the same. The networks
+ * are the network sheet's.
  */
 export function contractsSheet(vm) {
   const groups = vm.groups.filter((group) => group.id !== "networks");

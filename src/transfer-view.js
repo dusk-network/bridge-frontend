@@ -568,7 +568,8 @@ export function transferView(entry, { account = "", cfg, locale, name = "", now 
     statusWord: held || (withdrawal && status === "pending" && entry.stage === "ready_to_finalize" && !entry.pendingAction) ? HELD_WORD : STATUS_WORDS[status],
     steps,
     time,
-    title: displayTitle(route, cfg, amount),
+    // Once a payout arrived, what arrived: the amount less the bridge's fee.
+    title: displayTitle(route, cfg, moved),
     to: { account: entry.destination ?? null, network: toNetwork },
     trackingError: entry.trackingError ? "Status unavailable, retrying" : "",
     tracker: withdrawal

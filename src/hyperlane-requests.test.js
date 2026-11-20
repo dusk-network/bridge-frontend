@@ -10,6 +10,8 @@ import { sendDuskContractCall, useDuskWallet } from "./dusk-wallet.js";
 import { NOT_AN_EVM_RECIPIENT, U64_MAX, duskRecipientHash } from "./hyperlane.js";
 import { NOTHING_TO_CLAIM, NOT_CARRIED, approveRequest, claimRequest, transferRemoteRequest } from "./hyperlane-requests.js";
 import { MAILBOX_FULL, ROUTE_NOT_AS_BOOKED } from "./hyperlane-reads.js";
+import { duskCallLines, transferRemoteLines } from "./wallet-lines.js";
+import { amountsIn, byLabel } from "./pages.fixtures.js";
 
 globalThis.__DUSK_BRIDGE_CONFIG__ = { VITE_BRIDGE_PROFILE: "testnet" };
 const cfg = loadConfig();
@@ -119,7 +121,7 @@ test("an account claims its own escrow with claim_pending, and another claims it
   });
 });
 
-test("Dusk Wallet gets the request the review was built for, with its deposit, as a call to the route", async () => {
+test("Dusk Wallet gets the request the review showed, with its deposit, and shows it as a call to the route", async () => {
   const sent = [];
   useDuskWallet({
     async connect() {},
@@ -144,6 +146,29 @@ test("Dusk Wallet gets the request the review was built for, with its deposit, a
       privacy: "public",
     },
   ]);
+  // The wallet's window, field by field: the account it's sent from, the route's contract, the deposit, its fee at most and the total.
+  const rows = byLabel(await duskCallLines({ ...request, chainId: cfg.dusk.chainId, from: SENDER, note: "The DUSK route to Sepolia, on Dusk." }));
+  assert.deepEqual([rows.From.value, rows.From.full], ["xGX8tZ…zQjkw9", SENDER]);
+  assert.equal(rows.Contract.value, "979fb7…ee5a0b");
+  assert.equal(rows.Deposit.value, "17.876 DUSK");
+  assert.deepEqual(amountsIn(rows["Network fee"].value), ["≤0.005 DUSK"]);
+  assert.deepEqual(amountsIn(rows.Total.value), ["≤17.881 DUSK"]);
+});
+
+test("an EVM wallet's lines for a transfer back to Dusk name the token, Dusk's domain, the account's hash and the fee as its value", () => {
+  const lines = byLabel(transferRemoteLines({ amount: 32_156_353n, cfg, fee: 552_474_000_000_000n, recipient: SENDER, recipientHash: duskRecipientHash(SENDER), token: T.USDd, value: 132_000_000_001n }));
+  // Field by field: on Sepolia, the token's own contract, its transferRemote to Dusk's domain and the account's hash for the account it pays,
+  // the amount in the token's smallest unit (and in its own units), the delivery fee as its value, and the network fee.
+  assert.equal(lines.Network.value, "Sepolia, chain 11155111");
+  assert.equal(lines["Interacting with"].address, T.USDd.evm.token);
+  assert.equal(lines.Method.value, "transferRemote");
+  assert.equal(lines.destination.value, "1146442572");
+  assert.equal(lines.recipient.value, "0x2acf0348cca26cf2d0a4ecbddde6e7abd3d54b2e581a73a7741301e1b411b69b");
+  assert.equal(lines["Pays on Dusk"].address, SENDER);
+  assert.equal(lines.amount.value, "32156353");
+  assert.deepEqual(amountsIn(lines.amount.note), ["32.156353 USDd"]);
+  assert.equal(lines.Value.value, "0.000000132000000001 ETH");
+  assert.deepEqual(amountsIn(lines["Network fee"].value), ["0.00055 ETH"]);
 });
 
 test("an approval is asked for only once the transfer after it could go: the recipient, the route as booked, and the Mailbox's room", async () => {

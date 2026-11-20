@@ -127,7 +127,7 @@ export async function recheckApproval(reviewed, deps) {
  */
 export function rebuilding(review) {
   review.request = null;
-  review.steps[review.current] = { ...review.steps[review.current], call: null, ready: false, wait: "Reading the new fee…" };
+  review.steps[review.current] = { ...review.steps[review.current], call: null, lines: null, ready: false, wait: "Reading the new fee…" };
   return review;
 }
 

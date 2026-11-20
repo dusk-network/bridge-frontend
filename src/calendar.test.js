@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { calendarEvent, claimReminder, foldLine, icsText, icsTime } from "./calendar.js";
+import { ESTIMATE, amountsIn } from "./pages.fixtures.js";
 
 const CLAIM = Date.UTC(2026, 9, 31, 12, 38);
 const NOW = Date.UTC(2026, 9, 26, 9, 38, 5);
@@ -20,18 +21,27 @@ test("the claim reminder is a valid one-event calendar at the claim time", () =>
   assert.ok(lines.includes("DTSTART:20261031T123800Z"));
   assert.ok(lines.includes("DTEND:20261031T130800Z"));
   assert.ok(lines.includes("DTSTAMP:20261026T093805Z"));
-  assert.ok(lines.includes("SUMMARY:Claim 200 DUSK on Dusk"));
+  assert.deepEqual(amountsIn(lines.find((line) => line.startsWith("SUMMARY:"))), ["200 DUSK"]);
   assert.ok(lines.includes(`UID:claim-0x${"ab".repeat(32)}@dusk-bridge`));
   assert.ok(lines.includes("TRIGGER:PT0M"));
-  assert.ok(lines.some((line) => line.startsWith("DESCRIPTION:Your 200 DUSK from DuskEVM can be claimed") && line.includes("\\nhttps://bridge.example.org/#/transfer/")));
+  const description = lines.find((line) => line.startsWith("DESCRIPTION:"));
+  assert.deepEqual(amountsIn(description), ["200 DUSK"]);
+  assert.ok(description.includes("\\nhttps://bridge.example.org/#/transfer/"));
   assert.equal(lines.filter((line) => line === "BEGIN:VEVENT").length, 1);
   // Every physical line fits in 75 bytes.
   for (const line of ics.split("\r\n")) assert.ok(new TextEncoder().encode(line).length <= 75, line);
 });
 
-test("an estimated claim time says it is one", () => {
-  const ics = claimReminder({ amount: "1 DUSK", claimAt: CLAIM, exact: false, hash: "0x01", now: NOW });
-  assert.match(ics.replace(/\r\n /gu, ""), /DESCRIPTION:Your 1 DUSK from DuskEVM should be ready to claim on Dusk around now\. The time is an estimate/u);
+test("an estimated claim time is said apart from a sure one, at the same time", () => {
+  const reminder = (exact) => claimReminder({ amount: "1 DUSK", claimAt: CLAIM, exact, hash: "0x01", now: NOW }).replace(/\r\n /gu, "").split("\r\n");
+  const [sure, estimate] = [true, false].map(reminder);
+  const line = (lines, key) => lines.find((each) => each.startsWith(`${key}:`));
+  assert.equal(line(estimate, "DTSTART"), line(sure, "DTSTART"));
+  assert.notEqual(line(estimate, "DESCRIPTION"), line(sure, "DESCRIPTION"));
+  assert.deepEqual(amountsIn(line(estimate, "DESCRIPTION")), ["1 DUSK"]);
+  // The estimate says it's one; the sure time doesn't.
+  assert.match(line(estimate, "DESCRIPTION"), ESTIMATE);
+  assert.doesNotMatch(line(sure, "DESCRIPTION"), ESTIMATE);
 });
 
 test("text values are escaped and long lines folded", () => {

@@ -277,8 +277,8 @@ networks yet.
   Dusk account is listed apart, under Sent to someone else, with a quiet
   Prove, until your account proves it. "Look up a transfer" finds a
   transfer's route from its transaction ID alone.
-- **About**: every address and contract ID each route uses, short, in full
-  on hover and on copy, with explorer links; what each does, behind Details.
+- **About**: every address and contract ID each route uses, in full, with
+  copy and explorer links; what each does, behind Details.
 
 A link can open the card on a route: `#/move/<route>`, by its ID
 (`bsc-to-dusk`), by one of the three routes (`bsc`, `ethereum`, `duskevm`), or

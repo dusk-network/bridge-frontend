@@ -281,6 +281,9 @@ function hyperlaneChecks(route, { cfg, quote, reads }) {
           ? { html: `Not enough DUSK for this and the fees: ${has(formatDusk(balance))}`, ok: quote.maxLux !== null && units <= quote.maxLux }
           : { html: `Not enough DUSK for the fees (up to ${html(formatDusk(fees))}): ${has(formatDusk(balance))}`, ok: balance >= fees },
       );
+    // An approval left open covers the amount: always said, as there's no approval step.
+    if (token.symbol !== "DUSK" && quote.steps === 1 && read.allowance)
+      checks.push({ html: `An earlier approval of <b class="num">${html(formatToken(read.allowance, token))}</b> covers this, so you aren't asked to approve`, note: true, ok: true });
     return checks;
   }
   const coin = gasCoin(cfg, route.from.id);
@@ -417,11 +420,13 @@ export function actionLead(kind, entry, { account = "", amountLux = null, claim 
   const rows = [{ key: "fee", label: "Network fee", value: `up to ${formatMaxFee(maxLux)} DUSK` }];
   if (kind === "prove" && claim?.at) rows.push({ key: "when", label: "When", value: claimText(claim, when) });
   else if (kind === "prove" && maturity) rows.push({ key: "when", label: "When", value: claimAfterProving(maturity) });
+  // A proof moves nothing: said beside whom the withdrawal pays, as it decides whether to prove.
+  const moves = kind === "prove" ? "No DUSK moves now" : "";
   return {
     amount: amountLux === null ? "" : formatLux(amountLux),
     chain: "dusk",
     label: kind === "prove" ? "Withdrawal" : "You claim",
-    line: pays ? "" : "To the withdrawal's Dusk account",
+    line: pays ? moves : ["To the withdrawal's Dusk account", moves].filter(Boolean).join(" · "),
     notYours,
     payee: pays,
     rows,

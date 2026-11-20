@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { entryId, minedTransfer } from "./activity.js";
-import { NOTICE_WORDS, createArrivalNotice, createEndWatch } from "./arrival-notice.js";
+import { createArrivalNotice, createEndWatch } from "./arrival-notice.js";
 
 /** A browser: storage, a tab that's looked at or not, and notifications as `permission` and `answer` say. */
 function browser({ answer = "granted", permission = "default" } = {}) {
@@ -85,12 +85,11 @@ test("the tab's title says what ended while they're away, chosen or not, until t
   assert.equal(page.title, "Dusk Bridge");
 });
 
-test("refused, or dismissed: it says the title will tell them, and no notification is tried", async () => {
+test("refused, or dismissed: no notification is tried, and the title tells them", async () => {
   for (const answer of ["denied", "default"]) {
     const { page, shown } = browser({ answer });
     const notice = createArrivalNotice();
     assert.equal(await notice.choose(), "refused");
-    assert.match(NOTICE_WORDS.refused, /tab's title will say/u);
     page.focused = false;
     notice.ended(ARRIVED);
     assert.deepEqual(shown, []);

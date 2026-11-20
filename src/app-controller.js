@@ -1324,7 +1324,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
           confirmLabel: `Approve ${amountText} ${token}`,
           lines: approveLines({ amountLux: lux, cfg, fee: fee(migration.gas?.approve), network }),
           ready: true,
-          spender: { address: chain.migrationContract, name: "Dusk migration contract" },
+          spender: { address: chain.migrationContract, name: "Dusk migration contract", network },
           title: `Approve exactly ${amountText} ${token}`,
           walletName,
         });
