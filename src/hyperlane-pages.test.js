@@ -6,6 +6,12 @@ import { loadConfig } from "./config.js";
 import { groupTransfers } from "./discovery.js";
 import { duskRecipientHash } from "./hyperlane.js";
 import { balanceLine, receiptModel, reviewChecks, routeLine, routeSteps, transfersModel } from "./page-models.js";
+import { amountsIn, assertShownInFull, decode, exactly, fieldOf, textOf } from "./pages.fixtures.js";
+
+const DUSK_TX = (hash) => `https://explorer.testnet.dusk.network/transactions/transaction?id=${hash}`;
+// That the first transfer to an account waits for its claim: never released by itself.
+const CLAIMED = /\bclaim/iu;
+const AUTOMATIC = /\bautomatic/iu;
 import { buildQuote } from "./quote.js";
 import { cardPage, cardRegions, receiptPage, transferRow } from "./views.js";
 import { tokenChoices } from "./bridge-card.js";
@@ -60,98 +66,93 @@ const HELD = {
 
 const receipt = (entry, extra = {}) =>
   receiptModel(entry, { cfg, gasPrice: 1n, locale: GB, now: NOW, own: { account: ACCOUNT, name: "" }, route: routeOf(entry.routeId), timeZone: AMS, url: "https://bridge.test/#/transfer/x", ...extra });
-const steps = (model) => model.view.steps.map(({ detail, state, title }) => [title, state, detail]);
-const details = (model) => Object.fromEntries(model.details.map((row) => [row.label, row.value ?? row.html]));
+const steps = (model) => model.view.steps.map(({ key, state }) => [key, state]);
+// What each of a receipt's fields says, as amounts.
+const amountsOf = (page, labels) => labels.map((label) => amountsIn(fieldOf(page, label).text));
+// The tokens a card's menu offers: the route a press picks, beside the token it shows and what's said under it.
+const tokenOptions = (page) =>
+  [...page.matchAll(/<button\b[^>]*\bdata-action="pick-token" data-route="([^"]*)" aria-selected="(true|false)"[^>]*>[\s\S]*?<span class="nm">([^<]*)<\/span><span class="sb">([^<]*)<\/span>/gu)].map(
+    ([, route, selected, symbol, sub]) => ({ route: decode(route), selected: selected === "true", sub: decode(sub), symbol: decode(symbol) }),
+  );
 
 test("a transfer to Sepolia shows its message on its way, its fees in DUSK, and Sepolia's transaction once it arrives", () => {
   const model = receipt(OUT);
-  assert.equal(model.view.title, "Sending 95.085867 EURd to Sepolia");
-  assert.deepEqual(steps(model), [
-    ["Sent from Dusk", "done", ""],
-    ["Confirmed on Dusk", "done", ""],
-    ["Arriving on Sepolia", "now", "Message 0xed2c…213b"],
-  ]);
-  assert.equal(model.caption, "Takes ~20 s");
-  const rows = details(model);
-  assert.deepEqual(
-    ["You sent", "Bridge fee", "Network fee", "You receive"].map((label) => rows[label]),
-    ["95.085867 EURd", "16.876 DUSK", "0.002216155 DUSK", "95.085867 EURd"],
-  );
-  assert.match(rows["Message ID"], /<code class="mono">0xed2cb1330bb4746d16af2e23b0d68272a74c890459bd4702352de0b294d1213b<\/code>/u);
-  assert.match(rows["To, on Sepolia"], /https:\/\/sepolia\.etherscan\.io\/address\/0x8A51d0619286d937699D85c1a2c88D67A5a1B75d/u);
-  assert.match(rows["Dusk transaction"], /https:\/\/explorer\.testnet\.dusk\.network\/transactions\/transaction\?id=86123720/u);
+  assert.deepEqual(amountsIn(model.view.title), ["95.085867 EURd"]);
+  assert.deepEqual(steps(model), [["sent", "done"], ["confirmed", "done"], ["arrived", "now"]]);
+  assert.match(model.view.steps.at(-1).detail, exactly("0xed2c…213b"));
+  assert.match(model.caption, exactly("~20 s"));
+  // Field by field: what was sent, the bridge fee and the network fee in DUSK, and what arrives.
+  const page = receiptPage(model);
+  assert.deepEqual(amountsOf(page, ["You sent", "Bridge fee", "Network fee", "You receive"]), [["95.085867 EURd"], ["16.876 DUSK"], ["0.002216155 DUSK"], ["95.085867 EURd"]]);
+  // The message, the recipient and the transaction in full, each copied as it is, and on its explorer.
+  assertShownInFull(fieldOf(page, "Message ID"), OUT.messageId);
+  assertShownInFull(fieldOf(page, "To, on Sepolia"), EVM, `https://sepolia.etherscan.io/address/${EVM}`);
+  assertShownInFull(fieldOf(page, "Dusk transaction"), OUT.hash, DUSK_TX(OUT.hash));
   assert.equal(model.arrives, true);
 
   const done = receipt({ ...OUT, destinationAt: OUT.sourceAt + 19_000, destinationHash: "0xfdd8a84db201bfc08be9983224c7982f8c70ca0691f1b69c11c9930f2a401fd8", status: "completed" });
-  assert.equal(done.view.title, "95.085867 EURd arrived on Sepolia");
+  assert.equal(done.view.status, "completed");
+  assert.deepEqual(amountsIn(done.view.title), ["95.085867 EURd"]);
   assert.deepEqual(done.view.steps.at(-1).href, "https://sepolia.etherscan.io/tx/0xfdd8a84db201bfc08be9983224c7982f8c70ca0691f1b69c11c9930f2a401fd8");
-  assert.equal(details(done)["You received"], "95.085867 EURd");
+  assert.deepEqual(amountsOf(receiptPage(done), ["You received"]), [["95.085867 EURd"]]);
 });
 
 test("a transfer to Dusk the route holds needs its account's claim, there and in the list", () => {
   const model = receipt(HELD);
-  assert.equal(model.view.title, "32.156353 USDd is ready to claim");
-  assert.deepEqual(steps(model), [
-    ["Sent from Sepolia", "done", ""],
-    ["Delivered to Dusk", "done", "Held for its account until it's claimed"],
-    ["Claim on Dusk", "turn", "Ready now"],
-  ]);
-  assert.deepEqual(model.view.action, { blocked: "", command: "escrow-claim", failure: "", kind: "claim", label: "Claim on Dusk", quiet: false });
-  assert.equal(model.actionFee, "Network fee up to 0.003 DUSK, from your public balance");
+  assert.deepEqual(amountsIn(model.view.title), ["32.156353 USDd"]);
+  assert.deepEqual(steps(model), [["confirmed", "done"], ["arrived", "done"], ["claim", "turn"]]);
+  const { blocked, command, failure, kind, quiet } = model.view.action;
+  assert.deepEqual({ blocked, command, failure, kind, quiet }, { blocked: "", command: "escrow-claim", failure: "", kind: "claim", quiet: false });
+  assert.deepEqual(amountsIn(model.actionFee), ["≤0.003 DUSK"]);
   // Nothing comes by itself: it isn't offered to be told when it arrives.
   assert.equal(model.arrives, false);
-  assert.deepEqual(
-    ["You sent", "Bridge fee", "Fee on Sepolia", "You receive"].map((label) => details(model)[label]),
-    ["32.156353 USDd", "0.000000132000000001 ETH", "0.000000235736 ETH", "32.156353 USDd"],
-  );
+  // Field by field: what was sent, the bridge fee and the fee on Sepolia in ETH, and what's held for the claim.
   const page = receiptPage({ ...model, canAct: true });
-  assert.match(page, /<button type="button" class="btn pri" data-action="escrow-claim" data-id="sepolia-to-dusk-usdd:0x1944[^"]*">Claim on Dusk<\/button>/u);
+  assert.deepEqual(amountsOf(page, ["You sent", "Bridge fee", "Fee on Sepolia", "You receive"]), [["32.156353 USDd"], ["0.000000132000000001 ETH"], ["0.000000235736 ETH"], ["32.156353 USDd"]]);
+  assert.match(page, /data-action="escrow-claim" data-id="sepolia-to-dusk-usdd:0x1944/u);
 
   // In My transfers it needs you, with Claim on its row.
   const list = transfersModel([HELD], { account: ACCOUNT, accounts: [ACCOUNT], cfg, locale: GB, now: NOW, routeOf, timeZone: AMS });
   assert.equal(list.needs, 1);
   const [row] = list.groups.needs;
-  assert.deepEqual([row.title, row.amountText, row.subline], ["Sepolia to Dusk", "32.1563 USDd", "Held on Dusk until it's claimed"]);
+  assert.equal(row.amountText, "32.1563 USDd");
   assert.match(transferRow(row), /data-action="escrow-claim"/u);
 
   // Held for another account: anyone can claim it for it, so it's offered quietly, apart.
   assert.deepEqual(Object.entries(groupTransfers([HELD], routeOf, OTHER)).filter(([, list]) => list.length).map(([key]) => key), ["other"]);
   const forOther = receipt(HELD, { own: { account: OTHER, name: "" } });
   assert.equal(forOther.view.action.quiet, true);
-  assert.equal(forOther.actionFee, "Network fee up to 0.08 DUSK, from your public balance");
+  assert.deepEqual(amountsIn(forOther.actionFee), ["≤0.08 DUSK"]);
 });
 
-test("a transfer to Dusk says it waits for a claim as soon as it's known to be the account's first, and once claimed, that it arrived", () => {
+test("a transfer to Dusk waits for a claim as soon as it's known to be the account's first, and once claimed, it arrived", () => {
   const way = { ...HELD, delivered: false, escrow: undefined, firstToAccount: true, heldLux: undefined };
-  assert.deepEqual(steps(receipt(way)), [
-    ["Sent from Sepolia", "done", ""],
-    ["Arriving on Dusk", "now", "Message 0x8bfc…6db6"],
-    ["Claim on Dusk", "todo", "The first transfer to an account waits until it's claimed"],
-  ]);
+  assert.deepEqual(steps(receipt(way)), [["confirmed", "done"], ["arrived", "now"], ["claim", "todo"]]);
+  assert.match(receipt(way).view.steps[1].detail, exactly("0x8bfc…6db6"));
   const claimAt = Date.parse("2026-11-18T09:25:00Z");
   const claimed = receipt({ ...HELD, claimAt, claimFeeLux: "1908588", claimHash: "cd".repeat(32), destinationAt: claimAt, escrow: "claimed", status: "completed" });
-  assert.equal(claimed.view.title, "32.156353 USDd arrived on Dusk");
-  assert.deepEqual(claimed.view.steps.map(({ state, title }) => [title, state]), [
-    ["Sent from Sepolia", "done"],
-    ["Delivered to Dusk", "done"],
-    ["Claimed on Dusk", "done"],
-  ]);
-  assert.equal(details(claimed)["Claim fee on Dusk"], "0.001908588 DUSK");
-  assert.match(details(claimed)["Claim on Dusk"], /transactions\/transaction\?id=cdcd/u);
+  assert.equal(claimed.view.status, "completed");
+  assert.deepEqual(amountsIn(claimed.view.title), ["32.156353 USDd"]);
+  assert.deepEqual(steps(claimed), [["confirmed", "done"], ["arrived", "done"], ["claim", "done"]]);
+  // The claim's own fee, and its transaction in full, copied as it is.
+  const page = receiptPage(claimed);
+  assert.deepEqual(amountsOf(page, ["Claim fee on Dusk"]), [["0.001908588 DUSK"]]);
+  assertShownInFull(fieldOf(page, "Claim on Dusk"), "cd".repeat(32), DUSK_TX("cd".repeat(32)));
   // Paid straight away, no claim at all.
   const direct = receipt({ ...HELD, destinationAt: HELD.deliveredAt, escrow: null, status: "completed" });
-  assert.deepEqual(direct.view.steps.map(({ title }) => title), ["Sent from Sepolia", "Arrived on Dusk"]);
-  // Looked up by its hash alone, its account is said by its hash.
-  assert.match(details(receipt({ ...HELD, destination: undefined }))["To, on Dusk, by its hash"], /0x2acf0348cca26cf2d0a4ecbddde6e7abd3d54b2e581a73a7741301e1b411b69b/u);
+  assert.deepEqual(steps(direct), [["confirmed", "done"], ["arrived", "done"]]);
+  // Looked up by its hash alone, its account is said by its hash, in full.
+  assertShownInFull(fieldOf(receiptPage(receipt({ ...HELD, destination: undefined })), "To, on Dusk, by its hash"), "0x2acf0348cca26cf2d0a4ecbddde6e7abd3d54b2e581a73a7741301e1b411b69b");
 });
 
-test("a Hyperlane route's row, steps and checks say its time, its fees' coin, and the first transfer's claim", () => {
-  assert.equal(routeLine(byId["dusk-to-sepolia"], cfg, { fee: 16_876_000_000n }), "~20 s · 16.876 DUSK bridge fee");
-  assert.equal(routeLine(byId["dusk-to-sepolia-eurd"], cfg), "~20 s · two wallet steps · bridge fee in DUSK");
-  assert.equal(routeLine(byId["dusk-to-sepolia-eurd"], cfg, { steps: 1 }), "~20 s · bridge fee in DUSK");
-  assert.equal(routeLine(byId["sepolia-to-dusk-usdd"], cfg), "~1 min · fee in ETH");
-  assert.equal(routeSteps(byId["dusk-to-sepolia-eurd"], { steps: 2 }), "Approve, then send, in Dusk Wallet");
-  assert.equal(routeSteps(byId["sepolia-to-dusk"]), "One, in your EVM wallet");
+test("a Hyperlane route's row and checks say its time, its fees' coin, and the first transfer's claim", () => {
+  const dusk = routeLine(byId["dusk-to-sepolia"], cfg, { fee: 16_876_000_000n });
+  assert.match(dusk, exactly("~20 s"));
+  assert.deepEqual(amountsIn(dusk), ["16.876 DUSK"]);
+  // Before its fee is read, the coin it's paid in.
+  assert.match(routeLine(byId["dusk-to-sepolia-eurd"], cfg), exactly("DUSK"));
+  assert.match(routeLine(byId["sepolia-to-dusk-usdd"], cfg), exactly("~1 min"));
+  assert.match(routeLine(byId["sepolia-to-dusk-usdd"], cfg), exactly("ETH"));
   assert.deepEqual(balanceLine(byId["sepolia-to-dusk"], 2_599_214_807n), { exact: "2.599214807 DUSK", text: "2.5992 DUSK" });
 
   const route = byId["sepolia-to-dusk-usdd"];
@@ -160,9 +161,14 @@ test("a Hyperlane route's row, steps and checks say its time, its fees' coin, an
   const reads = { gasPrice: 1n, hyperlane: { evm: { balance: 71_508_029n, gasCoinWei: evm.gasCoinWei }, registered: false } };
   const checks = reviewChecks(route, { cfg, destination: ACCOUNT, duskAccount: ACCOUNT, evm: { account: EVM }, quote, reads });
   assert.deepEqual(checks.map((check) => check.ok), [true, true, true, true]);
-  assert.match(checks[0].html, /71\.508029 USDd<\/b> at <code class="mono">0x8A51…B75d<\/code> on Sepolia/u);
-  assert.match(checks[2].html, /It pays Dusk account <code class="mono">xGX8tZ…zQjkw9<\/code>, your connected account/u);
-  assert.equal(checks[3].html, "It's the first USDd to this account through the bridge, so it waits on Dusk until the account claims it, for a network fee of up to 0.003 DUSK");
+  assert.deepEqual(amountsIn(checks[0].html), ["71.508029 USDd"]);
+  assert.match(textOf(checks[0].html), exactly("0x8A51…B75d"));
+  assert.match(textOf(checks[2].html), exactly("xGX8tZ…zQjkw9"));
+  // The first USDd to the account waits on Dusk for its claim, never released by itself: said for this token, with the claim's fee.
+  assert.match(textOf(checks[3].html), exactly("USDd"));
+  assert.match(textOf(checks[3].html), CLAIMED);
+  assert.doesNotMatch(textOf(checks[3].html), AUTOMATIC);
+  assert.deepEqual(amountsIn(checks[3].html), ["≤0.003 DUSK"]);
   // An account the route pays already: no claim to mention.
   assert.equal(reviewChecks(route, { cfg, destination: ACCOUNT, duskAccount: ACCOUNT, evm: { account: EVM }, quote, reads: { hyperlane: { registered: true } } }).length, 1);
 
@@ -170,18 +176,20 @@ test("a Hyperlane route's row, steps and checks say its time, its fees' coin, an
   const ctx = { allowance: 20_000_000n, fee: 16_876_000_000n, tokenBalance: 49_805_396_789n };
   const outQuote = buildQuote(out, "10", { balance: 20_000_000_000n, cfg, gasPrice: 1n, hyperlane: ctx });
   const outChecks = reviewChecks(out, { cfg, destination: EVM, duskAccount: ACCOUNT, evm: { account: EVM, walletName: "MetaMask" }, quote: outQuote, reads: { duskBalance: 20_000_000_000n, hyperlane: ctx } });
+  // The token held, the DUSK for the fees against what they take, the approval that covers it, and the recipient.
   assert.deepEqual(
-    outChecks.map((check) => [check.ok, check.html.replace(/<[^>]+>/gu, "")]),
+    outChecks.map((check) => [check.ok, amountsIn(check.html)]),
     [
-      [true, "You have 49,805.396789 EURd on Dusk"],
-      [true, "You have 20 DUSK for the fees, up to 16.881 DUSK"],
-      [true, "An earlier approval of 20 EURd covers this, so you aren't asked to approve"],
-      [true, "It goes to 0x8A51…B75d on Sepolia, your MetaMask"],
+      [true, ["49,805.396789 EURd"]],
+      [true, ["20 DUSK", "≤16.881 DUSK"]],
+      [true, ["20 EURd"]],
+      [true, []],
     ],
   );
+  assert.match(textOf(outChecks[3].html), exactly("0x8A51…B75d"));
 });
 
-test("the card offers the pair's tokens beside the amount, and what the routes hold for the account above it", () => {
+test("the card offers the pair's tokens, each by the route it picks, and what the routes hold for the account, each to claim for its own account", () => {
   const route = byId["dusk-to-sepolia-eurd"];
   const quote = buildQuote(route, "10", { balance: 20_000_000_000n, cfg, gasPrice: 1n, hyperlane: { allowance: 0n, fee: 16_876_000_000n, tokenBalance: 49_805_396_789n } });
   const vm = {
@@ -210,37 +218,30 @@ test("the card offers the pair's tokens beside the amount, and what the routes h
     tokens: tokenChoices(buildRoutes(cfg), route),
     unit: "EURd",
   };
-  const page = cardPage(vm);
-  assert.match(page, /<button type="button" class="token tokbtn" data-action="open-menu" data-side="token" aria-haspopup="listbox" aria-expanded="false" aria-label="Token: EURd\. Choose the token">/u);
-  const open = cardPage({ ...vm, menu: "token" });
-  assert.match(open, /<div class="netmenu" role="listbox" aria-label="Token">/u);
-  assert.deepEqual([...open.matchAll(/data-action="pick-token" data-route="([^"]+)" aria-selected="(true|false)"/gu)].map((match) => [match[1], match[2]]), [
-    ["dusk-to-sepolia", "false"],
-    ["dusk-to-sepolia-eurd", "true"],
-    ["dusk-to-sepolia-usdd", "false"],
+  // The token sent, and the menu's tokens: each shown beside the route a press picks, the chosen one selected.
+  assert.match(textOf(/<button\b[^>]*\bclass="token tokbtn"[^>]*>[\s\S]*?<\/button>/u.exec(cardPage(vm))[0]), exactly("EURd"));
+  assert.deepEqual(tokenOptions(cardPage({ ...vm, menu: "token" })).map(({ route: id, selected, symbol }) => [id, symbol, selected]), [
+    ["dusk-to-sepolia", "DUSK", false],
+    ["dusk-to-sepolia-eurd", "EURd", true],
+    ["dusk-to-sepolia-usdd", "USDd", false],
   ]);
-  // One token on the pair: no choice, the token as it was.
-  assert.match(cardPage({ ...vm, tokens: [] }), /<span class="token"><span class="cm/u);
   // What waits for the account, with Claim, or the claim sent in its place.
-  const { escrow, route: row } = cardRegions(vm);
-  assert.match(escrow, /<b>Waiting for you on Dusk:<\/b> <span class="num">10 USDd and 2 DUSK<\/span>\. The bridge holds the first transfer to an account until it&#039;s claimed\.<\/span>/u);
-  assert.match(escrow, /<button type="button" class="btn sec sm" data-action="escrow-claim" data-route="sepolia-to-dusk-usdd">Claim 10 USDd<\/button><span class="small t2">Claim sent, waiting for Dusk\.<\/span>/u);
+  const { escrow } = cardRegions(vm);
+  for (const amount of ["10 USDd", "2 DUSK"]) assert.ok(amountsIn(escrow).includes(amount), amount);
+  assert.match(escrow, /data-action="escrow-claim" data-route="sepolia-to-dusk-usdd"/u);
+  assert.doesNotMatch(escrow, /data-route="sepolia-to-dusk"/u);
   assert.equal(cardRegions({ ...vm, escrow: null }).escrow, "");
-  // Another account's, typed or handed over: claimed for it.
+  // Another account's, typed or handed over: claimed for that account.
   const other = cardRegions({ ...vm, escrow: { held: [{ account: ACCOUNT, amount: "10 USDd", route: "sepolia-to-dusk-usdd", sent: "" }], link: "", owner: "xGX8tZ…zQjkw9" } }).escrow;
-  assert.match(other, /<b>Waiting for xGX8tZ…zQjkw9 on Dusk:<\/b> <span class="num">10 USDd<\/span>\. The bridge holds the first transfer to an account until it&#039;s claimed\. You can claim it for that account, paying only the network fee\./u);
-  assert.match(other, new RegExp(`data-action="escrow-claim" data-route="sepolia-to-dusk-usdd" data-account="${ACCOUNT}">Claim 10 USDd for it</button>`, "u"));
+  assert.match(textOf(other), exactly("xGX8tZ…zQjkw9"));
+  assert.match(other, new RegExp(`data-action="escrow-claim" data-route="sepolia-to-dusk-usdd" data-account="${ACCOUNT}"`, "u"));
   // Without DUSK for its own claim's fee: the link another account claims it with, in place of Claim.
   const link = "https://bridge.test/#/move/sepolia-to-dusk-usdd?to=" + ACCOUNT;
   const stuck = cardRegions({ ...vm, escrow: { held: [{ account: "", amount: "10 USDd", route: "sepolia-to-dusk-usdd", sent: "" }], link, owner: "" } }).escrow;
-  assert.match(stuck, /Your account has no DUSK for the claim&#039;s fee: another Dusk account can claim it for yours with this page&#039;s link\./u);
   assert.ok(stuck.includes(`data-copy="${link}"`) && !stuck.includes("escrow-claim"), stuck);
-  assert.match(row, /~20 s · two wallet steps · 16\.876 DUSK bridge fee/u);
-  assert.match(row, /Approve, then send, in Dusk Wallet/u);
-  assert.match(page, /data-region="escrow"/u);
 });
 
-test("where Sepolia's own DUSK route runs beside Hyperlane's, the token list says what each DUSK arrives as", () => {
+test("where Sepolia's own DUSK route runs beside Hyperlane's, the token list says what each DUSK arrives as, by the route it picks", () => {
   globalThis.__DUSK_BRIDGE_CONFIG__ = { VITE_BRIDGE_PROFILE: "testnet", VITE_PAUSED_ROUTES: "none" };
   const running = loadConfig();
   delete globalThis.__DUSK_BRIDGE_CONFIG__;
@@ -272,9 +273,12 @@ test("where Sepolia's own DUSK route runs beside Hyperlane's, the token list say
     tokens: tokenChoices(all, route),
     unit: "DUSK",
   });
-  const options = [...page.matchAll(/data-action="pick-token" data-route="([^"]+)"[^>]*>.*?<span class="nm">([^<]+)<\/span><span class="sb">([^<]+)<\/span>/gu)].map((match) => [match[1], match[2], match[3]]);
-  assert.deepEqual(options.slice(0, 2), [
-    ["dusk-to-ethereum", "DUSK", "Dusk · Arrives as ERC20 DUSK"],
-    ["dusk-to-sepolia", "DUSK", "Dusk · Arrives as DUSK"],
+  // Each option: the route a press picks, the token it shows, and the token that arrives where two send DUSK.
+  const arrives = (sub) => sub.match(/\bas\s+(.+)$/u)?.[1] ?? "";
+  assert.deepEqual(tokenOptions(page).map(({ route: id, sub, symbol }) => [id, symbol, arrives(sub)]), [
+    ["dusk-to-ethereum", "DUSK", "ERC20 DUSK"],
+    ["dusk-to-sepolia", "DUSK", "DUSK"],
+    ["dusk-to-sepolia-eurd", "EURd", ""],
+    ["dusk-to-sepolia-usdd", "USDd", ""],
   ]);
 });

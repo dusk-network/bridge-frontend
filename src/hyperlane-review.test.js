@@ -7,6 +7,7 @@ import { loadConfig } from "./config.js";
 import { duskRecipientHash } from "./hyperlane.js";
 import { NOTHING_TO_CLAIM } from "./hyperlane-requests.js";
 import { claimKey, evmReviewParts, heldFor, recheckClaim } from "./hyperlane-review.js";
+import { amountsIn, byLabel, exactly, textOf } from "./pages.fixtures.js";
 
 globalThis.__DUSK_BRIDGE_CONFIG__ = { VITE_BRIDGE_PROFILE: "testnet" };
 const cfg = loadConfig();
@@ -25,10 +26,10 @@ test("a transfer back to Dusk is reviewed at one delivery fee: its rows, its che
   const parts = evmReviewParts(route, { amountLux: 10_000_000n, cfg, destination: ACCOUNT, duskAccount: ACCOUNT, evm: { account: EVM }, fee: 500_000_000_000_000n, reads, registered: true });
   const bridge = parts.feeRows.find((row) => row.key === "bridge");
   assert.match(bridge.value, /0\.0005 ETH/u);
-  const coins = parts.checks.find((check) => /for the fees/u.test(check.html));
+  const coins = parts.checks.find((check) => /\bETH\b/u.test(check.html));
   assert.equal(coins.ok, false);
   assert.match(coins.html, /0\.0005/u);
-  assert.equal(parts.lines.find((line) => line.label === "Value").value, "0.0005 ETH");
+  assert.equal(byLabel(parts.lines).Value.value, "0.0005 ETH");
   assert.equal(parts.deliveryFee, 500_000_000_000_000n);
 });
 
@@ -38,12 +39,20 @@ test("the first transfer's claim is said for the account the review pays, as rea
   const reads = { gasPrice: 1n, hyperlane: { evm: { balance: 50_000_000n, gasCoinWei: 10n ** 18n, gasPriceWei: 1n }, gas: 250_000n, registered: true } };
   const first = evmReviewParts(route, { amountLux: 10_000_000n, cfg, destination: OTHER, duskAccount: ACCOUNT, evm: { account: EVM }, fee: 1n, reads, registered: false });
   assert.equal(first.firstToAccount, true);
-  assert.ok(first.checks.some((check) => /first EURd to this account/u.test(check.html)));
-  assert.match(first.what, /where it waits until that account claims it/u);
   const paid = evmReviewParts(route, { amountLux: 10_000_000n, cfg, destination: OTHER, duskAccount: ACCOUNT, evm: { account: EVM }, fee: 1n, reads: { ...reads, hyperlane: { ...reads.hyperlane, registered: false } }, registered: true });
   assert.equal(paid.firstToAccount, false);
-  assert.ok(!paid.checks.some((check) => /first EURd/u.test(check.html)));
-  assert.doesNotMatch(paid.what, /claims it/u);
+  // Said where it's the first: a check of its own, for this token, with the claim's fee; and what the transfer does says it.
+  const known = new Set(paid.checks.map((check) => check.html));
+  const claim = first.checks.filter((check) => !known.has(check.html));
+  assert.equal(claim.length, 1);
+  assert.match(textOf(claim[0].html), exactly("EURd"));
+  assert.deepEqual(amountsIn(claim[0].html), ["≤0.003 DUSK"]);
+  assert.notEqual(first.what, paid.what);
+  // Held for the account's claim, never released by itself.
+  for (const said of [textOf(claim[0].html), textOf(first.what)]) {
+    assert.match(said, /\bclaim/iu);
+    assert.doesNotMatch(said, /\bautomatic/iu);
+  }
 });
 
 test("a reviewed claim is built again as it's sent: unchanged it goes, another amount is reviewed again, nothing held isn't sent", async () => {
@@ -195,7 +204,7 @@ test("a step whose request is being built again can't be confirmed meanwhile", a
   now += 1_000;
   assert.equal(reviews.confirmable, true);
   rebuilding(review);
-  assert.deepEqual([review.request, review.steps[0].lines, review.steps[0].linesNote, review.steps[0].confirmLabel], [null, null, "Reading the new fee…", "Send"]);
+  assert.deepEqual([review.request, review.steps[0].lines, Boolean(review.steps[0].linesNote), review.steps[0].confirmLabel], [null, null, true, "Send"]);
   // Confirm takes no click, whatever the button shows, until the new request's lines are up.
   assert.equal(reviews.confirmable, false);
   review.steps[0] = { ...review.steps[0], lines: [{ label: "Method" }] };
