@@ -342,6 +342,21 @@ function actionLead(lead) {
 const flowSide = (part) =>
   `${chainMark(part.chain, "xs")}<span>${html(part.where)}${part.account ? ` · <code class="mono${part.full ? " wrap" : ""}">${html(part.account)}</code>` : ""}</span>`;
 
+/** One line of a call the wallet can't read: an ID or address in its own type, all of it on hover; else a value and what it is. */
+const callRow = (row) =>
+  `<div class="kv"><dt class="k">${html(row.label)}</dt><dd class="v">${
+    row.mono
+      ? `<code class="mono${row.wrap ? " wrap" : ""}"${row.full ? ` title="${html(row.full)}"` : ""}>${html(row.value)}</code>`
+      : `<span class="stack"><span class="num">${html(row.value)}</span>${row.detail ? `<span class="small">${html(row.detail)}</span>` : ""}</span>`
+  }</dd></div>`;
+
+/**
+ * Under Details, the call of the step at hand where Dusk Wallet can't read it
+ * and says to check it on the site: folded, by that name.
+ */
+const callFold = (call) =>
+  call?.length ? `<details class="wl-more"><summary>Call details, to check against Dusk Wallet</summary><dl class="group kvs">${call.map(callRow).join("")}</dl></details>` : "";
+
 /** A line the review always says, by itself: what's held, what stays approved, a fee past the amount. HTML. */
 const noteLine = (text) => `<p class="note">${icon("info")}<span>${text}</span></p>`;
 
@@ -349,8 +364,9 @@ const noteLine = (text) => `<p class="note">${icon("info")}<span>${text}</span><
  * The review: what moves, from whom and to whom in full, the one line on
  * what's public, what could cost money said once, the fees and the time,
  * and the steps where there are two. What the wallet's window shows is the
- * window's own, not repeated here. A check is said only where it fails, as
- * what keeps Confirm off.
+ * window's own, not repeated here; a call it can't read, it says to check
+ * on the site, so that's under Details (`callFold`). A check is said only
+ * where it fails, as what keeps Confirm off.
  */
 export function reviewSheet(vm) {
   const step = vm.steps.find((each) => each.current);
@@ -373,6 +389,7 @@ export function reviewSheet(vm) {
     ${notes}
     ${checks}
     <dl class="group kvs">${quoteRows({ rows: vm.feeRows })}</dl>
+    ${step?.ready ? callFold(step.call) : ""}
     ${step && !step.ready ? `<p class="small t2">${waiting(step.wait ?? "Preparing…")}</p>` : ""}
   </div>
   <div class="sheet-foot">${vm.error ? messageLine(vm.error) : ""}<div class="btn-pair"><button type="button" class="btn sec" data-action="close-sheet">Cancel</button><button type="button" class="btn pri" data-action="confirm" ${vm.canConfirm ? "" : "disabled"}>${html(vm.confirmLabel)}</button></div></div>`;

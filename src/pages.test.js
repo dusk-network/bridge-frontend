@@ -1110,3 +1110,23 @@ test("the card and the review say once, calmly, when the bridge fee is more than
   assert.match(sheet, /<p class="note">.*?<span>Bridge fee is more than the amount<\/span><\/p>/u);
   assert.match(sheet, /data-action="confirm" >Send 1 DUSK</u);
 });
+
+test("a call Dusk Wallet can't read is under Details, folded, named for what the wallet asks", () => {
+  const call = [
+    { label: "Method", mono: true, value: "transfer_remote" },
+    { full: "979fb72774e1d45a07abd0d57479578513917ab855bb4027acdfd48ac8ee5a0b", label: "Contract", mono: true, value: "979fb7…ee5a0b" },
+    { label: "Recipient", mono: true, value: EVM, wrap: true },
+    { detail: "the amount and the bridge fee", label: "Deposit", value: "17.876 DUSK" },
+  ];
+  const vm = (step) => ({ canConfirm: true, checks: [], confirmLabel: "Send 1 DUSK", feeRows: [], privacy: "x", receive: { amount: "1", chain: "ethereum", unit: "DUSK", where: "Sepolia" }, send: { amount: "1", chain: "dusk", unit: "DUSK", where: "Dusk" }, steps: [{ current: true, ready: true, ...step }], sub: "" });
+  const sheet = reviewSheet(vm({ call }));
+  // Folded, and found by what the wallet's window says to check.
+  assert.match(sheet, /<details class="wl-more"><summary>Call details, to check against Dusk Wallet<\/summary><dl class="group kvs">/u);
+  assert.match(sheet, /<dt class="k">Method<\/dt><dd class="v"><code class="mono">transfer_remote<\/code><\/dd>/u);
+  assert.ok(sheet.includes('<code class="mono" title="979fb72774e1d45a07abd0d57479578513917ab855bb4027acdfd48ac8ee5a0b">979fb7…ee5a0b</code>'));
+  assert.ok(sheet.includes(`<code class="mono wrap">${EVM}</code>`));
+  assert.match(sheet, /<dt class="k">Deposit<\/dt><dd class="v"><span class="stack"><span class="num">17\.876 DUSK<\/span><span class="small">the amount and the bridge fee<\/span><\/span><\/dd>/u);
+  // A call the wallet reads itself, or one not built yet: no fold.
+  assert.doesNotMatch(reviewSheet(vm({})), /Call details/u);
+  assert.doesNotMatch(reviewSheet(vm({ call: null, ready: false })), /Call details/u);
+});

@@ -186,3 +186,54 @@ test("no Hyperlane request asks the wallet for more gas than the deployment allo
     message: "This transfer needs more gas than the wallet allows, so it wasn't sent.",
   });
 });
+
+test("a call Dusk Wallet can't read is listed to check against its window: method, contract, call data and arguments in plain words", async () => {
+  const { callDetails } = await import("./hyperlane-review.js");
+  const { createHash } = await import("node:crypto");
+  // As the wallet's Details print a call's arguments: their size and sha256.
+  const callData = (bytes) => {
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    return `${bytes.length} bytes · sha256=${hash.slice(0, 12)}…${hash.slice(-8)}`;
+  };
+  const rows = (list) => list.map(({ detail, label, value }) => [label, value, detail ?? ""]);
+  const { reads } = chain({ allowance: DUSK, pending: 2_000_000n });
+
+  // DUSK to Sepolia: the route's transfer_remote, read back from its own bytes.
+  const dusk = await transfer(T.DUSK, {}, { amount: DUSK });
+  assert.deepEqual(rows(await callDetails(dusk, { cfg, reads, token: T.DUSK })), [
+    ["Method", "transfer_remote", ""],
+    ["Contract", "979fb7…ee5a0b", ""],
+    ["Call data", callData(dusk.fnArgs), ""],
+    ["Destination", "Sepolia, Hyperlane domain 11155111", ""],
+    ["Recipient", EVM, ""],
+    ["Amount", "1 DUSK (1000000000 Lux)", ""],
+    ["Deposit", "17.876 DUSK", "the amount and the bridge fee"],
+  ]);
+  // The contract as the wallet prints it, all of it on hover.
+  assert.equal((await callDetails(dusk, { cfg, reads, token: T.DUSK }))[1].full, T.DUSK.dusk.route);
+  // A token issued on Dusk: its own units; the deposit is the bridge fee alone.
+  const eurd = await transfer(T.EURd, { allowance: 10_000_000n });
+  assert.deepEqual(rows(await callDetails(eurd, { cfg, reads, token: T.EURd })).slice(5), [
+    ["Amount", "10 EURd (10000000 units)", ""],
+    ["Deposit", "16.876 DUSK", "the bridge fee"],
+  ]);
+
+  // A claim of what the route holds: for the account that signs, or for another, by its key.
+  const { node } = chain({ pending: 2_000_000n });
+  const own = await claimRequest({ account: SENDER, cfg, gasPrice: 1n, node, reads, signer: SENDER, token: T.EURd });
+  assert.deepEqual(rows(await callDetails(own, { cfg, reads, token: T.EURd })), [
+    ["Method", "claim_pending", ""],
+    ["Contract", "78ff6b…d6aef8", ""],
+    ["Call data", callData(own.fnArgs), ""],
+    ["Arguments", "None: it pays the account that signs", ""],
+  ]);
+  const forIt = await claimRequest({ account: SENDER, cfg, gasPrice: 1n, node, reads, signer: OTHER, token: T.EURd });
+  assert.deepEqual(rows(await callDetails(forIt, { cfg, reads, token: T.EURd })).slice(2), [
+    ["Call data", callData(forIt.fnArgs), ""],
+    ["Account", SENDER, ""],
+  ]);
+
+  // An approve the wallet reads itself, as an allowance: nothing to list.
+  const approve = await approveRequest({ amount: 10_000_000n, cfg, gasPrice: 1n, node, reads, recipient: EVM, sender: SENDER, token: T.EURd });
+  assert.equal(await callDetails(approve, { cfg, reads, token: T.EURd }), null);
+});

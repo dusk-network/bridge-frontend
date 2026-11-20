@@ -4,9 +4,14 @@
 // asked for is what the review says. A claim: built again as it's sent, and
 // what it pays out.
 
-import { amountForUnits } from "./format.js";
-import { duskRecipientHash } from "./hyperlane.js";
+import { encodeBase58 } from "@dusk-network/networks/account";
+import { formatContractId } from "@dusk-network/networks/format";
+
+import { sha256Hex } from "./data-driver.js";
+import { amountForUnits, formatDusk, formatToken } from "./format.js";
+import { duskRecipientHash, readTransferRemoteArgs } from "./hyperlane.js";
 import { approveRequest, claimRequest } from "./hyperlane-requests.js";
+import { networkName } from "./names.js";
 import { reviewChecks } from "./page-models.js";
 import { buildQuote } from "./quote.js";
 
@@ -35,6 +40,44 @@ export function evmReviewParts(route, { amountLux, cfg, destination, duskAccount
     // What the wallet is asked for is known once the fee is read.
     ready: fee !== null && fee !== undefined,
   };
+}
+
+/**
+ * A Hyperlane call on Dusk that Dusk Wallet can't read, which its window says
+ * to check on the site, as the review lists it under Details: its method, its
+ * contract as the window prints it (all of it on hover), its call data's size
+ * and sha256 as the window's Details print them, and its arguments in plain
+ * words, read back from its own bytes: where a transfer goes and its
+ * Hyperlane domain, whom it pays, in full, its amount in the token and in its
+ * smallest unit; a claim's account. Then its deposit. Null for a token's
+ * `approve`, which the wallet reads itself, as an allowance. `reads` gives
+ * the routes' data driver, which reads a claim's account back.
+ */
+export async function callDetails(request, { cfg, reads, token }) {
+  if (!request || request.fnName === "approve") return null;
+  const bytes = Uint8Array.from(request.fnArgs ?? []);
+  const hash = await sha256Hex(bytes);
+  const id = formatContractId(request.contractId);
+  const rows = [
+    { label: "Method", mono: true, value: request.fnName },
+    { full: id, label: "Contract", mono: true, value: formatContractId(id, { short: true }) },
+    { label: "Call data", mono: true, value: `${bytes.length} bytes · sha256=${hash.slice(0, 12)}…${hash.slice(-8)}` },
+  ];
+  if (request.fnName === "transfer_remote") {
+    const args = readTransferRemoteArgs(bytes);
+    const chain = args.destination === cfg.hyperlane.evm.domain ? `${networkName(cfg, cfg.hyperlane.network)}, ` : "";
+    rows.push(
+      { label: "Destination", value: `${chain}Hyperlane domain ${args.destination}` },
+      { label: "Recipient", mono: true, value: args.recipient ?? args.recipient32, wrap: true },
+      { label: "Amount", value: `${formatToken(args.amount, token)} (${args.amount} ${token.native ? "Lux" : "units"})` },
+    );
+  } else if (request.fnName === "claim_pending") rows.push({ label: "Arguments", value: "None: it pays the account that signs" });
+  else if (request.fnName === "claim_pending_for") {
+    const { account } = (await reads.driver()).decodeInputFn("claim_pending_for", bytes);
+    rows.push({ label: "Account", mono: true, value: encodeBase58(Uint8Array.from(account)), wrap: true });
+  }
+  if (request.depositLux) rows.push({ detail: token.native ? "the amount and the bridge fee" : "the bridge fee", label: "Deposit", value: formatDusk(BigInt(request.depositLux)) });
+  return rows;
 }
 
 /**
@@ -76,7 +119,7 @@ export async function recheckApproval(reviewed, deps) {
  */
 export function rebuilding(review) {
   review.request = null;
-  review.steps[review.current] = { ...review.steps[review.current], ready: false, wait: "Reading the new fee…" };
+  review.steps[review.current] = { ...review.steps[review.current], call: null, ready: false, wait: "Reading the new fee…" };
   return review;
 }
 

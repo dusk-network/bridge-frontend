@@ -29,7 +29,7 @@ import { amountForInput, amountForUnits, formatDusk, formatLux, formatDuskPlain,
 import { HYPERLANE_GAS, U64_MAX, duskRecipientHash } from "./hyperlane.js";
 import { inboundCharge, sendToDusk } from "./hyperlane-evm.js";
 import { approveRequest, claimRequest, feeChanged, transferRemoteRequest } from "./hyperlane-requests.js";
-import { claimKey, escrowOnTheWay, evmReviewParts, heldFor, nowHeld, rebuilding, recheckApproval, recheckClaim, withClaimSent } from "./hyperlane-review.js";
+import { callDetails, claimKey, escrowOnTheWay, evmReviewParts, heldFor, nowHeld, rebuilding, recheckApproval, recheckClaim, withClaimSent } from "./hyperlane-review.js";
 import { deliveryLinkDue } from "./hyperlane-tracking.js";
 import { approveMigration, minedAs, revokeMigration, submitMigration } from "./legacy-migration.js";
 import { bridgeTasks, chainName, gasCoin, linkedRoute, networkName, networkNames, notRunning, routeUnits, tokenName } from "./names.js";
@@ -1596,11 +1596,13 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       async () => {
         const sender = review.signer.account;
         const deps = { amount: review.amountLux, cfg, gasPrice, node: services.node, reads: services.hyperlane, recipient: review.destination, sender, token };
-        return step.kind === "approve" ? approveRequest(deps) : transferRemoteRequest(deps);
+        const request = step.kind === "approve" ? await approveRequest(deps) : await transferRemoteRequest(deps);
+        // What Dusk Wallet can't read, and says to check on the site: listed under Details.
+        return { call: await callDetails(request, { cfg, reads: services.hyperlane, token }), request };
       },
-      (request) => {
+      ({ call, request }) => {
         review.request = request;
-        review.steps[review.current] = { ...review.steps[review.current], ready: true };
+        review.steps[review.current] = { ...review.steps[review.current], call, ready: true };
         // The fee rows and the checks at the request's own fee and price, the approval's too.
         Object.assign(review, hyperlaneReviewAt(route, review, request));
       },
@@ -1814,16 +1816,16 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         const { account: signer } = await ensureDuskConnected(cfg.dusk.chainId);
         review.signer = { account: signer, wallet: "dusk" };
         const request = await claimRequest({ account, cfg, gasPrice, node: services.node, reads: services.hyperlane, signer, token });
-        return { request, signer };
+        return { call: await callDetails(request, { cfg, reads: services.hyperlane, token }), request, signer };
       },
-      ({ request, signer }) => {
+      ({ call, request, signer }) => {
         review.signer = { account: signer, wallet: "dusk" };
         review.request = request;
         review.amountLux = request.pending;
         review.lead = lead(signer, request.pending);
         review.feeRows = feeRows(BigInt(request.gas.limit) * BigInt(request.gas.price));
         review.privacy = signer === account ? "Public: your account and the amount" : PUBLIC_LINE;
-        review.steps[0] = { ...review.steps[0], confirmLabel: confirmLabel(signer, request.pending), ready: true, title: signer === account ? "Claim from the bridge" : "Claim for this account" };
+        review.steps[0] = { ...review.steps[0], call, confirmLabel: confirmLabel(signer, request.pending), ready: true, title: signer === account ? "Claim from the bridge" : "Claim for this account" };
       },
       (error) => {
         review.error = friendlyWalletError(error, "dusk");
@@ -1868,7 +1870,11 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
           review.request = again.request;
           review.amountLux = again.request.pending;
           review.lead = { ...review.lead, amount };
-          review.steps[0] = { ...review.steps[0], confirmLabel: review.signer.account === review.claimFor ? `Claim ${amount} ${route.token.symbol}` : review.steps[0].confirmLabel };
+          review.steps[0] = {
+            ...review.steps[0],
+            call: await callDetails(again.request, { cfg, reads: services.hyperlane, token: route.hyperlane }),
+            confirmLabel: review.signer.account === review.claimFor ? `Claim ${amount} ${route.token.symbol}` : review.steps[0].confirmLabel,
+          };
           review.busy = false;
           review.error = `The bridge now holds ${formatToken(again.request.pending, route.token)} for this account`;
           announce(review.error);

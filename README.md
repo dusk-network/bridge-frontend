@@ -228,7 +228,12 @@ networks yet.
   and the time, and the steps where there are two. A check (balances, gas)
   is said only where it fails, as what keeps Confirm off. What the wallet's
   window shows, its contract, spender, method and raw units, is the window's
-  own, and not repeated. Cancel and confirm are equal; a request you reject
+  own, and not repeated, but for a call the window can't read and says to
+  check on the site, as Hyperlane's transfer and claims: under Details, "Call
+  details, to check against Dusk Wallet" lists its method, its contract as
+  the window prints it, its call data's size and sha256 as the window's
+  Details print them, and its arguments in plain words, read back from its
+  bytes. Cancel and confirm are equal; a request you reject
   in the wallet is said in grey, not as a failure. A Dusk call is built
   before Confirm can be pressed, and the reviewed request is what is sent.
 - **Receipt**, at `#/transfer/<hash>`: what moved and whom it paid, in full,
