@@ -10,7 +10,7 @@ import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
 import { actionLead, actionPrivacy, availableLine, balanceLine, openApproval, pricedReview, receiptModel, recipientLine, replacedLine, reviewChecks, revokeReview, routeLine, transfersModel } from "./page-models.js";
-import { DURATION, ESTIMATE, amountsIn, assertShownInFull, byLabel, copiesOf, decode, exactly, fieldOf, fieldsOf, linksOf, textOf } from "./pages.fixtures.js";
+import { DURATION, ESTIMATE, amountsIn, assertShownInFull, byLabel, copiesOf, decode, exactly, fieldOf, fieldsOf, linksOf, partsOf, textOf } from "./pages.fixtures.js";
 import { buildQuote, withdrawalStepMax } from "./quote.js";
 import { cardPage, cardRegions, contractsSheet, footer, receiptPage, reviewSheet, walletLines, walletsSheet } from "./views.js";
 import { formatDateTime } from "./format.js";
@@ -384,8 +384,8 @@ test("a proof or claim lists what the withdrawal pays, to whom, and who sent it;
   // As the window leads since wallet#149: what it costs, marked as a cost, then the withdrawal it's for and whom that pays.
   assert.deepEqual([prove[0].amount, Boolean(prove[0].lead), prove[0].to, prove[0].toFull, Boolean(prove[0].tag)], ["0.0506 DUSK", true, "213qXN…V5JJ9Y", PAID, true]);
   assert.deepEqual(amountsIn(prove[0].prefix), ["1,008 DUSK"]);
-  // What it says of itself: what it costs, and that proving moves no DUSK and pays nothing out.
-  assert.match(prove[0].lead, /\bcosts?\b/iu);
+  // What it says of itself: what it costs at most, and that proving moves no DUSK and pays nothing out.
+  assert.deepEqual(amountsIn(`${prove[0].lead} ${prove[0].amount}`), ["≤0.0506 DUSK"]);
   assert.match(prove[0].sub, MOVES_NO_DUSK);
   assert.doesNotMatch([prove[0].title, prove[0].lead, prove[0].sub].join(" "), PAYS_OUT);
   const proof = byLabel(prove);
@@ -402,6 +402,10 @@ test("a proof or claim lists what the withdrawal pays, to whom, and who sent it;
   assert.match(proof["Call data"].value, /^\d+ bytes · sha256=[0-9a-f]{12}…[0-9a-f]{8}$/u);
   // As the review shows it: the payee and the sender in full and copied as they are, the amount and the total each in its own field.
   const view = walletLines(prove, explorer);
+  // Its head as shown: the cost at most, then the withdrawal it's for; and that proving moves no DUSK and pays nothing out.
+  assert.deepEqual(amountsIn(partsOf(view, "wlhd")[0]), ["≤0.0506 DUSK", "1,008 DUSK"]);
+  assert.match(textOf(view), MOVES_NO_DUSK);
+  assert.doesNotMatch(textOf(view), PAYS_OUT);
   assertShownInFull(fieldOf(view, "Pays to"), PAID, DUSK_ACCOUNT(PAID));
   assertShownInFull(fieldOf(view, "Sent from DuskEVM"), "0x75685f9D88749B583732B40d56fe007cD404b72D", DUSKEVM_ADDRESS("0x75685f9D88749B583732B40d56fe007cD404b72D"));
   assert.deepEqual(amountsIn(fieldOf(view, "Amount").text), ["1,008 DUSK"]);
@@ -845,7 +849,7 @@ test("a proof's review says what it costs and moves no DUSK, and whom the withdr
   // Proving costs up to 0.051 DUSK and moves none; the claim comes 7 days after. Paying another account than Dusk Wallet's says so, naming it.
   const prove = actionLead("prove", other, { account: ACCOUNT, amountLux, maturity: 604_800, maxLux: 51_000_000n, name: "alice.dusk" });
   assert.equal(prove.amount, "0.051");
-  assert.match(prove.label, /\bcosts?\b/iu);
+  assert.deepEqual(amountsIn(`${prove.label} ${prove.amount} DUSK`), ["≤0.051 DUSK"]);
   assert.deepEqual(amountsIn(prove.line), []);
   assert.match(prove.line, MOVES_NO_DUSK);
   assert.doesNotMatch(`${prove.label} ${prove.line}`, PAYS_OUT);
@@ -868,7 +872,9 @@ test("a proof's review says what it costs and moves no DUSK, and whom the withdr
     canConfirm: true, cfgLinks: explorer, checks: [], confirmLabel: "Prove on Dusk", feeRows: [], lead: prove,
     privacy: "x", steps: [], sub: "", walletCheckName: "Dusk Wallet",
   });
-  assert.deepEqual(fieldsOf(sheet).filter((field) => amountsIn(field.text).length).map((field) => [field.label, amountsIn(field.text)]), [[prove.label, ["0.051 DUSK"]]]);
+  assert.deepEqual(fieldsOf(sheet).filter((field) => amountsIn(field.text).length).map((field) => [field.label, amountsIn(`${field.label} ${field.text}`)]), [[prove.label, ["≤0.051 DUSK"]]]);
+  assert.match(textOf(sheet), MOVES_NO_DUSK);
+  assert.doesNotMatch(textOf(sheet), PAYS_OUT);
   assert.ok(textOf(sheet).includes(prove.notYours), sheet);
 });
 

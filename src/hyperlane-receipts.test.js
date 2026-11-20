@@ -5,7 +5,7 @@ import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 import { duskRecipientHash } from "./hyperlane.js";
 import { receiptModel } from "./page-models.js";
-import { DURATION, NOT_SENT, amountsIn, assertShownInFull, exactly, fieldOf, fieldsOf, linksOf, stepsOf, textOf } from "./pages.fixtures.js";
+import { DURATION, NOT_SENT, amountsIn, assertShownInFull, exactly, fieldOf, fieldsOf, linksOf, partsOf, stepsOf, textOf } from "./pages.fixtures.js";
 import { transferSubline, transferView } from "./transfer-view.js";
 import { receiptPage } from "./views.js";
 
@@ -28,8 +28,16 @@ const DELIVERED = /\bdelivered\b/iu;
 const CLAIM_SENT = /\bclaim sent\b/iu;
 const NEVER_SENT = /\b(?:never|not|wasn't)\b[^.]*\bsent\b/iu;
 const FAILED = /\bfailed\b/iu;
+const NOT = /\bnot\b/iu;
 // The last step of a receipt as it shows: its state, and its text.
 const lastStep = (model) => stepsOf(receiptPage({ ...model, canAct: true })).at(-1);
+// The status a receipt's pill shows: completed, or still on its way.
+const pillOf = (model) => textOf(partsOf(receiptPage({ ...model, canAct: true }), "spill")[0]);
+function assertPill(model, completed) {
+  const pill = pillOf(model);
+  assert.match(pill, completed ? /\bcompleted\b/iu : /\b(?:pending|in progress)\b/iu, pill);
+  assert.doesNotMatch(pill, completed ? /\b(?:pending|in progress)\b/iu : /\bcompleted\b/iu, pill);
+}
 
 test("a transfer to Sepolia that approved first counts the approval in its network fee, and lists it", () => {
   const approval = "ab".repeat(32);
@@ -77,14 +85,17 @@ test("a transfer to Dusk links the Dusk transaction that delivered it, and befor
   const arrived = model.view.steps.find((step) => step.key === "arrived");
   assert.equal(arrived.href, `https://explorer.testnet.dusk.network/transactions/transaction?id=${delivery}`);
   assertShownInFull(field(model, "Dusk transaction"), delivery, DUSK_TX(delivery));
+  assertPill(model, true);
   // Delivered, its transaction not found yet; or still on its way: neither links one, and each shows as what it is.
+  for (const [still, completed] of [[{ deliveryHash: undefined, status: "pending" }, false], [{ delivered: false, deliveryHash: undefined, status: "pending" }, false]]) assertPill(receipt({ ...entry, ...still }), completed);
   const unfound = receipt({ ...entry, deliveryHash: undefined, status: "pending" });
   const onItsWay = receipt({ ...entry, delivered: false, deliveryHash: undefined, status: "pending" });
   assert.deepEqual([steps(unfound).at(-1), steps(onItsWay).at(-1)], [["arrived", "done"], ["arrived", "now"]]);
   for (const model of [unfound, onItsWay]) assert.deepEqual([field(model, "Dusk transaction").copies, linksOf(field(model, "Dusk transaction").html)], [[], []]);
   const [doneState, doneText] = lastStep(unfound);
-  assert.deepEqual([doneState, ARRIVED.test(doneText), ARRIVING.test(doneText)], ["done", true, false]);
+  assert.deepEqual([doneState, ARRIVED.test(doneText), ARRIVING.test(doneText), NOT.test(doneText)], ["done", true, false, false]);
   assert.match(field(unfound, "Dusk transaction").text, DELIVERED);
+  assert.doesNotMatch(field(unfound, "Dusk transaction").text, NOT);
   const [wayState, wayText] = lastStep(onItsWay);
   assert.deepEqual([wayState, ARRIVING.test(wayText), ARRIVED.test(wayText)], ["now", true, false]);
   assert.doesNotMatch(field(onItsWay, "Dusk transaction").text, DELIVERED);
@@ -99,8 +110,11 @@ test("a transfer to Sepolia that arrived before its transaction was found reads 
   // No transaction to link yet; each shows as what it is.
   for (const model of [arrived, onItsWay]) assert.deepEqual([field(model, "Sepolia transaction").copies, linksOf(field(model, "Sepolia transaction").html)], [[], []]);
   const [doneState, doneText] = lastStep(arrived);
-  assert.deepEqual([doneState, ARRIVED.test(doneText), ARRIVING.test(doneText)], ["done", true, false]);
+  assert.deepEqual([doneState, ARRIVED.test(doneText), ARRIVING.test(doneText), NOT.test(doneText)], ["done", true, false, false]);
   assert.match(field(arrived, "Sepolia transaction").text, DELIVERED);
+  assert.doesNotMatch(field(arrived, "Sepolia transaction").text, NOT);
+  assertPill(arrived, true);
+  assertPill(onItsWay, false);
   const [wayState, wayText] = lastStep(onItsWay);
   assert.deepEqual([wayState, ARRIVING.test(wayText), ARRIVED.test(wayText)], ["now", true, false]);
   assert.doesNotMatch(field(onItsWay, "Sepolia transaction").text, DELIVERED);
@@ -126,9 +140,11 @@ test("a transfer held for its claim offers Claim; once the claim is sent, it sho
   assert.equal(model.view.action.kind, "claim");
   assert.equal(model.arrives, false);
   assert.doesNotMatch(model.caption, DURATION);
-  // Held: the claim is the account's turn, and it's said as held.
+  // Held: the claim is the account's turn, and it's said as held, on its pill too: neither completed nor pending.
   assert.equal(lastStep(model)[0], "turn");
   assert.match(model.caption, /\bheld\b/iu);
+  assert.match(pillOf(model), /\b(?:held|claim)\b/iu);
+  assert.doesNotMatch(pillOf(model), /\b(?:completed|pending)\b/iu);
   // Its claim sent: that claim's transaction in full, said as sent (never as not sent), and Claim not offered again.
   const sent = receipt({ ...held, pendingAction: "claim", pendingHash: "cd".repeat(32) });
   assert.equal(sent.view.action, null);
