@@ -9,7 +9,7 @@ import { releaseFor } from "@duskdomains/sdk/releases";
 import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
-import { actionLead, actionPrivacy, addDuskOffer, availableLine, balanceLine, feesTotal, openApproval, pricedReview, receiptModel, recipientLine, replacedLine, reviewChecks, revokeReview, routeDetailRows, routeLines, transfersModel } from "./page-models.js";
+import { actionLead, actionPrivacy, addDuskOffer, availableLine, balanceLine, feeNotes, feesTotal, openApproval, pricedReview, receiptModel, recipientLine, replacedLine, reviewChecks, revokeReview, routeDetailRows, routeLines, transfersModel } from "./page-models.js";
 import { buildQuote, withdrawalStepMax } from "./quote.js";
 import { activityPanel, cardPage, cardRegions, contractsSheet, footer, header, networkSheet, receiptPage, reviewSheet, walletsSheet } from "./views.js";
 import { formatDateTime } from "./format.js";
@@ -1087,4 +1087,26 @@ test("with more than one Dusk wallet to choose from, each is offered by name, an
   const one = walletsSheet({ wallets: [{ id: "a", name: "Dusk Wallet", rdns: "network.dusk.wallet" }] });
   assert.doesNotMatch(one, /class="sub"/u);
   assert.equal([...one.matchAll(/data-action="choose-dusk"/gu)].length, 1);
+});
+
+test("the card and the review say once, calmly, when the bridge fee is more than the amount, and block nothing", () => {
+  const route = buildRoutes(testnet).find((each) => each.id === "dusk-to-sepolia");
+  const quote = buildQuote(route, "1", { balance: 2_000n * 10n ** 9n, cfg: testnet, gasPrice: 1n, hyperlane: { fee: 16_876_000_000n } });
+  assert.deepEqual(feeNotes(quote), ["Bridge fee is more than the amount"]);
+  assert.deepEqual(feeNotes(buildQuote(route, "20", { balance: 2_000n * 10n ** 9n, cfg: testnet, gasPrice: 1n, hyperlane: { fee: 16_876_000_000n } })), []);
+  // Under the card's route line, beside the fees it's about; the button still reviews.
+  const vm = cardVmFor({ feeNotes: feeNotes(quote), quote, routeLines: routeLines(route, testnet, { quote }), routeRows: routeDetailRows(route, quote) });
+  const { cta, route: row } = cardRegions(vm);
+  assert.match(row, /<span>~20 s · fees up to 16\.881 DUSK<\/span><span class="route-status warn">Bridge fee is more than the amount<\/span>/u);
+  assert.ok(cta.includes('data-action="review"') && !cta.includes("disabled"), cta);
+  assert.doesNotMatch(cardRegions(cardVmFor()).route, /more than the amount/u);
+  // On the review, once, as a line of its own; Confirm stays on.
+  const sheet = reviewSheet({
+    canConfirm: true, checks: [], confirmLabel: "Send 1 DUSK", feeRows: quote.rows.filter((each) => !["send", "receive"].includes(each.key)), notes: feeNotes(quote), privacy: "Public: both accounts and the amount",
+    receive: { account: EVM, amount: "1", chain: "ethereum", full: true, unit: "DUSK", where: "Sepolia" }, send: { account: "21n5nc…fMMLNz", amount: "1", chain: "dusk", unit: "DUSK", where: "Dusk" },
+    steps: [{ current: true, ready: true }], sub: "",
+  });
+  assert.equal(sheet.match(/Bridge fee is more than the amount/gu)?.length, 1);
+  assert.match(sheet, /<p class="note">.*?<span>Bridge fee is more than the amount<\/span><\/p>/u);
+  assert.match(sheet, /data-action="confirm" >Send 1 DUSK</u);
 });

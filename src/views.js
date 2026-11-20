@@ -246,12 +246,14 @@ function approvalBox(open, note = "") {
 }
 
 /**
- * The route's line under the card: its time and fees, then how it's doing
- * where that could make someone wait. Its split behind it, where there's one
- * (`routeRows`): a summary that opens, else a plain line.
+ * The route's line under the card: its time and fees, what they say where
+ * the bridge fee is more than the amount (`feeNotes`), then how it's doing
+ * where that could make someone wait. Its split behind it, where there's
+ * one (`routeRows`): a summary that opens, else a plain line.
  */
 function routeHead(vm, open) {
-  const lines = vm.routeLines.map((line) => `<span>${html(line)}</span>`).join("");
+  // Its fees, then what they say, as a bridge fee more than the amount.
+  const lines = [...vm.routeLines.map((line) => `<span>${html(line)}</span>`), ...(vm.feeNotes ?? []).map((note) => `<span class="route-status warn">${html(note)}</span>`)].join("");
   const status = vm.status ? `<span class="route-status${vm.status.warn ? " warn" : ""}">${html(vm.status.text)}</span>` : "";
   const sum = `${icon("clock")}<span class="route-sum">${lines}${status}</span>`;
   return open ? `<summary>${sum}${icon("chev-d", "chev")}</summary>` : `<div class="route-head">${sum}</div>`;

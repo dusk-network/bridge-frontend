@@ -272,3 +272,20 @@ test("an approval not read yet, or not readable, decides no steps: the review wa
   // DUSK's route takes no approval.
   assert.equal(buildQuote(byId["dusk-to-sepolia"], "1", { ...ctx, hyperlane: { fee: BRIDGE_FEE } }).waiting, undefined);
 });
+
+test("a bridge fee larger than the amount sent is noted, and blocks nothing", () => {
+  const route = byId["dusk-to-sepolia"];
+  const quote = (amount, hyperlane = { fee: BRIDGE_FEE }) => buildQuote(route, amount, { balance: 2_000n * DUSK, cfg, gasPrice: 1n, hyperlane });
+  // 16.876 DUSK to send 1 DUSK: said, and it can still be reviewed.
+  assert.deepEqual([quote("1").feeOverAmount, quote("1").error, quote("1").insufficient], [true, "", undefined]);
+  assert.equal(quote("16.876").feeOverAmount, false);
+  assert.equal(quote("20").feeOverAmount, false);
+  // Nothing typed, or the fee not read yet: nothing to compare.
+  assert.equal(quote("").feeOverAmount, false);
+  assert.equal(quote("1", {}).feeOverAmount, false);
+  // A fee in another coin than the amount isn't compared: EURd's is in DUSK, Sepolia's in ETH.
+  const eurd = buildQuote(byId["dusk-to-sepolia-eurd"], "1", { balance: 2_000n * DUSK, cfg, gasPrice: 1n, hyperlane: { allowance: 0n, fee: BRIDGE_FEE, tokenBalance: 10n ** 9n } });
+  assert.equal(eurd.feeOverAmount, false);
+  const back = buildQuote(byId["sepolia-to-dusk"], "0.0000001", { balance: DUSK, cfg, evm: { deliveryFeeWei: 132_000_000_001n, gas: 1n, gasCoinWei: 10n ** 18n, priceWei: 1n } });
+  assert.equal(back.feeOverAmount, false);
+});

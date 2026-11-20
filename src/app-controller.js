@@ -42,6 +42,7 @@ import {
   recipientLine,
   DUSK_WALLET_URL,
   evmWalletName,
+  feeNotes,
   openApproval,
   receiptModel,
   replacedLine,
@@ -693,6 +694,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       error: state.form.error,
       // What Hyperlane's routes hold for the connected Dusk account, to claim.
       escrow: escrowVm(),
+      // A bridge fee more than the amount, said under the route line; it blocks nothing.
+      feeNotes: route.paused ? [] : feeNotes(quote),
       from: {
         balance: balance.text,
         balanceExact: balance.exact,
@@ -1247,8 +1250,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       error: "",
       feeRows: quote.rows.filter((row) => !["send", "receive"].includes(row.key)),
       kind: "send",
-      // Lines it always says, as what's held for a claim or a fee past the amount.
-      notes: [],
+      // Lines it always says, as a bridge fee more than the amount.
+      notes: feeNotes(quote),
       // A contract, or DUSK paid to another Dusk account than the connected one: said first.
       paysConnected: route.to.kind === "evm" && evmAccount() && destination === checkEvmRecipient(evmAccount()).address ? destination : "",
       paysTo: destination,
@@ -1478,6 +1481,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     return {
       checks: reviewChecks(route, { cfg, destination: review.destination, duskAccount: duskAccount(), evm: state.evmState, quote, reads: { ...formReads.reads, hyperlane: read } }),
       feeRows: quote.rows.filter((row) => !["send", "receive"].includes(row.key)),
+      // At the request's own fee: one that moved past the amount, or back under it, says so.
+      notes: feeNotes(quote),
     };
   }
 

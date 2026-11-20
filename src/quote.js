@@ -144,7 +144,7 @@ export function buildQuote(route, amount, ctx) {
   const parsed = parseAmount(amount);
   const lux = parsed.lux;
   const rows = [];
-  const quote = { amountLux: lux, error: parsed.error, maxLux: null, receiveLux: lux, rows };
+  const quote = { amountLux: lux, error: parsed.error, feeOverAmount: false, maxLux: null, receiveLux: lux, rows };
   const shown = (value) => (value === null ? "—" : formatDusk(value));
 
   if (route.mode === "duskevm-deposit" || route.mode === "service-transfer") {
@@ -277,6 +277,7 @@ function hyperlaneQuote(route, amount, ctx) {
   const quote = {
     amountLux: units,
     error: parsed.error || (units === null && parsed.lux !== null ? "That's more than one transfer can carry." : ""),
+    feeOverAmount: false,
     maxLux: null,
     receiveLux: units,
     rows: [],
@@ -299,6 +300,8 @@ function hyperlaneQuote(route, amount, ctx) {
     const gas = hyperlaneDuskFees({ approves, gasPrice: ctx.gasPrice });
     const balance = ctx.balance === null || ctx.balance === undefined ? null : BigInt(ctx.balance);
     Object.assign(quote, { bridgeFeeLux: fee, gasMaxLux: gas.maxLux, steps: unknown ? null : approves ? 2 : 1 });
+    // DUSK's bridge fee is paid in DUSK, on top: where it's more than what's sent, that's said. It blocks nothing.
+    quote.feeOverAmount = native && units !== null && fee !== null && fee > units;
     if (native) {
       if (balance !== null && fee !== null) quote.maxLux = balance > fee + gas.maxLux ? balance - fee - gas.maxLux : 0n;
       if (!quote.error && units !== null && quote.maxLux !== null && units > quote.maxLux) {

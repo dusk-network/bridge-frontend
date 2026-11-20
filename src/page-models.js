@@ -66,6 +66,16 @@ export function routeLines(route, cfg, { gasPrice = 1n, quote = null, timing } =
   return [capital([routeTimeText(time), cost].filter(Boolean).join(" · "))];
 }
 
+/** Said under the card's route line and on the review, where a bridge fee in the coin sent is more than what's sent. */
+export const FEE_OVER_AMOUNT = "Bridge fee is more than the amount";
+
+/**
+ * What the card and the review say of a quote's fees beside their rows: that
+ * the bridge fee is more than the amount, where it is (`feeOverAmount`).
+ * Said, never blocking.
+ */
+export const feeNotes = (quote) => (quote?.feeOverAmount ? [FEE_OVER_AMOUNT] : []);
+
 /**
  * What the card keeps behind its route line, from the quote's rows: the
  * split of the fees it sums, a fee it leaves out, and a withdrawal's claim.
