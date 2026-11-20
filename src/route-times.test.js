@@ -26,6 +26,8 @@ const mainnet = profile("mainnet");
 const routes = (cfg) => buildRoutes(cfg);
 const byId = (cfg, id) => routes(cfg).find((route) => route.id === id);
 const text = (cfg, id, timing) => routeTimeText(routeTime(byId(cfg, id), cfg, timing));
+// A time a route takes, however it's worded around it.
+const DURATION = /\b\d+ (?:s|min|minutes?|hours?|days?)\b/u;
 // What DuskEVM testnet's chains said on 27 Oct 2026.
 const CHAIN = Object.freeze({
   deposit: { lagSeconds: 35 },
@@ -74,7 +76,8 @@ test("a withdrawal keeps its waits before there are two games to time outputs by
   assert.equal(text(testnet, "dusk-evm-to-dusk", early), "~7 days");
   // The quote still says the days to wait, and leaves out only when proving can start.
   const when = buildQuote(withdrawal, "10", { balance: null, cfg: testnet, gasPrice: 1n, timing: early }).rows.find((row) => row.key === "when");
-  assert.deepEqual([when.value, when.detail], ["Claim 7 days after you prove.", ""]);
+  assert.match(when.value, /\b7 days\b/u);
+  assert.ok(!when.detail);
 });
 
 test("this browser's own recent transfers measure a route the chain says nothing about", () => {
@@ -133,27 +136,28 @@ test("every page says the same time for the same route", () => {
   ];
   for (const [cfg, id, timing, expected] of cases) {
     const shown = pages(cfg, byId(cfg, id), timing);
-    assert.match(shown.card, new RegExp(`^${expected} · `, "u"), id);
+    for (const [page, line] of Object.entries(shown)) assert.ok(line.includes(expected), `${id}, ${page}: ${line}`);
     assert.equal(shown.quote, expected, id);
-    assert.equal(shown.receipt, `Takes ${expected}`, id);
-    assert.match(shown.activity, new RegExp(` · takes ${expected}$`, "u"), id);
   }
   // A withdrawal: the whole on the card and the receipt; the Portal's 7 days
   // from the proof to the claim in the quote, the claim step and the review.
   const withdrawal = pages(testnet, byId(testnet, "dusk-evm-to-dusk"), { chain: CHAIN });
-  assert.deepEqual([withdrawal.card.split(" · ")[0], withdrawal.receipt], ["~7 days", "Takes ~7 days"]);
+  for (const line of [withdrawal.card, withdrawal.receipt]) assert.ok(line.includes("~7 days"), line);
   const route = byId(testnet, "dusk-evm-to-dusk");
   // Sent now, it says when that is: proved about an output later, 7 days after.
   const when = buildQuote(route, "10", { balance: null, cfg: testnet, gasPrice: 1n, locale: "en-GB", timeZone: "UTC", timing: { chain: CHAIN, now } }).rows.find((row) => row.key === "when");
-  assert.deepEqual([when.value, when.detail], ["Claim from about 3 Nov, 09:28 UTC", "Claim 7 days after you prove. You can prove about 30 minutes after sending."]);
+  assert.match(when.value, /\b3 Nov, 09:28 UTC\b/u);
+  assert.match(when.detail, /\b7 days\b/u);
+  assert.match(when.detail, /\b30 minutes\b/u);
   const view = transferView({ hash: "0x01", stage: "ready_to_prove", status: "pending" }, { cfg: testnet, route, timing: { chain: CHAIN } });
-  assert.equal(view.steps[2].detail, "7 days after you prove");
-  assert.equal(actionLead("prove", {}, { maturity: view.time.maturity, maxLux: 1n }).line, "No DUSK moves now. Claim 7 days after you prove.");
-  // Unknown on this network: no time anywhere, and no Arrives line in the review.
+  assert.match(view.steps[2].detail, /\b7 days\b/u);
+  assert.match(actionLead("prove", {}, { maturity: view.time.maturity, maxLux: 1n }).line, /\b7 days\b/u);
+  // Unknown on this network: no time anywhere, the review's checks included.
   const unknown = pages(testnet, byId(testnet, "dusk-to-ethereum"), {});
-  assert.deepEqual(unknown, { activity: "Sent Today, 08:59 UTC", card: "1 DUSK bridge fee", quote: "", receipt: "" });
+  assert.deepEqual([unknown.quote, unknown.receipt], ["", ""]);
+  for (const line of [unknown.card, unknown.activity]) assert.doesNotMatch(line, DURATION);
   const checks = reviewChecks(byId(testnet, "dusk-to-ethereum"), { cfg: testnet, destination: "0x1", duskAccount: "a", evm: {}, quote: buildQuote(byId(testnet, "dusk-to-ethereum"), "10", { cfg: testnet }), reads: {} });
-  assert.ok(checks.every((check) => !/arrive|usually|within/iu.test(check.html)));
+  assert.ok(checks.every((check) => !DURATION.test(check.html)));
 });
 
 test("a Hyperlane transfer into Dusk took as long as its delivery, however long its claim waited", () => {

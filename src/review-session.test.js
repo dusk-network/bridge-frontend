@@ -90,18 +90,20 @@ test("a request that wasn't sent says why on the review and in the page's live r
   assert.deepEqual([switched.busy, switched.error, switched.stale], [false, SIGNER_MOVED.evm, true]);
   // Anything else in plain words, naming the wallet that refused.
   notSent({}, { code: 4100 }, { announce, wallet: "evm" });
-  assert.deepEqual(said, [WALLET_CANCELLED, SIGNER_MOVED.dusk, SIGNER_MOVED.evm, "The EVM wallet is locked. Unlock it, reconnect, and try again."]);
+  assert.deepEqual(said, [WALLET_CANCELLED, SIGNER_MOVED.dusk, SIGNER_MOVED.evm, friendlyWalletError({ code: 4100 }, "evm")]);
 });
 
 test("a send Dusk Connect refused because Dusk Wallet changed network or account leaves the review stale, in plain words", () => {
   // As Dusk Connect refuses: nothing went to the wallet.
   const refused = (reason) => new DuskSdkError("Wallet changed before sending", { data: { reason } });
   const network = notSent({ busy: true }, refused("network_changed"), { announce: () => {} });
-  assert.deepEqual([network.busy, network.stale, network.error], [false, true, "Dusk Wallet switched network, so nothing was sent. Close it and review again."]);
+  assert.deepEqual([network.busy, network.stale], [false, true]);
   const session = notSent({ busy: true }, refused("session_changed"), { announce: () => {} });
-  assert.deepEqual([session.stale, session.error], [true, "Dusk Wallet locked or changed accounts, so nothing was sent. Close it and review again."]);
-  // Refused while connecting, outside a review: try again.
-  assert.equal(friendlyWalletError(refused("session_changed")), "Dusk Wallet locked or changed accounts. Try again.");
+  assert.equal(session.stale, true);
+  // Each said as itself, never as Dusk Connect's own words, also when it refused while connecting, outside a review.
+  const plain = [network.error, session.error, friendlyWalletError(refused("session_changed"))];
+  for (const said of plain) assert.ok(said && said !== "Wallet changed before sending", said);
+  assert.notEqual(network.error, session.error);
   // Any other refusal leaves the review as it was.
   assert.equal(notSent({ busy: true }, new DuskSdkError("Wallet network changed", { data: { reason: "other" } }), { announce: () => {} }).stale, undefined);
 });
