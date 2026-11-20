@@ -67,6 +67,22 @@ function finalizedHeight(pair) {
   }
 }
 
+/**
+ * A Dusk transaction this page sent, once it's confirmed, as the step after
+ * it needs: its record from the `node`. One that failed throws, marked
+ * FAILED_ON_DUSK; one not confirmed after `tries` checks `wait` ms apart
+ * throws saying so, and to check the wallet before reviewing again.
+ */
+export async function confirmedOnDusk(node, hash, what, { tries = 30, wait = 3_000 } = {}) {
+  for (let tried = 0; tried < tries; tried += 1) {
+    const tx = await node.transaction(hash).catch(() => null);
+    if (tx?.error) throw Object.assign(new Error(`The ${what} failed on Dusk: ${tx.error}`), { code: "FAILED_ON_DUSK" });
+    if (tx) return tx;
+    await new Promise((resolve) => setTimeout(resolve, wait));
+  }
+  throw new Error(`The ${what} isn't confirmed yet. Check Dusk Wallet's activity, then review again.`);
+}
+
 export function createDuskNode({ url, fetch = globalThis.fetch }) {
   const base = String(url ?? "").replace(/\/+$/u, "");
   if (!/^https?:\/\//iu.test(base))
@@ -180,7 +196,7 @@ export function createDuskNode({ url, fetch = globalThis.fetch }) {
     const data = await query("block(height: -1) { header { height timestamp } }");
     const header = data?.block?.header;
     if (header?.timestamp === undefined || header?.timestamp === null || header?.height === undefined || header?.height === null)
-      throw new Error("Latest Dusk block timestamp is unavailable.");
+      throw new Error("Dusk didn't give its latest time.");
     return Object.freeze({ height: BigInt(header.height), timestamp: BigInt(header.timestamp) });
   }
 

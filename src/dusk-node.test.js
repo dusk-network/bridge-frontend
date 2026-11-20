@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createDuskNode, parseJsonExact } from "./dusk-node.js";
+import { confirmedOnDusk, createDuskNode, parseJsonExact } from "./dusk-node.js";
 
 const NODE = "https://testnet.nodes.example";
 
@@ -220,4 +220,24 @@ test("a public balance is read from the node as Lux, without losing digits", asy
   assert.equal(await node.accountBalance(account), 18_446_744_073_709_551_615n);
   assert.deepEqual(calls, [[`https://node.example/on/account:${account}/status`, "POST"]]);
   await assert.rejects(node.accountBalance("not base58 0OIl"), /base58/u);
+});
+
+test("a transaction this page sent is waited for until it's confirmed: one that isn't by then says so, and to check the wallet first", async () => {
+  // Found: its record, for its fee.
+  assert.deepEqual(await confirmedOnDusk({ transaction: async () => ({ gasSpent: "1840717" }) }, "ab", "approval", { wait: 0 }), { gasSpent: "1840717" });
+  // Failed on Dusk: said so, and marked, so the approval isn't counted as sent.
+  await assert.rejects(confirmedOnDusk({ transaction: async () => ({ error: "Panic" }) }, "ab", "approval", { wait: 0 }), (error) => error.code === "FAILED_ON_DUSK");
+  // Not found by then, or the node not answering: not confirmed yet, in plain words, and where to look before trying again.
+  for (const transaction of [async () => null, async () => Promise.reject(new Error("offline"))]) {
+    let asked = 0;
+    const node = { transaction: (...args) => ((asked += 1), transaction(...args)) };
+    await assert.rejects(confirmedOnDusk(node, "ab", "approval", { tries: 3, wait: 0 }), (error) => {
+      assert.match(error.message, /\bisn't confirmed yet\b/u);
+      assert.match(error.message, /\bcheck Dusk Wallet's activity\b/iu);
+      assert.doesNotMatch(error.message, /\bblock\b/iu);
+      assert.equal(error.code, undefined);
+      return true;
+    });
+    assert.equal(asked, 3);
+  }
 });

@@ -20,6 +20,7 @@ import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js"
 import { followAfterDiscovery, mergeTransfer, mergeTransfers, partyKey } from "./discovery.js";
 import { createDiscoveryRuns } from "./discovery-runs.js";
 import { depositRequest } from "./dusk-deposit.js";
+import { confirmedOnDusk } from "./dusk-node.js";
 import { createDuskAdded, createDuskOffer } from "./dusk-offer.js";
 import { createDuskConnection, disconnectDusk, ensureDuskConnected, sendDuskContractCall, sendDuskTransfer } from "./dusk-wallet.js";
 import { duskEvmNetwork, submitDuskEvmWithdrawal } from "./duskevm-withdrawal.js";
@@ -1694,21 +1695,11 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     if (state.sheet === "review" && reviews.current === review) renderSheet();
   }
 
-  /** Waits for a Dusk transaction this page sent to be in a block, as the step after it needs. */
-  async function includedOnDusk(hash, what) {
-    for (let tries = 0; tries < 30; tries += 1) {
-      const tx = await services.node.transaction(hash).catch(() => null);
-      if (tx?.error) throw Object.assign(new Error(`The ${what} failed on Dusk: ${tx.error}`), { code: "FAILED_ON_DUSK" });
-      if (tx) return tx;
-      await new Promise((resolve) => setTimeout(resolve, 3_000));
-    }
-    throw new Error(`The ${what} isn't in a block yet. Check Dusk Wallet's activity, then review again.`);
-  }
 
   /**
    * Sends a Hyperlane review's current step. Back to Dusk, from the EVM
    * wallet, with the delivery fee read again as it's sent. To the EVM chain,
-   * an approval first, waited for until it's in a block, then the transfer,
+   * an approval first, waited for until it's confirmed, then the transfer,
    * checked again as it's signed: a fee that moved shows on the review, and
    * nothing goes until it's confirmed again.
    */
@@ -1778,11 +1769,11 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         }
         review.approvalHash = (await sendDuskContractCall(review.request, { account: review.signer?.account })).hash;
       }
-      review.busyLabel = "Waiting for Dusk…";
+      review.busyLabel = "Confirming…";
       renderSheet();
       try {
         // Kept with the transfer: its fee is part of what it cost.
-        review.approvalFeeLux = duskFeePaid(await includedOnDusk(review.approvalHash, "approval"));
+        review.approvalFeeLux = duskFeePaid(await confirmedOnDusk(services.node, review.approvalHash, "approval"));
       } catch (error) {
         if (error?.code === "FAILED_ON_DUSK") review.approvalHash = null;
         throw error;
