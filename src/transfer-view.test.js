@@ -13,6 +13,7 @@ import {
   transferView,
 } from "./transfer-view.js";
 import { receiptModel } from "./page-models.js";
+import { amountsIn, exactly } from "./pages.fixtures.js";
 import { proofSubmitterFor } from "./services.js";
 import { receiptPage, transferRow } from "./views.js";
 
@@ -36,8 +37,6 @@ const EVM = "0x3E5B8223e638CB414BEF8CF95393460cA1C3a11d";
 const AMS = "Europe/Amsterdam";
 // Times on a 24-hour clock, as an English or Dutch viewer sees them.
 const GB = "en-GB";
-// The DUSK amounts a line says, whatever words it says them with.
-const amountsIn = (text) => [...String(text).matchAll(/\d[\d,]*(?:\.\d+)? (?:[A-Z0-9]+ )?DUSK\b/gu)].map((match) => match[0]);
 const states = (items) => items.map(({ state }) => state);
 
 test("explorer links point at each network's own explorer", () => {
@@ -98,7 +97,7 @@ test("a deposit is pending through its steps, then completed with both transacti
 test("a payout to another chain says what arrives after the bridge fee", () => {
   const view = transferView({ amountLux: "50000000000", hash: DUSK_HASH, sourceAt: Date.UTC(2026, 9, 26, 9, 12), status: "pending" }, { cfg, now: Date.UTC(2026, 9, 26, 9, 30), route: service, locale: GB, timeZone: AMS });
   assert.deepEqual(amountsIn(view.title), ["50 DUSK"]);
-  assert.match(transferSubline(view, { sourceAt: Date.UTC(2026, 9, 26, 9, 12) }, service, cfg, { locale: GB, now: Date.UTC(2026, 9, 26, 9, 30), timeZone: AMS }), /~1 hour/u);
+  assert.match(transferSubline(view, { sourceAt: Date.UTC(2026, 9, 26, 9, 12) }, service, cfg, { locale: GB, now: Date.UTC(2026, 9, 26, 9, 30), timeZone: AMS }), exactly("~1 hour"));
   const done = transferView({ amountLux: "50000000000", hash: DUSK_HASH, status: "completed" }, { cfg, route: service });
   assert.deepEqual(amountsIn(done.title), ["49 DUSK"]);
   assert.deepEqual(amountsIn(transferView({ amountLux: "1000000000000", hash: L2_HASH, status: "pending" }, { cfg, route: migration }).title), ["1,000 ERC20 DUSK"]);
@@ -113,11 +112,11 @@ test("a withdrawal shows its three steps, their times and the next action", () =
     ["prove", "turn"],
     ["claim", "todo"],
   ]);
-  assert.match(ready.steps[2].detail, /7 days/u);
+  assert.match(ready.steps[2].detail, exactly("7 days"));
   // Before it can be proved: from when it can, about an output after it was sent.
   const sent = transferView({ hash: L2_HASH, sourceAt: sentAt, stage: "waiting_for_output", status: "pending" }, { cfg, now, route: withdrawal, locale: GB, timeZone: AMS, timing });
-  assert.match(sent.steps[1].detail, /23 Oct, 16:48/u);
-  assert.match(transferSubline(sent, { sourceAt: sentAt, stage: "waiting_for_output" }, withdrawal, cfg, { locale: GB, now, timeZone: AMS }), /23 Oct, 16:48/u);
+  assert.match(sent.steps[1].detail, exactly("23 Oct, 16:48 CEST"));
+  assert.match(transferSubline(sent, { sourceAt: sentAt, stage: "waiting_for_output" }, withdrawal, cfg, { locale: GB, now, timeZone: AMS }), exactly("23 Oct, 16:48 CEST"));
   // Where the chain hasn't said, no time at all.
   const unread = transferView({ hash: L2_HASH, sourceAt: sentAt, stage: "waiting_for_output", status: "pending" }, { cfg, now, route: withdrawal, locale: GB, timeZone: AMS });
   assert.deepEqual(unread.steps.slice(1).map(({ detail }) => detail), ["", ""]);
@@ -134,15 +133,15 @@ test("a withdrawal shows its three steps, their times and the next action", () =
   // Whom it pays where that's another account: the list and the review say the same, naming it.
   const paying = (destination, account) =>
     transferView({ destination, hash: L2_HASH, provenByOther: true, sourceAt: sentAt, stage: "ready_to_prove", status: "pending" }, { account, cfg, route: withdrawal }).steps[1].detail;
-  assert.doesNotMatch(paying(ACCOUNT, ACCOUNT), /21n5nc…fMMLNz/u);
+  assert.doesNotMatch(paying(ACCOUNT, ACCOUNT), exactly("21n5nc…fMMLNz"));
   const stranger = `25z9o6${"x".repeat(40)}5Etftt`;
   // Proving and claiming it still pays that account: said plainly, by your .dusk name where you have one.
-  assert.match(paying(stranger, ACCOUNT), /25z9o6…5Etftt/u);
-  assert.match(paying(stranger, ""), /25z9o6…5Etftt/u);
+  assert.match(paying(stranger, ACCOUNT), exactly("25z9o6…5Etftt"));
+  assert.match(paying(stranger, ""), exactly("25z9o6…5Etftt"));
   const named = { amountLux: "1008000000000", destination: stranger, hash: L2_HASH, provenByOther: true, sourceAt: sentAt, stage: "ready_to_prove", status: "pending" };
   const namedView = transferView(named, { account: ACCOUNT, cfg, name: "alice.dusk", route: withdrawal });
-  assert.match(namedView.steps[1].detail, /25z9o6…5Etftt/u);
-  assert.match(namedView.steps[1].detail, /alice\.dusk/u);
+  assert.match(namedView.steps[1].detail, exactly("25z9o6…5Etftt"));
+  assert.match(namedView.steps[1].detail, exactly("alice.dusk"));
   assert.equal(transferSubline(namedView, named, withdrawal, cfg, { account: ACCOUNT, name: "alice.dusk" }), namedView.steps[1].detail);
   assert.deepEqual(amountsIn(namedView.title), ["1,008 DUSK"]);
 
@@ -154,7 +153,7 @@ test("a withdrawal shows its three steps, their times and the next action", () =
   // A prover counts only once a proof was sent from here, not as a guess.
   assert.equal(transferView({ ...proved, proveHash: undefined }, { cfg, route: withdrawal, submitter: `0x${"3d".repeat(20)}` }).action.blocked, "");
   const elsewhere = claimWith(`0x${"3d".repeat(20)}`);
-  assert.match(elsewhere.blocked, /21n5nc…fMMLNz/u);
+  assert.match(elsewhere.blocked, exactly("21n5nc…fMMLNz"));
   assert.ok(transferView({ ...proved, proofAccount: undefined }, { cfg, route: withdrawal, submitter: `0x${"3d".repeat(20)}` }).action.blocked);
   // The receipt and the list say so in place of the Claim button.
   const receipt = receiptPage({ ...receiptModel(proved, { cfg, route: withdrawal, submitter: `0x${"3d".repeat(20)}`, url: "https://bridge.example/#/transfer/x" }), canAct: true });
@@ -214,10 +213,10 @@ test("a waiting withdrawal counts down to its claim time, across a clock change"
     { at: waiting.countdown.atText, exact: waiting.countdown.exact, left: waiting.countdown.left },
     { at: "31 Oct, 13:38 CET", exact: true, left: "5 days 3 hours" },
   );
-  assert.match(waiting.tracker[2].label, /5 days 3 hours/u);
+  assert.match(waiting.tracker[2].label, exactly("5 days 3 hours"));
   const subline = transferSubline(waiting, { readyAt: (provenAt + 7 * 86_400_000) / 1_000, stage: "proven_waiting" }, withdrawal, cfg, { now, locale: GB, timeZone: AMS });
-  assert.match(subline, /31 Oct, 13:38/u);
-  assert.match(subline, /5 days 3 hours/u);
+  assert.match(subline, exactly("31 Oct, 13:38 CET"));
+  assert.match(subline, exactly("5 days 3 hours"));
   assert.equal(waiting.action, null);
 
   const rejected = transferView({ hash: L2_HASH, proofRejected: true, stage: "proven_waiting", status: "pending" }, { cfg, now, route: withdrawal });
@@ -231,12 +230,12 @@ test("a waiting withdrawal counts down to its claim time, across a clock change"
 test("what becomes public names the accounts themselves, not a label", () => {
   // By its .dusk name too, as the wallet's window says it.
   const named = privacyLine(deposit, cfg, { dusk: ACCOUNT, evm: EVM, name: "alice.dusk" });
-  for (const shown of [/alice\.dusk/u, /21n5nc…fMMLNz/u, /0x3E5B…a11d/u]) assert.match(named, shown);
+  for (const shown of ["alice.dusk", "21n5nc…fMMLNz", "0x3E5B…a11d"]) assert.match(named, exactly(shown));
   const plain = privacyLine(deposit, cfg, { dusk: ACCOUNT, evm: EVM });
-  for (const shown of [/21n5nc…fMMLNz/u, /0x3E5B…a11d/u]) assert.match(plain, shown);
+  for (const shown of ["21n5nc…fMMLNz", "0x3E5B…a11d"]) assert.match(plain, exactly(shown));
   // From the sending side to the paid one, on both networks.
   const back = privacyLine(migration, cfg, { dusk: ACCOUNT, evm: EVM });
-  for (const shown of [/0x3E5B…a11d/u, /21n5nc…fMMLNz/u]) assert.match(back, shown);
+  for (const shown of ["0x3E5B…a11d", "21n5nc…fMMLNz"]) assert.match(back, exactly(shown));
   assert.ok(privacyLine(service, cfg, {}));
 });
 
@@ -274,15 +273,15 @@ test("a withdrawal's card dates each step: sent, proved, and from when it can be
   );
   assert.equal(unread.tracker[2].when, "");
   assert.equal(unread.countdown, null);
-  assert.match(unread.steps[2].detail, /7 days/u);
+  assert.match(unread.steps[2].detail, exactly("7 days"));
   const waiting = transferView(
     { amountLux: "1008000000000", hash: L2_HASH, provenAt, readyAt: (provenAt + 7 * 86_400_000) / 1_000, sourceAt: sentAt, stage: "proven_waiting", status: "pending" },
     { cfg, now: provenAt + 60_000, route: withdrawal, locale: GB, timeZone: AMS, timing },
   );
   const whens = waiting.tracker.map(({ when }) => when);
   assert.deepEqual(whens.slice(0, 2), ["24 Sept", "25 Sept"]);
-  assert.match(whens[2], /2 Oct/u);
-  assert.match(waiting.tracker[2].label, /6 days 23 hours/u);
+  assert.match(whens[2], exactly("2 Oct"));
+  assert.match(waiting.tracker[2].label, exactly("6 days 23 hours"));
   // Claimed: its day; not sent yet: none.
   const claimedAt = Date.UTC(2026, 9, 2, 12, 0);
   const claimed = transferView({ claimAt: claimedAt, hash: L2_HASH, provenAt, sourceAt: sentAt, stage: "finalized", status: "completed" }, { cfg, route: withdrawal, locale: GB, timeZone: AMS });
@@ -303,15 +302,18 @@ test("after the proof, the claim date is the chain's: exact, about, or late at t
   assert.deepEqual(countdown({ readyAtExact: true }), [at, true, false]);
   assert.deepEqual(countdown({}), [at, false, false]);
   assert.deepEqual(countdown({ claimOverdue: true }), [at, false, true]);
-  for (const patch of [{ readyAtExact: true }, {}, { claimOverdue: true }]) assert.match(view(patch).countdown.line, /2 Nov, 04:20 CET/u);
-  assert.match(subline({ readyAtExact: true }), /5 days/u);
+  // Each at the same date, exactly; and the three said apart, an estimate never as a sure date.
+  const lines = [{ readyAtExact: true }, {}, { claimOverdue: true }].map((patch) => view(patch).countdown.line);
+  for (const line of lines) assert.match(line, exactly("2 Nov, 04:20 CET"));
+  assert.equal(new Set(lines).size, 3);
+  assert.match(subline({ readyAtExact: true }), exactly("5 days"));
   assert.equal(subline({ claimOverdue: true }), view({ claimOverdue: true }).countdown.line);
   // The receipt says it under the countdown, and its claim step doesn't repeat it.
   const model = receiptModel({ ...base }, { cfg, now, route: withdrawal, locale: GB, timeZone: AMS, timing, url: "https://bridge.example/#/transfer/x" });
   assert.equal(model.view.steps[2].detail, "");
   const html = receiptPage({ ...model, canAct: true });
-  assert.match(html, /5 days/u);
-  assert.match(html, /2 Nov 2026, 04:20 CET/u);
+  assert.match(html, exactly("5 days"));
+  assert.match(html, exactly("2 Nov 2026, 04:20 CET"));
 });
 
 test("a late claim says only the wait and its soonest date: no countdown, nothing for a calendar", () => {
@@ -321,13 +323,13 @@ test("a late claim says only the wait and its soonest date: no countdown, nothin
   const entry = { amountLux: "1000000000", claimOverdue: true, hash: L2_HASH, provenAt, readyAt: Date.UTC(2026, 10, 2, 3, 20, 39) / 1_000, sourceAt: provenAt - 86_400_000, stage: "proven_waiting", status: "pending" };
   const model = receiptModel(entry, { cfg, now, route: withdrawal, locale: GB, timeZone: AMS, timing, url: "https://bridge.example/#/transfer/x" });
   const html = receiptPage({ ...model, canAct: true });
-  assert.match(html, /2 Nov 2026, 04:20 CET/u);
-  assert.doesNotMatch(html, /\b5 days\b/u);
+  assert.match(html, exactly("2 Nov 2026, 04:20 CET"));
+  assert.doesNotMatch(html, exactly("5 days"));
   assert.doesNotMatch(html, /data-action="calendar"/u);
   // In My transfers, its claim step counts down to nothing either.
   const view = transferView(entry, { cfg, now, route: withdrawal, locale: GB, timeZone: AMS, timing });
   assert.doesNotMatch(view.tracker[2].label, /\d/u);
-  assert.match(view.tracker[2].when, /2 Nov/u);
+  assert.match(view.tracker[2].when, exactly("2 Nov"));
 });
 
 test("a proof or claim you rejected in your wallet is no failure: it says so, and offers the step again", () => {
@@ -353,8 +355,8 @@ test("a finished transfer out lists what arrived, as the receipt says it, not wh
   const withFee = { ...cfg, service: { ...cfg.service, feeLux: 1_000_000_000n } };
   const view = (entry) => transferView(entry, { cfg: withFee, route: service });
 
-  assert.match(view(sent).amountText, /^3\b/u);
-  assert.match(view({ ...sent, destinationAt: 1, status: "completed" }).amountText, /^2\b/u);
+  assert.equal(view(sent).amountText, "3 DUSK");
+  assert.equal(view({ ...sent, destinationAt: 1, status: "completed" }).amountText, "2 DUSK");
   // What it pays nothing for stays what was sent.
-  assert.match(view({ ...sent, amountLux: "1000000000", destinationAt: 1, status: "completed" }).amountText, /^1\b/u);
+  assert.equal(view({ ...sent, amountLux: "1000000000", destinationAt: 1, status: "completed" }).amountText, "1 DUSK");
 });

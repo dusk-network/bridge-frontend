@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { aboutFee, formatDusk, formatFee, formatLux, formatMaxFee, formatTypicalFee } from "./format.js";
+import { amountsIn } from "./pages.fixtures.js";
 
 test("amounts group their digits and keep every Lux", () => {
   assert.equal(formatLux(1_483_920_000_000n), "1,483.92");
@@ -16,9 +17,9 @@ test("fees keep two significant digits and never understate a maximum", () => {
   assert.equal(formatFee(2_209_505n), "0.0022");
   assert.equal(formatFee(2_209_505n, 9, { round: "up" }), "0.0023");
   assert.equal(formatFee(55_200_000_000_000n, 18), "0.000055");
-  assert.match(aboutFee(55_200_000_000_000n, 18, "ETH"), /(?<![\d.])0\.000055 ETH$/u);
-  // Sepolia gas can cost next to nothing: no string of zeros.
-  assert.match(aboutFee(15_000_000n, 18, "ETH"), /(?<![\d.])0\.000001 ETH$/u);
+  assert.deepEqual(amountsIn(aboutFee(55_200_000_000_000n, 18, "ETH")), ["0.000055 ETH"]);
+  // Sepolia gas can cost next to nothing: less than its smallest step, never a string of zeros.
+  assert.deepEqual(amountsIn(aboutFee(15_000_000n, 18, "ETH")), ["<0.000001 ETH"]);
 });
 
 test("Dusk fees are rounded up where they're the most a step costs, to the nearest as they usually are, and exact once paid", () => {

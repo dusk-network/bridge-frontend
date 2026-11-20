@@ -7,6 +7,7 @@ import { loadConfig } from "./config.js";
 import { duskRecipientHash } from "./hyperlane.js";
 import { NOTHING_TO_CLAIM } from "./hyperlane-requests.js";
 import { claimKey, evmReviewParts, heldFor, recheckClaim } from "./hyperlane-review.js";
+import { amountsIn, byLabel, exactly, textOf } from "./pages.fixtures.js";
 
 globalThis.__DUSK_BRIDGE_CONFIG__ = { VITE_BRIDGE_PROFILE: "testnet" };
 const cfg = loadConfig();
@@ -28,7 +29,7 @@ test("a transfer back to Dusk is reviewed at one delivery fee: its rows, its che
   const coins = parts.checks.find((check) => /\bETH\b/u.test(check.html));
   assert.equal(coins.ok, false);
   assert.match(coins.html, /0\.0005/u);
-  assert.ok(parts.lines.some((line) => line.value === "0.0005 ETH"));
+  assert.equal(byLabel(parts.lines).Value.value, "0.0005 ETH");
   assert.equal(parts.deliveryFee, 500_000_000_000_000n);
 });
 
@@ -40,8 +41,12 @@ test("the first transfer's claim is said for the account the review pays, as rea
   assert.equal(first.firstToAccount, true);
   const paid = evmReviewParts(route, { amountLux: 10_000_000n, cfg, destination: OTHER, duskAccount: ACCOUNT, evm: { account: EVM }, fee: 1n, reads: { ...reads, hyperlane: { ...reads.hyperlane, registered: false } }, registered: true });
   assert.equal(paid.firstToAccount, false);
-  // Said where it's the first: a check of its own, and what the transfer does says it.
-  assert.equal(first.checks.length, paid.checks.length + 1);
+  // Said where it's the first: a check of its own, for this token, with the claim's fee; and what the transfer does says it.
+  const known = new Set(paid.checks.map((check) => check.html));
+  const claim = first.checks.filter((check) => !known.has(check.html));
+  assert.equal(claim.length, 1);
+  assert.match(textOf(claim[0].html), exactly("EURd"));
+  assert.deepEqual(amountsIn(claim[0].html), ["0.003 DUSK"]);
   assert.notEqual(first.what, paid.what);
 });
 

@@ -5,6 +5,7 @@ import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 import { actionLead, receiptModel, reviewChecks, routeLine, transfersModel } from "./page-models.js";
 import { buildQuote } from "./quote.js";
+import { DURATION, exactly } from "./pages.fixtures.js";
 import { arrivalDue, measuredSeconds, routeTime, routeTimeText } from "./route-times.js";
 import { transferView } from "./transfer-view.js";
 
@@ -26,8 +27,6 @@ const mainnet = profile("mainnet");
 const routes = (cfg) => buildRoutes(cfg);
 const byId = (cfg, id) => routes(cfg).find((route) => route.id === id);
 const text = (cfg, id, timing) => routeTimeText(routeTime(byId(cfg, id), cfg, timing));
-// A time a route takes, however it's worded around it.
-const DURATION = /\b\d+ (?:s|min|minutes?|hours?|days?)\b/u;
 // What DuskEVM testnet's chains said on 27 Oct 2026.
 const CHAIN = Object.freeze({
   deposit: { lagSeconds: 35 },
@@ -76,7 +75,7 @@ test("a withdrawal keeps its waits before there are two games to time outputs by
   assert.equal(text(testnet, "dusk-evm-to-dusk", early), "~7 days");
   // The quote still says the days to wait, and leaves out only when proving can start.
   const when = buildQuote(withdrawal, "10", { balance: null, cfg: testnet, gasPrice: 1n, timing: early }).rows.find((row) => row.key === "when");
-  assert.match(when.value, /\b7 days\b/u);
+  assert.match(when.value, exactly("7 days"));
   assert.ok(!when.detail);
 });
 
@@ -136,22 +135,22 @@ test("every page says the same time for the same route", () => {
   ];
   for (const [cfg, id, timing, expected] of cases) {
     const shown = pages(cfg, byId(cfg, id), timing);
-    for (const [page, line] of Object.entries(shown)) assert.ok(line.includes(expected), `${id}, ${page}: ${line}`);
+    for (const [page, line] of Object.entries(shown)) assert.match(line, exactly(expected), `${id}, ${page}: ${line}`);
     assert.equal(shown.quote, expected, id);
   }
   // A withdrawal: the whole on the card and the receipt; the Portal's 7 days
   // from the proof to the claim in the quote, the claim step and the review.
   const withdrawal = pages(testnet, byId(testnet, "dusk-evm-to-dusk"), { chain: CHAIN });
-  for (const line of [withdrawal.card, withdrawal.receipt]) assert.ok(line.includes("~7 days"), line);
+  for (const line of [withdrawal.card, withdrawal.receipt]) assert.match(line, exactly("~7 days"), line);
   const route = byId(testnet, "dusk-evm-to-dusk");
   // Sent now, it says when that is: proved about an output later, 7 days after.
   const when = buildQuote(route, "10", { balance: null, cfg: testnet, gasPrice: 1n, locale: "en-GB", timeZone: "UTC", timing: { chain: CHAIN, now } }).rows.find((row) => row.key === "when");
-  assert.match(when.value, /\b3 Nov, 09:28 UTC\b/u);
-  assert.match(when.detail, /\b7 days\b/u);
-  assert.match(when.detail, /\b30 minutes\b/u);
+  assert.match(when.value, exactly("3 Nov, 09:28 UTC"));
+  assert.match(when.detail, exactly("7 days"));
+  assert.match(when.detail, exactly("30 minutes"));
   const view = transferView({ hash: "0x01", stage: "ready_to_prove", status: "pending" }, { cfg: testnet, route, timing: { chain: CHAIN } });
-  assert.match(view.steps[2].detail, /\b7 days\b/u);
-  assert.match(actionLead("prove", {}, { maturity: view.time.maturity, maxLux: 1n }).line, /\b7 days\b/u);
+  assert.match(view.steps[2].detail, exactly("7 days"));
+  assert.match(actionLead("prove", {}, { maturity: view.time.maturity, maxLux: 1n }).line, exactly("7 days"));
   // Unknown on this network: no time anywhere, the review's checks included.
   const unknown = pages(testnet, byId(testnet, "dusk-to-ethereum"), {});
   assert.deepEqual([unknown.quote, unknown.receipt], ["", ""]);
