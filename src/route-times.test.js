@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
-import { actionLead, receiptModel, reviewChecks, routeLine, transfersModel } from "./page-models.js";
+import { actionLead, receiptModel, reviewChecks, routeLines, transfersModel } from "./page-models.js";
 import { buildQuote } from "./quote.js";
 import { arrivalDue, measuredSeconds, routeTime, routeTimeText } from "./route-times.js";
 import { transferView } from "./transfer-view.js";
@@ -74,7 +74,7 @@ test("a withdrawal keeps its waits before there are two games to time outputs by
   assert.equal(text(testnet, "dusk-evm-to-dusk", early), "~7 days");
   // The quote still says the days to wait, and leaves out only when proving can start.
   const when = buildQuote(withdrawal, "10", { balance: null, cfg: testnet, gasPrice: 1n, timing: early }).rows.find((row) => row.key === "when");
-  assert.deepEqual([when.value, when.detail], ["Claim 7 days after you prove.", ""]);
+  assert.deepEqual([when.value, when.detail], ["Claim 7 days after you prove.", undefined]);
 });
 
 test("this browser's own recent transfers measure a route the chain says nothing about", () => {
@@ -117,8 +117,8 @@ test("every page says the same time for the same route", () => {
     const entry = { amountLux: "10000000000", hash: "ab".repeat(32), id: "x", parties: ["me"], routeId: route.id, sourceAt: now - 60_000, stage: "waiting_for_output", status: "pending" };
     const routeOf = (id) => routes(cfg).find((item) => item.id === id);
     return {
-      // The card's route row, which its network lists show too.
-      card: routeLine(route, cfg, { timing }),
+      // The card's route line; its network lists show the time alone.
+      card: routeLines(route, cfg, { timing })[0],
       // The quote's row, in the card's details and the review's fee rows.
       quote: quote.rows.find((row) => row.key === "arrives")?.value ?? "",
       receipt: receiptModel(entry, { cfg, now, route, timing, url }).caption,
@@ -135,23 +135,25 @@ test("every page says the same time for the same route", () => {
     const shown = pages(cfg, byId(cfg, id), timing);
     assert.match(shown.card, new RegExp(`^${expected} · `, "u"), id);
     assert.equal(shown.quote, expected, id);
-    assert.equal(shown.receipt, `Takes ${expected}`, id);
-    assert.match(shown.activity, new RegExp(` · takes ${expected}$`, "u"), id);
+    assert.equal(shown.receipt, expected, id);
+    assert.match(shown.activity, new RegExp(` · ${expected}$`, "u"), id);
   }
-  // A withdrawal: the whole on the card and the receipt; the Portal's 7 days
-  // from the proof to the claim in the quote, the claim step and the review.
+  // A withdrawal: the whole on the card and the receipt, with the Portal's 7
+  // days from the proof to the claim on the card; the date in the quote and
+  // the wait in the review.
   const withdrawal = pages(testnet, byId(testnet, "dusk-evm-to-dusk"), { chain: CHAIN });
-  assert.deepEqual([withdrawal.card.split(" · ")[0], withdrawal.receipt], ["~7 days", "Takes ~7 days"]);
+  assert.deepEqual([withdrawal.card, withdrawal.receipt], ["~7 days: send, prove after ~30 min, claim 7 days later", "~7 days"]);
   const route = byId(testnet, "dusk-evm-to-dusk");
   // Sent now, it says when that is: proved about an output later, 7 days after.
   const when = buildQuote(route, "10", { balance: null, cfg: testnet, gasPrice: 1n, locale: "en-GB", timeZone: "UTC", timing: { chain: CHAIN, now } }).rows.find((row) => row.key === "when");
-  assert.deepEqual([when.value, when.detail], ["Claim from about 3 Nov, 09:28 UTC", "Claim 7 days after you prove. You can prove about 30 minutes after sending."]);
+  assert.deepEqual([when.value, when.detail], ["Claim from about 3 Nov, 09:28 UTC", undefined]);
   const view = transferView({ hash: "0x01", stage: "ready_to_prove", status: "pending" }, { cfg: testnet, route, timing: { chain: CHAIN } });
-  assert.equal(view.steps[2].detail, "7 days after you prove");
-  assert.equal(actionLead("prove", {}, { maturity: view.time.maturity, maxLux: 1n }).line, "No DUSK moves now. Claim 7 days after you prove.");
+  // The receipt's claim step leaves it to the card and the review.
+  assert.equal(view.steps[2].detail, "");
+  assert.equal(actionLead("prove", {}, { maturity: view.time.maturity, maxLux: 1n }).rows.find((row) => row.key === "when").value, "Claim 7 days after you prove.");
   // Unknown on this network: no time anywhere, and no Arrives line in the review.
   const unknown = pages(testnet, byId(testnet, "dusk-to-ethereum"), {});
-  assert.deepEqual(unknown, { activity: "Sent Today, 08:59 UTC", card: "1 DUSK bridge fee", quote: "", receipt: "" });
+  assert.deepEqual(unknown, { activity: "Today, 08:59 UTC", card: "Bridge fee 1 DUSK, from the amount", quote: "", receipt: "" });
   const checks = reviewChecks(byId(testnet, "dusk-to-ethereum"), { cfg: testnet, destination: "0x1", duskAccount: "a", evm: {}, quote: buildQuote(byId(testnet, "dusk-to-ethereum"), "10", { cfg: testnet }), reads: {} });
   assert.ok(checks.every((check) => !/arrive|usually|within/iu.test(check.html)));
 });

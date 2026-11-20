@@ -45,15 +45,15 @@ test("the card pairs only the bridge's routes, in both directions where both exi
   assert.equal(flip(main, "bsc", "dusk").id, routeBetween(main, "dusk", "bsc").id);
 });
 
-test("a network without a route from the chosen one is offered disabled, saying why", () => {
+test("a network without a route from the chosen one is offered disabled, saying why, and the one it comes from without words", () => {
   const routes = buildRoutes(testnet);
   const name = (id) => networkName(testnet, id);
   assert.deepEqual(
     toChoices(routes, "dusk-evm", "dusk", name).map(({ disabled = "", id, selected = false }) => [id, disabled, selected]),
     [
-      ["ethereum", "No route from DuskEVM", false],
+      ["ethereum", "No route", false],
       ["dusk", "", true],
-      ["dusk-evm", "It's where it comes from", false],
+      ["dusk-evm", true, false],
     ],
   );
   assert.ok(fromChoices(buildRoutes(running), "dusk", name).every((choice) => !choice.disabled));
@@ -74,13 +74,15 @@ test("the card opens on Dusk to DuskEVM with Dusk Wallet, and on Ethereum to Dus
   assert.equal(pairs([defaultPair(buildRoutes(mainnet), { dusk: true })])[0], "dusk>bsc");
 });
 
-test("the button says what's missing, then Review bridge", () => {
+test("the button says what's missing, then Review and what's sent", () => {
   const routes = buildRoutes(running);
   const deposit = routeBetween(routes, "dusk", "dusk-evm");
   const migration = routeBetween(routes, "ethereum", "dusk");
   const ready = { amountLux: 25_000_000_000n, destination: "0x1", duskInstalled: true, route: deposit, signerConnected: true };
   const label = (patch) => primaryButton({ ...ready, ...patch }).label;
   assert.equal(label({ signerConnected: false }), "Connect Dusk Wallet");
+  // Connected before and locked since, as the header says it.
+  assert.equal(label({ duskLocked: true, signerConnected: false }), "Unlock Dusk Wallet");
   assert.equal(label({ duskInstalled: false, signerConnected: false }), "Get Dusk Wallet");
   assert.equal(label({ duskInstalled: false, phoneOnly: true, signerConnected: false }), "Send from a computer");
   assert.equal(label({ route: migration, signerConnected: false }), "Connect EVM wallet");
@@ -88,9 +90,9 @@ test("the button says what's missing, then Review bridge", () => {
   assert.equal(label({ amountError: "Use a point for decimals, like 0.5.", amountLux: null }), "Enter a valid amount");
   assert.equal(label({ amountError: "That's more than you have", insufficient: true }), "Not enough DUSK");
   assert.equal(label({ insufficient: true, route: migration, unit: "ERC20 DUSK" }), "Not enough ERC20 DUSK");
-  assert.equal(label({ amountError: "Send more than the 1 DUSK bridge fee." }), "Check the amount");
+  assert.equal(label({ amountError: "Send more than the 1 DUSK fee" }), "Check the amount");
   assert.equal(label({ destination: "", looking: "alice.dusk" }), "Looking up alice.dusk…");
-  assert.equal(label({ destination: "", destinationError: "That isn't an EVM address" }), "Fix the recipient");
+  assert.equal(label({ destination: "", destinationError: "Not an EVM address (0x + 40 hex)" }), "Fix recipient");
   assert.equal(label({ destination: "" }), "Add a recipient");
   // A route's approval not read yet: nothing to review until it is, or a way to read it again.
   assert.deepEqual(primaryButton({ ...ready, waiting: "reading" }), { action: null, enabled: false, label: "Checking the approval…" });
@@ -101,7 +103,8 @@ test("the button says what's missing, then Review bridge", () => {
     enabled: true,
     label: "Connect EVM wallet",
   });
-  assert.deepEqual(primaryButton(ready), { action: "review", enabled: true, label: "Review bridge" });
+  assert.deepEqual(primaryButton({ ...ready, amountText: "25 DUSK" }), { action: "review", enabled: true, label: "Review 25 DUSK" });
+  assert.deepEqual(primaryButton(ready), { action: "review", enabled: true, label: "Review" });
   assert.equal(primaryButton({ ...ready, amountLux: null }).enabled, false);
 });
 
@@ -142,7 +145,7 @@ test("the testnet Sepolia routes are listed but not running, behind one switch",
   assert.deepEqual(routes.filter((route) => route.paused).map((route) => route.id), ["ethereum-to-dusk", "dusk-to-ethereum"]);
   const name = (id) => networkName(testnet, id);
   const why = notRunning(testnet);
-  assert.equal(why, "Not running on testnet right now");
+  assert.equal(why, "Paused on testnet");
   // In the card's lists, disabled, saying why.
   assert.deepEqual(fromChoices(routes, "dusk", name, why).find((choice) => choice.id === "ethereum"), { disabled: why, id: "ethereum" });
   assert.deepEqual(toChoices(routes, "dusk", "dusk-evm", name, why).find((choice) => choice.id === "ethereum"), { disabled: why, id: "ethereum" });
@@ -152,7 +155,7 @@ test("the testnet Sepolia routes are listed but not running, behind one switch",
   // A link to one opens it, and it sends nothing.
   const sepolia = cardRoute(parseLocation("#/move/migrate"), bridgeTasks(withoutHyperlane, routes), routes);
   assert.equal(sepolia.id, "ethereum-to-dusk");
-  assert.deepEqual(primaryButton({ amountLux: 1n, destination: "x", duskInstalled: true, route: sepolia, signerConnected: true }), { action: null, enabled: false, label: "Not running right now" });
+  assert.deepEqual(primaryButton({ amountLux: 1n, destination: "x", duskInstalled: true, paused: why, route: sepolia, signerConnected: true }), { action: null, enabled: false, label: "Paused on testnet" });
   // On its own page the network stays chosen, not disabled.
   assert.deepEqual(fromChoices(routes, "ethereum", name, why).find((choice) => choice.id === "ethereum"), { id: "ethereum", selected: true });
   // The flip, the pair a From picks, and a link to a route with a running
@@ -179,7 +182,7 @@ test("under the card, DUSK on Ethereum or BNB Smart Chain is one link from movin
   const line = entryLine(entryRoutes(routes, out).map((route) => ({ href: `#/move/${route.id}`, name: networkName(mainnet, route.from.id) })));
   assert.equal(
     line,
-    '<p class="entry">Have DUSK on <a href="#/move/ethereum-to-dusk" aria-label="Move DUSK from Ethereum to Dusk">Ethereum</a> or <a href="#/move/bsc-to-dusk" aria-label="Move DUSK from BNB Smart Chain to Dusk">BNB Smart Chain</a>? Move it to Dusk.</p>',
+    '<p class="entry">Migrate from <a href="#/move/ethereum-to-dusk" aria-label="Migrate DUSK from Ethereum to Dusk">Ethereum</a> <span aria-hidden="true">·</span> <a href="#/move/bsc-to-dusk" aria-label="Migrate DUSK from BNB Smart Chain to Dusk">BNB Smart Chain</a></p>',
   );
   assert.doesNotMatch(line, /\bold\b/iu);
   // Each link sets From: it opens that route.
@@ -229,10 +232,11 @@ test("Hyperlane's routes run Sepolia ↔ Dusk on testnet, one per token, beside 
 test("the card offers the tokens its pair moves, each by its route, and none for a pair of one", () => {
   const routes = buildRoutes(testnet);
   const choices = (route) => tokenChoices(routes, route).map(({ id, name, selected, symbol }) => [symbol, id, name, selected]);
+  // Each by what it is, where its symbol doesn't say it: DUSK says itself, and the badge says testnet.
   assert.deepEqual(choices(routeBetween(routes, "dusk", "ethereum", "hyperlane-eurd")), [
-    ["DUSK", "dusk-to-sepolia", "Dusk", false],
-    ["EURd", "dusk-to-sepolia-eurd", "Dusk Euro (testnet)", true],
-    ["USDd", "dusk-to-sepolia-usdd", "Dusk Dollar (testnet)", false],
+    ["DUSK", "dusk-to-sepolia", "", false],
+    ["EURd", "dusk-to-sepolia-eurd", "Euro", true],
+    ["USDd", "dusk-to-sepolia-usdd", "US dollar", false],
   ]);
   assert.deepEqual(choices(routeBetween(routes, "ethereum", "dusk")).map(([symbol, id]) => [symbol, id]), [
     ["DUSK", "sepolia-to-dusk"],

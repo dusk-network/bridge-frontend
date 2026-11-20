@@ -10,7 +10,6 @@ import {
   formatFee,
   formatLux,
   formatMaxFee,
-  formatTypicalFee,
   zoneOffsetMinutes,
 } from "./format.js";
 
@@ -29,9 +28,9 @@ test("fees keep two significant digits and never understate a maximum", () => {
   assert.equal(formatFee(2_209_505n), "0.0022");
   assert.equal(formatFee(2_209_505n, 9, { round: "up" }), "0.0023");
   assert.equal(formatFee(55_200_000_000_000n, 18), "0.000055");
-  assert.equal(aboutFee(55_200_000_000_000n, 18, "ETH"), "about 0.000055 ETH");
+  assert.equal(aboutFee(55_200_000_000_000n, 18, "ETH"), "~0.000055 ETH");
   // Sepolia gas can cost next to nothing: no string of zeros.
-  assert.equal(aboutFee(15_000_000n, 18, "ETH"), "less than 0.000001 ETH");
+  assert.equal(aboutFee(15_000_000n, 18, "ETH"), "<0.000001 ETH");
 });
 
 test("dates read as in every Dusk app: English words on the viewer's clock, with the zone", () => {
@@ -50,11 +49,10 @@ test("dates read as in every Dusk app: English words on the viewer's clock, with
   assert.equal(formatDateTime(claim, { ...gb, locale: "nl-NL", year: true }), "Sat 31 Oct 2026, 13:38 CET");
 });
 
-test("Dusk fees are rounded up where they're the most a step costs, to the nearest as they usually are, and exact once paid", () => {
+test("Dusk fees are rounded up where they're the most a step costs, and exact once paid", () => {
   assert.deepEqual([0n, 2_500_000n, 5_000_000n, 50_519_542n, 105_000_001n].map(formatMaxFee), ["0", "0.0025", "0.005", "0.0506", "0.1051"]);
   // Under 0.01 DUSK, two significant digits.
   assert.equal(formatMaxFee(49_999n), "0.00005");
-  assert.deepEqual([1_850_000n, 1_986_599n, 2_209_505n].map(formatTypicalFee), ["0.0019", "0.002", "0.0022"]);
 });
 
 test("seven days across the October clock change say so", () => {

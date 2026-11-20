@@ -351,10 +351,12 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 .recip { margin-top: 8px; color: var(--text-2); font-size: 13px; overflow-wrap: anywhere; }
 .recip b { color: var(--text); font-weight: 500; }
 .route { margin: 6px 2px 0; }
-.route > summary { display: flex; align-items: center; gap: 8px; padding: 10px 8px; color: var(--text-2); font-size: 13.5px; cursor: pointer; list-style: none; border-radius: 10px; }
+.route > summary, .route > .route-head { display: flex; align-items: center; gap: 8px; padding: 10px 8px; color: var(--text-2); font-size: 13.5px; cursor: pointer; list-style: none; border-radius: 10px; }
+/* A route line with nothing behind it doesn't open. */
+.route > .route-head { cursor: default; }
 .route > summary::-webkit-details-marker { display: none; }
 .route > summary:hover { color: var(--text); }
-.route > summary svg { width: 15px; height: 15px; flex: 0 0 auto; }
+.route > summary svg, .route > .route-head svg { width: 15px; height: 15px; flex: 0 0 auto; }
 /* Under the route, how it's doing: amber where it could make someone wait. */
 .route-sum { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .route-status.warn { color: var(--amber); }
@@ -433,6 +435,8 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 .flow .v { font-size: 26px; line-height: 1.2; }
 .flow .v .u { margin-left: 6px; color: var(--text-2); font-size: 15px; }
 .flow .w { display: flex; align-items: center; gap: 7px; margin-top: 4px; color: var(--text-2); font-size: 13px; }
+/* Whom it pays, in full: it wraps within its side. */
+.flow .w > span { min-width: 0; }
 .flow.lead { grid-template-columns: 1fr; }
 .flow .dn { color: var(--text-3); }
 .flow .dn svg { transform: rotate(180deg); }
@@ -495,6 +499,8 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 .rc-main { min-width: 0; display: flex; flex-direction: column; gap: 20px; }
 .rc-side { position: sticky; top: calc(var(--bar) + 24px); padding: 20px 22px 8px; border-radius: 16px; background: var(--surface); }
 .rc-side .gh { margin: 0 0 6px; color: var(--text); font-size: 17px; font-weight: 500; }
+.rc-side summary.gh { margin: 0; cursor: pointer; }
+.rc-side details[open] > summary.gh { margin-bottom: 6px; }
 .rc-side .kvs .kv { padding: 11px 0; }
 .rc-side .kvs .kv::before, .rc-side .kvs .kv + .kv::before { content: ""; position: absolute; top: 0; left: 0; right: 0; border-top: 1px solid var(--hair); }
 .rc-side .kvs .v { max-width: 72%; }

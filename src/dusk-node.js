@@ -29,7 +29,7 @@ export function parseJsonExact(text) {
 function normalizeHash(hash) {
   const value = String(hash ?? "").replace(/^0x/iu, "").toLowerCase();
   if (!/^[0-9a-f]{64}$/u.test(value))
-    throw new Error("Dusk transaction hash is invalid.");
+    throw new Error("Dusk transaction ID is invalid.");
   return value;
 }
 

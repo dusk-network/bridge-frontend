@@ -67,7 +67,7 @@ test("routes and tasks use the same names everywhere", () => {
   assert.deepEqual([...labels].sort(), ["Dusk", "DuskEVM", "Sepolia"]);
   assert.deepEqual(
     routes.map((route) => routeTitle(cfg, route)),
-    ["Sepolia to Dusk", "Dusk to Sepolia", "Dusk to DuskEVM", "DuskEVM to Dusk", ...Array(3).fill(["Dusk to Sepolia", "Sepolia to Dusk"]).flat()],
+    ["Sepolia → Dusk", "Dusk → Sepolia", "Dusk → DuskEVM", "DuskEVM → Dusk", ...Array(3).fill(["Dusk → Sepolia", "Sepolia → Dusk"]).flat()],
   );
   assert.equal(networkName(profile("mainnet"), "dusk-evm"), "DuskEVM");
 });

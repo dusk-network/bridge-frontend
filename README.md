@@ -195,7 +195,7 @@ that fails pays its whole gas limit:
 - **Links**: the Dusk testnet explorer and sepolia.etherscan.io. Hyperlane's
   own explorer doesn't index Dusk.
 
-A transfer is looked up by its hash on either side. My transfers lists those
+A transfer is looked up by its hash on either side. Activity lists those
 sent or looked up here; it doesn't read Hyperlane transfers from the
 networks yet.
 
@@ -204,35 +204,37 @@ networks yet.
 - **Start**: the bridge card, with each route's time and cost, and on a phone
   without Dusk Wallet whether it works there. Under it, for DUSK on Ethereum or
   BNB Smart Chain, a link per chain that opens its route to Dusk.
-- **A task**: the amount, where it goes, and the quote: what you send, the
-  network fee as a maximum and its usual cost, the bridge fee, what you
-  receive and when. One line says what becomes public. With the EVM wallet on
-  another chain than the route sends from, as the wallet itself says, the
-  button offers to switch it, here and on the review. Nothing goes out from
-  another chain. Under the route, how it's doing, read once as its card opens
-  and kept 10 minutes (`bridgeStatus`): "Paying out. Last payout 12 minutes
-  ago.", what it can pay where a balance limits that, and that it doesn't know
-  where it can't read that. It's only said: nothing waits for it, and nothing
-  it says stops anyone from sending. On the way into Dusk, what the migration
-  contract may still take from the EVM wallet, read on the chain and kept
-  nowhere, shows above the form as an open approval, with Finish, the review
-  of what it still lets go, and Revoke, an approval of 0 reviewed as any
-  request is. Where it covers the amount, the route under the form says one
-  wallet step. Where a pair moves more than one token, as Hyperlane's do,
-  the token is chosen beside the amount; what Hyperlane's routes hold in
+- **A task**: the amount, where it goes, and under the card one line with the
+  route's time and its fees, summed where they're paid in one coin (the most
+  a Dusk fee can be, an EVM chain's as estimated); the split is behind the
+  line, as is a withdrawal's claim date. With the EVM wallet on another chain
+  than the route sends from, as the wallet itself says, the button offers to
+  switch it, here and on the review. Nothing goes out from another chain.
+  Under the route, how it's doing, read once as its card opens and kept 10
+  minutes (`bridgeStatus`), where it could make someone wait: "Payouts late:
+  last 3 hours ago", or "Can pay 120 DUSK now: yours may wait" where a
+  balance can't pay what's sent. It's only said: nothing waits for it, and
+  nothing it says stops anyone from sending. On the way into Dusk, what the
+  migration contract may still take from the EVM wallet, read on the chain
+  and kept nowhere, shows above the form as an open approval, with Finish,
+  the review of what it still lets go, and Revoke, an approval of 0 reviewed
+  as any request is. Where a pair moves more than one token, as Hyperlane's
+  do, the token is chosen beside the amount; what Hyperlane's routes hold in
   escrow for the account shows above the form, with Claim.
-- **Review**: what moves and what becomes public, the checked facts
-  (balances, gas, where the payout goes, and the earlier approval that covers
-  the amount where Approve is skipped, with what stays approved), then each
-  wallet step with the lines its window will show, in its order and words,
-  raw values decoded next to them and every recipient in full. An approval
-  that replaces an open one says so. Cancel and confirm are equal; a
-  request you reject in the wallet is said in grey, not as a failure. A
-  Dusk call is built before the review, so the call data's sha256 shown is
-  the one Dusk Wallet prints (older versions show a bridge call only as its
-  bytes), and the reviewed request is what is sent.
-- **Receipt**, at `#/transfer/<hash>`: the steps with times, explorer links
-  and hashes, both transactions in full, the receipt link, and its amounts as
+- **Review**: what moves, whom it pays, in full, and in one line what
+  becomes public; then what could cost money, said once (another account
+  paid, a first transfer held until claimed, an earlier approval that covers
+  the amount and what stays approved, one an approval replaces), the fees
+  and the time, and the steps where there are two. A check (balances, gas)
+  is said only where it fails, as what keeps Confirm off. What the wallet's
+  window shows, its contract, spender, method and raw units, is the window's
+  own, and not repeated. Cancel and confirm are equal; a request you reject
+  in the wallet is said in grey, not as a failure. A Dusk call is built
+  before Confirm can be pressed, and the reviewed request is what is sent.
+- **Receipt**, at `#/transfer/<hash>`: what moved and whom it paid, in full,
+  the steps with times, explorer links and transaction IDs, what its fees
+  came to, the receipt link to copy, and, under Details, both transactions,
+  short and in full on copy, and its amounts as
   every Dusk app says them (`transferLedger`): what you sent, the bridge fee,
   the network fee and what you received, to the Lux, and gas as wallets write
   it. A migration's gas counts the approval it spent, whichever app signed
@@ -243,7 +245,7 @@ networks yet.
   old. One cancelled in the wallet counts the approval sent for it, until a
   migration this browser knows of spends that approval and counts it
   instead. It shows no balances: the link is safe to share. While a transfer
-  is on its way, "Tell me when it arrives" asks the browser for a notification, only
+  is on its way, "Notify me" asks the browser for a notification, only
   then, and it stays chosen on this device. Whoever isn't looking at the page
   when one ends gets that, and the tab's title says so until they're back; where
   notifications are refused or a page can't send them, as on most phones, it's
@@ -260,14 +262,14 @@ networks yet.
   the request is offered it; one that added DUSK isn't offered it again for
   that address and chain in this browser, and a refusal says nothing. Once
   it's added, "DUSK added to MetaMask." takes the offer's place for the visit.
-- **My transfers**: the connected accounts' transfers, read from the networks
+- **Activity**: the connected accounts' transfers, read from the networks
   (below), plus any sent or looked up on this device, each with whom it pays
-  and its transaction's short hash. A withdrawal under way that pays another
+  and its transaction's short ID. A withdrawal under way that pays another
   Dusk account is listed apart, under Sent to someone else, with a quiet
   Prove, until your account proves it. "Look up a transfer" finds a
-  transfer's route from its hash alone.
-- **Contracts**: every address and contract ID each route uses, in full,
-  with copy buttons and explorer links.
+  transfer's route from its transaction ID alone.
+- **About**: every address and contract ID each route uses, short, in full
+  on hover and on copy, with explorer links; what each does, behind Details.
 
 A link can open the card on a route: `#/move/<route>`, by its ID
 (`bsc-to-dusk`), by one of the three routes (`bsc`, `ethereum`, `duskevm`), or
@@ -276,7 +278,7 @@ route into Dusk, `?to=<account>` hands over the Dusk account it pays, as the
 web wallet's Migrate can: the card shows "Paying <account>" until it's
 changed.
 
-## My transfers
+## Activity
 
 The list is the same on any device: it comes from the networks, a bounded
 number of requests per visit, and what was read is kept per network and
@@ -349,9 +351,9 @@ times are the contracts' own: testnet's deployed contracts count Dusk block
 height × 10, which the latest block converts to a date; the others count block
 time, a second later for their strict comparisons.
 
-- Before the proof: "Claim 7 days after you prove. You can prove about 30
-  minutes after sending.", with the chain's figures. Before sending, the
-  review dates it too: "Claim from about 5 Nov, 12:28 CET".
+- Before the proof: "~7 days: send, prove after ~30 min, claim 7 days
+  later" under the card, with the chain's figures. Before sending, the
+  review dates it: "Claim from about 5 Nov, 12:28 CET".
 - After it: "Claim from 2 Nov, 04:20 CET" once the game has resolved, and
   "Claim from about …", the earliest it can be, before that. A game left
   unresolved more than an hour past its clock is late: "Waiting for DuskEVM
@@ -407,9 +409,9 @@ Hyperlane transfer takes 5M (it spends 2.13M to 2.22M), an approval 3M
 80M, its key decoded on chain (about 59M), each refused where it's past
 `VITE_GAS_LIMIT_UPPER`. Transfers
 to the bridge account carry the wallet's public-transfer limit, 2.5M, at the
-node's price. The quote shows each limit as "up to" and the measured usual
-cost next to it. The node's price is the one the page last read: the quote,
-the review and the request all use it, so each step shows one fee.
+node's price. The quote shows each limit as "up to", as Dusk Wallet does.
+The node's price is the one the page last read: the quote, the review and
+the request all use it, so each step shows one fee.
 
 ## Configuration
 
@@ -443,14 +445,15 @@ pauses any of their routes by ID (`dusk-to-sepolia-usdd`).
 
 The page writes times, IDs and fees as every Dusk app does
 (`@dusk-network/networks/format`): times in English words on the viewer's
-clock, with the zone ("Today, 14:05 CET", records in full: "Wed 28 Oct
-2026, 14:05 CET"); Dusk contract IDs without 0x and EVM addresses with their
-checksum, shortened as 6…6 for Dusk IDs, accounts and hashes and as 0x and
-4…4 for EVM addresses and transactions; the most a fee can be rounded up.
-Amounts go by `@dusk-network/app-core/amounts`, as most wallets write them: a
-row in My transfers and the form's balance line up to 4 decimals, rounded down,
-with every digit on hover; Max, the review and the receipt to the Lux, gas
-paid as a row writes it.
+clock, with the zone ("Today, 14:05 CET", "28 Oct, 14:05 CET", the year
+only where it isn't this one); Dusk contract IDs without 0x and EVM
+addresses with their checksum, shortened as 6…6 after any 0x
+("0x0d7f01…DE6ea5", "rz2gFT…3VGXyt"), and as 4…4 in Activity's rows; whom
+a transfer pays in full on its review and receipt; the most a fee can be
+rounded up. Amounts go by `@dusk-network/app-core/amounts`, as most wallets
+write them: a row in Activity and the form's balance line up to 4 decimals,
+EURd and USDd to the cent, rounded down, with every digit on hover; Max, the
+review and the receipt to the Lux, gas paid as a row writes it.
 
 The footer and About this page link the Terms of use and Privacy policy the
 network's file names, as the explorer does. A deployment can link its own

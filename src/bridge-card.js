@@ -37,10 +37,10 @@ export function routeBetween(routes, from, to, token = null) {
  * Each network as a From choice: those no route starts on are disabled, and
  * those whose routes are all paused say why (`paused`).
  */
-export function fromChoices(routes, current, nameOf, paused = "Not running right now") {
+export function fromChoices(routes, current, nameOf, paused = "Paused") {
   return cardNetworks(routes).map((id) => {
     const leaving = routes.filter((route) => route.from.id === id);
-    if (!leaving.length) return { disabled: `Nothing leaves ${nameOf(id)} through this bridge`, id };
+    if (!leaving.length) return { disabled: "No route", id };
     if (leaving.every((route) => route.paused) && id !== current) return { disabled: paused, id };
     return { id, selected: id === current };
   });
@@ -48,14 +48,15 @@ export function fromChoices(routes, current, nameOf, paused = "Not running right
 
 /**
  * Each network as a To choice from `from`: those no running route reaches are
- * disabled, with why. Each names the route that moves `token` there, where
- * one does.
+ * disabled, with why; the one it comes from, without words (`true`), as
+ * From shows it. Each names the route that moves `token` there, where one
+ * does.
  */
-export function toChoices(routes, from, current, nameOf, paused = "Not running right now", token = null) {
+export function toChoices(routes, from, current, nameOf, paused = "Paused", token = null) {
   return cardNetworks(routes).map((id) => {
-    if (id === from) return { disabled: "It's where it comes from", id };
+    if (id === from) return { disabled: true, id };
     const route = routeBetween(routes, from, id, token);
-    if (!route) return { disabled: `No route from ${nameOf(from)}`, id };
+    if (!route) return { disabled: "No route", id };
     if (route.paused && id !== current) return { disabled: paused, id };
     return { id, route, selected: id === current };
   });
@@ -75,6 +76,12 @@ export function choosePair(routes, { from, to, token = null }) {
 }
 
 /**
+ * What a token is, under its symbol in the token list, where the symbol
+ * doesn't say it. The network says which, test or real, and DUSK says itself.
+ */
+const TOKEN_WORDS = Object.freeze({ EURd: "Euro", USDd: "US dollar" });
+
+/**
  * The tokens the card's pair moves, each by its route, for the card's token
  * list: those that run, and the one the card is on, each once (`tokenOf`),
  * by what it sends. Two that send the same say what arrives. A pair that
@@ -89,7 +96,7 @@ export function tokenChoices(routes, route) {
   const sends = (each) => routeUnits(each).send;
   return chosen.map((each) => ({
     id: each.id,
-    name: each.token.name,
+    name: TOKEN_WORDS[sends(each)] ?? "",
     ...(chosen.filter((other) => sends(other) === sends(each)).length > 1 ? { note: `Arrives as ${routeUnits(each).receive}` } : {}),
     selected: each.id === route.id,
     symbol: sends(each),
@@ -155,20 +162,25 @@ export function flipRoute(routes, route) {
  * The card's one button, as the state stands: what it says, whether it can
  * be pressed, and what it does then ("review", "connect-dusk", "connect-evm",
  * "switch-chain", "read-again", or "get-dusk", a link to Dusk Wallet). A
- * paused route sends nothing. `switchTo` names the chain a route sends from,
- * where the wallet that signs it is on another, and `switching` says the
- * wallet was asked. `waiting` is a route's approval not read yet ("reading")
- * or that couldn't be read ("failed"): the steps aren't known.
+ * paused route sends nothing, and says so (`paused`). `switchTo` names the
+ * chain a route sends from, where the wallet that signs it is on another,
+ * and `switching` says the wallet was asked. `waiting` is a route's approval
+ * not read yet ("reading") or that couldn't be read ("failed"): the steps
+ * aren't known. Review names what's sent (`amountText`, "1 DUSK"); a
+ * locked Dusk Wallet (`duskLocked`) is unlocked, as the header says.
  */
 export function primaryButton({
   amountLux = null,
   amountError = "",
+  amountText = "",
   connectsRecipient = false,
   destination = "",
   destinationError = "",
   duskInstalled = false,
+  duskLocked = false,
   insufficient = false,
   looking = "",
+  paused = "Paused",
   phoneOnly = false,
   route,
   signerConnected = false,
@@ -177,10 +189,10 @@ export function primaryButton({
   unit = "DUSK",
   waiting = "",
 }) {
-  if (route.paused) return { action: null, enabled: false, label: "Not running right now" };
+  if (route.paused) return { action: null, enabled: false, label: paused };
   if (!signerConnected) {
     if (route.signer !== "dusk") return { action: "connect-evm", enabled: true, label: "Connect EVM wallet" };
-    if (duskInstalled) return { action: "connect-dusk", enabled: true, label: "Connect Dusk Wallet" };
+    if (duskInstalled) return { action: "connect-dusk", enabled: true, label: duskLocked ? "Unlock Dusk Wallet" : "Connect Dusk Wallet" };
     return phoneOnly
       ? { action: null, enabled: false, label: "Send from a computer" }
       : { action: "get-dusk", enabled: true, label: "Get Dusk Wallet" };
@@ -193,10 +205,10 @@ export function primaryButton({
   if (waiting === "reading") return { action: null, enabled: false, label: "Checking the approval…" };
   if (waiting === "failed") return { action: "read-again", enabled: true, label: "Couldn't read the approval. Try again" };
   if (looking) return { action: null, enabled: false, label: `Looking up ${looking}…` };
-  if (destinationError) return { action: null, enabled: false, label: "Fix the recipient" };
+  if (destinationError) return { action: null, enabled: false, label: "Fix recipient" };
   if (!destination)
     return connectsRecipient
       ? { action: "connect-evm", enabled: true, label: "Connect EVM wallet" }
       : { action: null, enabled: false, label: "Add a recipient" };
-  return { action: "review", enabled: true, label: "Review bridge" };
+  return { action: "review", enabled: true, label: amountText ? `Review ${amountText}` : "Review" };
 }

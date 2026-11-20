@@ -3,8 +3,7 @@
 // isn't indexed, or a network didn't answer), it's looked up again while the
 // receipt stays open; opening the receipt again always looks again.
 
-export const NOT_FOUND =
-  "No bridge transfer with this transaction hash was found on the networks this page knows. It may not be confirmed yet.";
+export const NOT_FOUND = "No bridge transfer with this ID yet";
 
 /**
  * @param {object} options

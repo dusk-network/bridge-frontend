@@ -17,10 +17,11 @@ import { networkName } from "./names.js";
 import { normalizeEvmAddress } from "./validation.js";
 import { NOT_A_DUSK_WITHDRAWAL, waitWords } from "./withdrawals.js";
 
+/** A transfer's state, as the bridge says it everywhere: In progress, Completed, Failed (and Held, transfer-view.js). */
 export const STATUS_WORDS = Object.freeze({
   completed: "Completed",
   failed: "Failed",
-  pending: "Pending",
+  pending: "In progress",
 });
 
 const WEI_PER_LUX = 1_000_000_000n;

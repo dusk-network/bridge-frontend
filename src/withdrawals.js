@@ -52,7 +52,7 @@ function notReadyWords(status) {
 
 const REFUSED = Object.freeze({
   "bad-call": "The request didn't match this withdrawal, so it wasn't sent.",
-  "bad-hash": "Enter a valid DuskEVM withdrawal transaction hash.",
+  "bad-hash": "Enter a valid DuskEVM withdrawal transaction ID.",
   claimed: "This withdrawal is already claimed.",
   failed: "Withdrawal transaction failed on DuskEVM.",
   gas: WITHDRAWAL_GAS_REFUSAL,

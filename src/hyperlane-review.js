@@ -4,22 +4,19 @@
 // asked for is what the review says. A claim: built again as it's sent, and
 // what it pays out.
 
-import { amountForUnits, formatUnitsGrouped } from "./format.js";
+import { amountForUnits } from "./format.js";
 import { duskRecipientHash } from "./hyperlane.js";
 import { approveRequest, claimRequest } from "./hyperlane-requests.js";
-import { gasCoin } from "./names.js";
 import { reviewChecks } from "./page-models.js";
 import { buildQuote } from "./quote.js";
-import { html, short } from "./transfer-view.js";
-import { transferRemoteLines } from "./wallet-lines.js";
 
 /**
  * A transfer back to Dusk's review at the delivery fee `fee` and the route's
  * word on whether it pays `destination` yet (`registered`), both read for
- * the review: its fee rows, its checks (the gas coin for the fees, the first
- * transfer's claim), what its step says, and its wallet lines, all at that
- * one fee. `reads` is the form's, for the rest: the token and gas coin held,
- * the gas price and the transfer's gas.
+ * the review: its fee rows and its checks (the gas coin for the fees, the
+ * first transfer's claim), all at that one fee, and whether its step can be
+ * sent (`ready`): once the fee is read. `reads` is the form's, for the rest:
+ * the token and gas coin held, the gas price and the transfer's gas.
  */
 export function evmReviewParts(route, { amountLux, cfg, destination, duskAccount, evm, fee, reads, registered, timing }) {
   const read = { ...(reads.hyperlane ?? {}), registered };
@@ -30,20 +27,13 @@ export function evmReviewParts(route, { amountLux, cfg, destination, duskAccount
     evm: { deliveryFeeWei: fee, gas: read.gas ?? null, gasCoinWei: state.gasCoinWei ?? null, priceWei: state.gasPriceWei ?? null },
     timing,
   });
-  const token = route.hyperlane;
-  const first = registered === false;
-  const amount = `${formatUnitsGrouped(amountLux, route.amountDecimals)} ${route.token.symbol}`;
   return {
     checks: reviewChecks(route, { cfg, destination, duskAccount, evm, quote, reads: { ...reads, hyperlane: read } }),
     deliveryFee: fee,
     feeRows: quote.rows.filter((row) => !["send", "receive"].includes(row.key)),
-    firstToAccount: first,
-    // What the wallet is asked for, once the fee is read.
-    lines:
-      fee === null || fee === undefined
-        ? null
-        : transferRemoteLines({ amount: amountLux, cfg, fee: quote.evmFeeWei ?? null, recipient: destination, recipientHash: duskRecipientHash(destination), token, value: fee }),
-    what: `Sends <b>${html(amount)}</b> to <code class="mono">${html(short(destination))}</code> on Dusk${first ? ", where it waits until that account claims it" : ""}. The bridge fee goes with it, in ${html(gasCoin(cfg, route.from.id))}.`,
+    firstToAccount: registered === false,
+    // What the wallet is asked for is known once the fee is read.
+    ready: fee !== null && fee !== undefined,
   };
 }
 
@@ -82,12 +72,11 @@ export async function recheckApproval(reviewed, deps) {
 
 /**
  * A review's step whose request is built again, as when its fee moved: no
- * request and no lines meanwhile, so it can't be confirmed until the new
- * ones are shown.
+ * request meanwhile, so it can't be confirmed until the new one is built.
  */
 export function rebuilding(review) {
   review.request = null;
-  review.steps[review.current] = { ...review.steps[review.current], lines: null, linesNote: "Reading the new fee…" };
+  review.steps[review.current] = { ...review.steps[review.current], ready: false, wait: "Reading the new fee…" };
   return review;
 }
 

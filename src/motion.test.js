@@ -60,14 +60,14 @@ test("a Copy button shows its icon or its words, and a check or Copied once it c
 test("a wait shows a turning ring beside its words from the first draw", () => {
   const ring = /<span class="waiting"><span class="spin" aria-hidden="true"><\/span><span>(.*?)<\/span><\/span>/u;
   // A receipt being found.
-  assert.equal(ring.exec(receiptPage({ loading: "Finding this transfer on the networks…" }))?.[1], "Finding this transfer on the networks…");
+  assert.equal(ring.exec(receiptPage({ loading: "Looking up this transfer…" }))?.[1], "Looking up this transfer…");
   // A wallet request being prepared, before Confirm.
   const sheet = reviewSheet({
-    canConfirm: false, cfgLinks: { explorer: () => "" }, checks: [], confirmLabel: "Send 2 DUSK", feeRows: [], privacy: "x",
+    canConfirm: false, checks: [], confirmLabel: "Send 2 DUSK", feeRows: [], privacy: "x",
     receive: { amount: "2", chain: "dusk-evm", unit: "DUSK", where: "DuskEVM" }, send: { amount: "2", chain: "dusk", unit: "DUSK", where: "Dusk" },
-    steps: [{ current: true, lines: null, linesNote: "Preparing the request…", title: "Send from Dusk", walletName: "Dusk Wallet" }], sub: "", walletCheckName: "Dusk Wallet",
+    steps: [{ current: true, ready: false, title: "Send from Dusk", wait: "Preparing…", walletName: "Dusk Wallet" }], sub: "",
   });
-  assert.equal(ring.exec(sheet)?.[1], "Preparing the request…");
+  assert.equal(ring.exec(sheet)?.[1], "Preparing…");
   // Activity reading the networks; its words alone once it's done.
   const activity = (syncing, syncText) => activityPanel({ empty: "Looking for transfers…", groups: {}, lede: "x", more: false, syncing, syncText });
   assert.equal(ring.exec(activity(true, "Reading the networks…"))?.[1], "Reading the networks…");

@@ -4,7 +4,7 @@ import test from "node:test";
 import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 import { duskRecipientHash } from "./hyperlane.js";
-import { receiptModel, routeSteps } from "./page-models.js";
+import { receiptModel, routeLines } from "./page-models.js";
 import { transferSubline, transferView } from "./transfer-view.js";
 
 globalThis.__DUSK_BRIDGE_CONFIG__ = { VITE_BRIDGE_PROFILE: "testnet" };
@@ -65,13 +65,13 @@ test("a transfer to Dusk links the Dusk transaction that delivered it, on its st
   assert.match(details(model)["Dusk transaction"].html, new RegExp(`id=${delivery}`, "u"));
   // Before it's found, said as it stands.
   assert.match(details(receipt({ ...entry, deliveryHash: undefined, status: "pending" }))["Dusk transaction"].html, /Delivered/u);
-  assert.match(details(receipt({ ...entry, delivered: false, deliveryHash: undefined, status: "pending" }))["Dusk transaction"].html, /Shows when it arrives/u);
+  assert.match(details(receipt({ ...entry, delivered: false, deliveryHash: undefined, status: "pending" }))["Dusk transaction"].html, /Not yet/u);
 });
 
-test("a transfer to Sepolia that arrived before its transaction was found says it was delivered, not that it shows when it arrives", () => {
+test("a transfer to Sepolia that arrived before its transaction was found says it was delivered, not that it hasn't yet", () => {
   const rows = details(receipt({ amountLux: "1000000", destination: EVM, hash: "1decfef01c5b9991253a54e7442c87a8999dd45976cf498f232fd455a9be6b37", id: "o", messageId: "0x" + "ab".repeat(32), routeId: "dusk-to-sepolia-eurd", sourceAt: NOW - 60_000, status: "completed" }));
   assert.match(rows["Sepolia transaction"].html, /Delivered/u);
-  assert.doesNotMatch(rows["Sepolia transaction"].html, /Shows when it arrives/u);
+  assert.doesNotMatch(rows["Sepolia transaction"].html, /Not yet/u);
 });
 
 test("a transfer held for its claim says it waits to be claimed, with Claim, not that it's pending or how long it takes", () => {
@@ -91,12 +91,14 @@ test("a transfer held for its claim says it waits to be claimed, with Claim, not
     status: "pending",
   };
   const model = receipt(held);
-  assert.deepEqual([model.view.statusWord, model.caption, model.view.action?.label], ["To claim", "Held on Dusk until it's claimed.", "Claim on Dusk"]);
+  // Why it's held is said once, at the step it waits on, next to its Claim.
+  assert.deepEqual([model.view.statusWord, model.caption, model.view.action?.label], ["Held", "", "Claim 1 DUSK"]);
+  assert.equal(model.view.steps.find((step) => step.key === "arrived").detail, "First transfer to this account: held until claimed");
   const sent = receipt({ ...held, pendingAction: "claim", pendingHash: "cd".repeat(32) });
-  assert.deepEqual([sent.view.statusWord, sent.caption], ["To claim", "Claim sent, waiting for Dusk."]);
-  // On its way, it's pending, and takes the route's time.
+  assert.deepEqual([sent.view.statusWord, sent.caption], ["Held", "Claim sent, waiting for Dusk"]);
+  // On its way, it's in progress, and takes the route's time.
   const way = receipt({ ...held, delivered: false, escrow: undefined, heldLux: undefined });
-  assert.deepEqual([way.view.statusWord, way.caption], ["Pending", "Takes ~1 min"]);
+  assert.deepEqual([way.view.statusWord, way.caption], ["In progress", "~1 min"]);
 });
 
 test("a claim that failed on Dusk says so and what it cost, on the receipt and in the list, not that it wasn't sent", () => {
@@ -119,10 +121,10 @@ test("a claim that failed on Dusk says so and what it cost, on the receipt and i
     status: "pending",
   };
   const model = receipt(held);
-  assert.deepEqual([model.view.action.failure, model.view.action.label], ["The claim failed on Dusk (Panic) and cost 0.003 DUSK.", "Claim on Dusk"]);
+  assert.deepEqual([model.view.action.failure, model.view.action.label], ["The claim failed on Dusk (Panic) and cost 0.003 DUSK.", "Claim 1 DUSK"]);
   const rows = details(model);
-  assert.equal(rows["Failed claim fee on Dusk"].value, "0.003 DUSK");
-  assert.match(rows["Failed claim on Dusk"].html, new RegExp(`id=${failedHash}`, "u"));
+  assert.equal(rows["Failed claim fee"].value, "0.003 DUSK");
+  assert.match(rows["Failed claim"].html, new RegExp(`id=${failedHash}`, "u"));
   const view = transferView(held, { cfg, locale: "en-GB", now: NOW, route: byId["sepolia-to-dusk"], timeZone: "Europe/Amsterdam" });
   assert.equal(transferSubline(view, held, byId["sepolia-to-dusk"], cfg, { locale: "en-GB", now: NOW, timeZone: "Europe/Amsterdam" }), "The claim failed on Dusk");
   // One the wallet didn't send stays that.
@@ -130,10 +132,10 @@ test("a claim that failed on Dusk says so and what it cost, on the receipt and i
   assert.equal(unsent.view.action.failure, "The claim wasn't sent. Try again.");
 });
 
-test("a route's steps aren't said before its approval is read", () => {
-  assert.equal(routeSteps(byId["dusk-to-sepolia-eurd"], { steps: null }), "In Dusk Wallet");
-  assert.equal(routeSteps(byId["dusk-to-sepolia-eurd"], { steps: 2 }), "Approve, then send, in Dusk Wallet");
-  assert.equal(routeSteps(byId["dusk-to-sepolia-eurd"], { steps: 1 }), "One, in Dusk Wallet");
+test("the card says a route's time and fees, never its steps: the review says those, once its approval is read", () => {
+  const eurd = byId["dusk-to-sepolia-eurd"];
+  assert.deepEqual(routeLines(eurd, cfg, { quote: { bridgeFeeLux: null, steps: null } }), ["~20 s · fees in DUSK"]);
+  assert.deepEqual(routeLines(eurd, cfg, { quote: { bridgeFeeLux: 16_876_000_000n, gasMaxLux: 8_000_000n, steps: 2 } }), ["~20 s · fees up to 16.884 DUSK"]);
 });
 
 test("a transfer back to Dusk whose gas isn't known yet says its check covers only the delivery fee, never that the gas is free", async () => {
@@ -144,6 +146,6 @@ test("a transfer back to Dusk whose gas isn't known yet says its check covers on
   const quote = buildQuote(route, "1", { balance: evm.balance, cfg, evm: { deliveryFeeWei: evm.deliveryFeeWei, gas: 250_000n, gasCoinWei: evm.gasCoinWei, priceWei: null } });
   const checks = reviewChecks(route, { cfg, destination: ACCOUNT, duskAccount: ACCOUNT, evm: { account: EVM }, quote, reads: { gasPrice: 1n, hyperlane: { evm, registered: true } } });
   const fees = checks.find((check) => /ETH/u.test(check.html) && /fee/u.test(check.html));
-  assert.match(fees.html, /for the delivery fee/u);
-  assert.match(fees.html, /the gas isn't known yet/u);
+  assert.match(fees.html, /^Not enough ETH for the bridge fee \(&lt;0\.000001 ETH\)/u);
+  assert.doesNotMatch(fees.html, /for the fees/u);
 });

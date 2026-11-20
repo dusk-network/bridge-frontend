@@ -10,23 +10,19 @@ const MINUTE = 60_000;
 const line = (status, options) => statusLine({ canPay: null, lastPayout: null, limit: "mints", readSince: null, ...status }, { now: NOW, ...options });
 const paid = (ago) => ({ amount: 5n, at: NOW - ago, block: 1, hash: "0xaa" });
 
-test("a route's status says plainly whether it's paying out, and when it last did", () => {
-  assert.deepEqual(line({ lastPayout: paid(12 * MINUTE), paying: "yes" }), { text: "Paying out. Last payout 12 minutes ago.", warn: false });
-  assert.equal(line({ lastPayout: paid(20_000), paying: "yes" }).text, "Paying out. Last payout less than a minute ago.");
-  assert.equal(line({ lastPayout: { ...paid(0), at: null }, paying: "yes" }).text, "Paying out.");
-  assert.deepEqual(line({ lastPayout: paid(185 * MINUTE), paying: "late" }), { text: "Payouts are running late. Last payout 3 hours 5 minutes ago.", warn: true });
-  assert.deepEqual(line({ paying: "late" }), { text: "Payouts are running late.", warn: true });
-  // Quiet is nobody having used it, not trouble.
-  assert.deepEqual(line({ lastPayout: paid(12 * 86_400_000), paying: "quiet" }), { text: "Last payout 12 days ago.", warn: false });
-  assert.deepEqual(line({ paying: "quiet", readSince: Date.UTC(2026, 9, 6, 12) }), { text: "No payouts since 6 Oct.", warn: false });
-  assert.deepEqual(line({ paying: "quiet" }), { text: "No recent payouts.", warn: false });
-  assert.deepEqual(line({ paying: "on-claim" }), { text: "It pays when you claim it.", warn: false });
+test("a route's status is said only where it could make someone wait: payouts running late", () => {
+  assert.deepEqual(line({ lastPayout: paid(185 * MINUTE), paying: "late" }), { text: "Payouts late: last 3 hours 5 minutes ago", warn: true });
+  assert.deepEqual(line({ paying: "late" }), { text: "Payouts late", warn: true });
+  // Paying as usual, quiet (nobody having used it, not trouble), or paying on its claim: nothing to say.
+  assert.equal(line({ lastPayout: paid(12 * MINUTE), paying: "yes" }), null);
+  assert.equal(line({ lastPayout: { ...paid(0), at: null }, paying: "yes" }), null);
+  assert.equal(line({ lastPayout: paid(12 * 86_400_000), paying: "quiet" }), null);
+  assert.equal(line({ paying: "quiet", readSince: Date.UTC(2026, 9, 6, 12) }), null);
+  assert.equal(line({ paying: "on-claim" }), null);
 });
 
-test("a status it can't read says it doesn't know, never that anything is wrong", () => {
-  const unknown = line({ paying: "unknown" });
-  assert.deepEqual(unknown, { text: "Last payout not known right now.", warn: false });
-  assert.doesNotMatch(unknown.text, /fail|error|problem|wrong|down|sorry/iu);
+test("a status it can't read says nothing, never that anything is wrong", () => {
+  assert.equal(line({ paying: "unknown" }), null);
 });
 
 test("a route that isn't running, or that nothing was read of yet, says nothing here", () => {
@@ -34,19 +30,17 @@ test("a route that isn't running, or that nothing was read of yet, says nothing 
   assert.equal(statusLine(null), null);
 });
 
-test("it says how much it can pay where a balance limits that, and warns only where what's sent is more", () => {
+test("it says how much it can pay only where what's sent is more, and warns", () => {
   const route = { canPay: 1_234_567_890_123n, lastPayout: paid(5 * MINUTE), limit: "balance", paying: "yes" };
-  assert.deepEqual(line(route), { text: "Paying out. Last payout 5 minutes ago. It can pay up to 1,234.5678 DUSK.", warn: false });
-  assert.equal(line(route, { amountLux: 1_234_567_890_123n }).warn, false);
-  assert.deepEqual(line(route, { amountLux: 1_234_567_890_124n }), {
-    text: "Paying out. Last payout 5 minutes ago. It can pay up to 1,234.5678 DUSK now, less than you're sending, so yours may wait.",
-    warn: true,
-  });
-  // What's paid is minted as it's paid: no balance says how much it can pay.
-  assert.equal(line({ ...route, canPay: null, limit: "mints" }).text, "Paying out. Last payout 5 minutes ago.");
-  assert.equal(line({ canPay: 5_000_000_000n, limit: "balance", paying: "on-claim" }).text, "It pays when you claim it. It can pay up to 5 DUSK.");
-  assert.equal(line({ canPay: 5_000_000_000n, limit: "balance", paying: "unknown" }).text, "Last payout not known right now. It can pay up to 5 DUSK.");
-  assert.equal(line({ canPay: 5_000_000_000n, limit: "balance", paying: "yes" }).text, "Paying out. It can pay up to 5 DUSK.");
+  assert.equal(line(route), null);
+  assert.equal(line(route, { amountLux: 1_234_567_890_123n }), null);
+  assert.deepEqual(line(route, { amountLux: 1_234_567_890_124n }), { text: "Can pay 1,234.5678 DUSK now: yours may wait", warn: true });
+  // Late too: both, in one line.
+  assert.equal(line({ ...route, paying: "late" }, { amountLux: 1_234_567_890_124n }).text, "Payouts late: last 5 minutes ago · Can pay 1,234.5678 DUSK now: yours may wait");
+  // What's paid is minted as it's paid: no balance limits what it can pay.
+  assert.equal(line({ ...route, canPay: null, limit: "mints" }, { amountLux: 1_234_567_890_124n }), null);
+  assert.equal(line({ canPay: 5_000_000_000n, limit: "balance", paying: "on-claim" }, { amountLux: 6_000_000_000n }).text, "Can pay 5 DUSK now: yours may wait");
+  assert.equal(line({ canPay: 5_000_000_000n, limit: "balance", paying: "unknown" }, { amountLux: 6_000_000_000n }).text, "Can pay 5 DUSK now: yours may wait");
 });
 
 test("a route is read once as its card opens, and again once what was read is old", async () => {
@@ -86,7 +80,8 @@ test("a read that fails outright reads as not knowing, and leaves the page as it
   const route = { id: "gone" };
   status.open(route);
   await new Promise(setImmediate);
-  assert.equal(statusLine(status.get(route)).text, "Last payout not known right now.");
+  assert.equal(status.get(route).paying, "unknown");
+  assert.equal(statusLine(status.get(route)), null);
 });
 
 test("what a route's read found is kept, so the page asks the chains again only once it's old", async () => {

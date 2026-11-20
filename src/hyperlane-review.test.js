@@ -18,7 +18,7 @@ const ACCOUNT = "xGX8tZ9zvamEVKM9vb8GeUQ3xihLd7fQP4w3RSZMD1R61YasXZsgRYRmjStAePv
 const OTHER = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
 const EVM = "0x8A51d0619286d937699D85c1a2c88D67A5a1B75d";
 
-test("a transfer back to Dusk is reviewed at one delivery fee: its rows, its check of the coin for the fees and its wallet lines", () => {
+test("a transfer back to Dusk is reviewed at one delivery fee: its rows and its check of the coin for the fees, ready once it's read", () => {
   const route = byId["sepolia-to-dusk-eurd"];
   // The form read 0.000132 ETH; the review reads 0.0005, and the wallet holds 0.0004.
   const reads = { gasPrice: 1n, hyperlane: { evm: { balance: 50_000_000n, deliveryFeeWei: 132_000_000_000_000n, gasCoinWei: 400_000_000_000_000n, gasPriceWei: 1n }, gas: 250_000n, registered: true } };
@@ -28,8 +28,10 @@ test("a transfer back to Dusk is reviewed at one delivery fee: its rows, its che
   const coins = parts.checks.find((check) => /for the fees/u.test(check.html));
   assert.equal(coins.ok, false);
   assert.match(coins.html, /0\.0005/u);
-  assert.equal(parts.lines.find((line) => line.label === "Value").value, "0.0005 ETH");
+  assert.equal(parts.ready, true);
   assert.equal(parts.deliveryFee, 500_000_000_000_000n);
+  // Until the fee is read, nothing can be sent.
+  assert.equal(evmReviewParts(route, { amountLux: 10_000_000n, cfg, destination: ACCOUNT, duskAccount: ACCOUNT, evm: { account: EVM }, fee: null, reads, registered: true }).ready, false);
 });
 
 test("the first transfer's claim is said for the account the review pays, as read for it, whatever the form read", () => {
@@ -38,12 +40,11 @@ test("the first transfer's claim is said for the account the review pays, as rea
   const reads = { gasPrice: 1n, hyperlane: { evm: { balance: 50_000_000n, gasCoinWei: 10n ** 18n, gasPriceWei: 1n }, gas: 250_000n, registered: true } };
   const first = evmReviewParts(route, { amountLux: 10_000_000n, cfg, destination: OTHER, duskAccount: ACCOUNT, evm: { account: EVM }, fee: 1n, reads, registered: false });
   assert.equal(first.firstToAccount, true);
-  assert.ok(first.checks.some((check) => /first EURd to this account/u.test(check.html)));
-  assert.match(first.what, /where it waits until that account claims it/u);
+  // Said always, as a line of its own: it's held until claimed.
+  assert.ok(first.checks.some((check) => check.note && check.ok && /^First EURd to this account: held until claimed/u.test(check.html)));
   const paid = evmReviewParts(route, { amountLux: 10_000_000n, cfg, destination: OTHER, duskAccount: ACCOUNT, evm: { account: EVM }, fee: 1n, reads: { ...reads, hyperlane: { ...reads.hyperlane, registered: false } }, registered: true });
   assert.equal(paid.firstToAccount, false);
-  assert.ok(!paid.checks.some((check) => /first EURd/u.test(check.html)));
-  assert.doesNotMatch(paid.what, /claims it/u);
+  assert.ok(!paid.checks.some((check) => /First EURd/u.test(check.html)));
 });
 
 test("a reviewed claim is built again as it's sent: unchanged it goes, another amount is reviewed again, nothing held isn't sent", async () => {
@@ -191,13 +192,13 @@ test("a step whose request is being built again can't be confirmed meanwhile", a
   const { createReviewSession } = await import("./review-session.js");
   let now = 0;
   const reviews = createReviewSession({ now: () => now });
-  const review = reviews.start({ current: 0, request: { fnName: "transfer_remote" }, steps: [{ confirmLabel: "Send", lines: [{ label: "Method" }] }] });
+  const review = reviews.start({ current: 0, request: { fnName: "transfer_remote" }, steps: [{ confirmLabel: "Send", ready: true }] });
   now += 1_000;
   assert.equal(reviews.confirmable, true);
   rebuilding(review);
-  assert.deepEqual([review.request, review.steps[0].lines, review.steps[0].linesNote, review.steps[0].confirmLabel], [null, null, "Reading the new fee…", "Send"]);
-  // Confirm takes no click, whatever the button shows, until the new request's lines are up.
+  assert.deepEqual([review.request, review.steps[0].ready, review.steps[0].wait, review.steps[0].confirmLabel], [null, false, "Reading the new fee…", "Send"]);
+  // Confirm takes no click, whatever the button shows, until the new request is built.
   assert.equal(reviews.confirmable, false);
-  review.steps[0] = { ...review.steps[0], lines: [{ label: "Method" }] };
+  review.steps[0] = { ...review.steps[0], ready: true };
   assert.equal(reviews.confirmable, true);
 });

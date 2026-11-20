@@ -33,7 +33,7 @@ test("an account or a .dusk name's public account can be followed", async () => 
   assert.deepEqual(await watchTarget("bob.dusk", { resolveName }), { error: "bob.dusk isn't an active .dusk name." });
   assert.match((await watchTarget("alice.dusk", { resolveName: async () => { throw new Error("offline"); } })).error, /^Couldn't look up alice\.dusk just now/u);
   assert.match((await watchTarget("", { resolveName })).error, /^Paste a Dusk account/u);
-  assert.match((await watchTarget("0x1234", { resolveName })).error, /^That isn't a Dusk account or a \.dusk name/u);
+  assert.equal((await watchTarget("0x1234", { resolveName })).error, "Not a Dusk account or .dusk name");
   // A name Dusk Domains can't hold says why, without a lookup.
   let asked = 0;
   const counting = async (name) => {

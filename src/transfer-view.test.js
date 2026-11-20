@@ -3,11 +3,11 @@ import test from "node:test";
 
 import { WITHDRAWAL_GAS_REFUSAL } from "./gas.js";
 import {
+  PUBLIC_LINE,
   WALLET_CANCELLED,
   actionErrorOf,
   explorerTxUrl,
   friendlyWalletError,
-  privacyLine,
   short,
   transferSubline,
   transferView,
@@ -46,51 +46,59 @@ test("explorer links point at each network's own explorer", () => {
   assert.equal(explorerTxUrl(cfg, "ethereum", L2_HASH), `https://sepolia.etherscan.io/tx/${L2_HASH}`);
 });
 
-test("short forms are the same everywhere: 0x and 4 + 4, or 6 + 6", () => {
-  assert.equal(short(EVM), "0x3E5B…a11d");
+test("short forms are the same everywhere: 6 + 6 after any 0x, and 4 + 4 in a dense list", () => {
+  assert.equal(short(EVM), "0x3E5B82…C3a11d");
   // An address kept in lower case reads with its checksum's capitals, as wallets write it.
-  assert.equal(short(EVM.toLowerCase()), "0x3E5B…a11d");
+  assert.equal(short(EVM.toLowerCase()), "0x3E5B82…C3a11d");
   assert.equal(short(ACCOUNT), "21n5nc…fMMLNz");
   // An EVM transaction is cut as an EVM address is.
-  assert.equal(short("0x04a8a8977dd251da49bd8997cf4d063ddc385f8d29b437b119bb3c79c11b3213"), "0x04a8…3213");
+  assert.equal(short("0x04a8a8977dd251da49bd8997cf4d063ddc385f8d29b437b119bb3c79c11b3213"), "0x04a8a8…1b3213");
   // Dusk hashes and contract IDs: 6 + 6, in lower case.
   assert.equal(short(DUSK_HASH), "cecece…cecece");
   assert.equal(short("14EEB3d4021aff09af2c515603a01f8d956a7f6411d11a1b1c0b0561a93fb1b9"), "14eeb3…3fb1b9");
   assert.equal(short("abc"), "abc");
+  // A list's rows: 4 + 4.
+  assert.deepEqual(
+    [EVM, ACCOUNT, DUSK_HASH, "0x04a8a8977dd251da49bd8997cf4d063ddc385f8d29b437b119bb3c79c11b3213"].map((value) => short(value, { dense: true })),
+    ["0x3E5B…a11d", "21n5…MLNz", "cece…cece", "0x04a8…3213"],
+  );
 });
 
-test("a deposit shows Pending with its steps, then Completed with both transactions", () => {
+test("a deposit shows In progress with its steps, then Completed with both transactions", () => {
   const now = Date.UTC(2026, 9, 26, 9, 40);
   const sent = { amountLux: "25000000000", destination: EVM, hash: DUSK_HASH, sender: ACCOUNT, sentHere: true, sourceAt: Date.UTC(2026, 9, 26, 9, 31, 12), status: "pending" };
   const pending = transferView(sent, { cfg, now, route: deposit, locale: GB, timeZone: AMS });
-  assert.equal(pending.title, "Sending 25 DUSK to DuskEVM");
-  assert.equal(pending.statusWord, "Pending");
+  // What moves and where; its state is its pill's. What's announced as it ends says the state.
+  assert.equal(pending.title, "25 DUSK · Dusk → DuskEVM");
+  assert.equal(pending.headline, "Sending 25 DUSK to DuskEVM");
+  assert.equal(pending.statusWord, "In progress");
+  // Sent and in a block on Dusk: one transaction, one step.
   assert.deepEqual(pending.steps.map((step) => [step.title, step.state]), [
     ["Sent from Dusk", "done"],
-    ["Confirmed on Dusk", "done"],
     ["Arriving on DuskEVM", "now"],
   ]);
   assert.equal(pending.steps[0].href, `https://explorer.testnet.dusk.network/transactions/transaction?id=${DUSK_HASH}`);
-  assert.equal(pending.steps[1].atText, "Today, 10:31 CET");
-  assert.equal(pending.steps[2].detail, "");
+  assert.equal(pending.steps[0].atText, "Today, 10:31 CET");
+  assert.equal(pending.steps[1].detail, "");
   assert.equal(pending.late, false);
 
   const done = transferView(
     { ...sent, destinationAt: Date.UTC(2026, 9, 26, 9, 31, 19), destinationHash: L2_HASH, status: "completed" },
     { cfg, now, route: deposit, locale: GB, timeZone: AMS, year: true },
   );
-  assert.equal(done.title, "25 DUSK arrived on DuskEVM");
+  assert.equal(done.title, "25 DUSK · Dusk → DuskEVM");
+  assert.equal(done.headline, "25 DUSK arrived on DuskEVM");
   assert.equal(done.statusWord, "Completed");
-  assert.equal(done.steps[2].title, "Arrived on DuskEVM");
-  assert.equal(done.steps[2].href, `https://explorer.testnet.evm.dusk.network/tx/${L2_HASH}`);
-  assert.equal(done.steps[2].atText, "Mon 26 Oct 2026, 10:31 CET");
+  assert.equal(done.steps[1].title, "Arrived on DuskEVM");
+  assert.equal(done.steps[1].href, `https://explorer.testnet.evm.dusk.network/tx/${L2_HASH}`);
+  assert.equal(done.steps[1].atText, "Mon 26 Oct 2026, 10:31 CET");
   assert.equal(transferView({ hash: DUSK_HASH, note: "Nope.", status: "failed" }, { cfg, route: deposit }).statusWord, "Failed");
 
   // Late past twice its usual time and a quarter of an hour more: 16 minutes here.
   assert.equal(transferView(sent, { cfg, now: sent.sourceAt + 16 * 60_000, route: deposit }).late, false);
   const late = transferView(sent, { cfg, now: sent.sourceAt + 17 * 60_000, route: deposit });
   assert.equal(late.late, true);
-  assert.match(transferSubline(late, sent, deposit, cfg, { locale: GB, timeZone: AMS }), / · taking longer than usual$/u);
+  assert.match(transferSubline(late, sent, deposit, cfg, { locale: GB, timeZone: AMS }), / · Taking longer than usual$/u);
   // Without a usual time on this network, nothing is late.
   const unknown = { ...cfg, duskEvm: { ...cfg.duskEvm, depositSeconds: null } };
   assert.equal(transferView(sent, { cfg: unknown, now: sent.sourceAt + 86_400_000, route: deposit }).late, false);
@@ -98,14 +106,17 @@ test("a deposit shows Pending with its steps, then Completed with both transacti
 
 test("a payout to another chain says what arrives after the bridge fee", () => {
   const view = transferView({ amountLux: "50000000000", hash: DUSK_HASH, sourceAt: Date.UTC(2026, 9, 26, 9, 12), status: "pending" }, { cfg, now: Date.UTC(2026, 9, 26, 9, 30), route: service, locale: GB, timeZone: AMS });
-  assert.equal(view.title, "Sending 50 DUSK to Sepolia");
+  assert.equal(view.title, "50 DUSK · Dusk → Sepolia");
+  assert.equal(view.headline, "Sending 50 DUSK to Sepolia");
   assert.equal(
     transferSubline(view, { sourceAt: Date.UTC(2026, 9, 26, 9, 12) }, service, cfg, { locale: GB, now: Date.UTC(2026, 9, 26, 9, 30), timeZone: AMS }),
-    "Sent Today, 10:12 CET · takes ~1 hour",
+    "Today, 10:12 CET · ~1 hour",
   );
   const done = transferView({ amountLux: "50000000000", hash: DUSK_HASH, status: "completed" }, { cfg, route: service });
-  assert.equal(done.title, "49 DUSK arrived on Sepolia");
-  assert.equal(transferView({ amountLux: "1000000000000", hash: L2_HASH, status: "pending" }, { cfg, route: migration }).title, "Moving 1,000 ERC20 DUSK to Dusk");
+  // What arrived is said as it ends; the receipt's ledger says it too.
+  assert.equal(done.headline, "49 DUSK arrived on Sepolia");
+  const moving = transferView({ amountLux: "1000000000000", hash: L2_HASH, status: "pending" }, { cfg, route: migration });
+  assert.deepEqual([moving.title, moving.headline], ["1,000 ERC20 DUSK · Sepolia → Dusk", "Moving 1,000 ERC20 DUSK to Dusk"]);
 });
 
 test("a withdrawal shows its three steps, their times and the next action", () => {
@@ -118,9 +129,9 @@ test("a withdrawal shows its three steps, their times and the next action", () =
     ["Claim on Dusk", "todo"],
   ]);
   assert.equal(ready.steps[0].atText, "23 Oct, 16:20 CEST");
-  // Its fee is the receipt's, next to the Prove button.
-  assert.equal(ready.steps[1].detail, "Ready now");
-  assert.equal(ready.steps[2].detail, "7 days after you prove");
+  // Ready: its button says so, with its fee, and the card and the review say the wait.
+  assert.equal(ready.steps[1].detail, "");
+  assert.equal(ready.steps[2].detail, "");
   // Before it can be proved: from when it can, about an output after it was sent.
   const sent = transferView({ hash: L2_HASH, sourceAt: sentAt, stage: "waiting_for_output", status: "pending" }, { cfg, now, route: withdrawal, locale: GB, timeZone: AMS, timing });
   assert.equal(sent.steps[1].detail, "From about 23 Oct, 16:48 CEST");
@@ -129,9 +140,14 @@ test("a withdrawal shows its three steps, their times and the next action", () =
   const unread = transferView({ hash: L2_HASH, sourceAt: sentAt, stage: "waiting_for_output", status: "pending" }, { cfg, now, route: withdrawal, locale: GB, timeZone: AMS });
   assert.deepEqual(unread.steps.slice(1).map(({ detail }) => detail), ["", ""]);
   assert.equal(transferSubline(unread, { sourceAt: sentAt, stage: "waiting_for_output" }, withdrawal, cfg, { locale: GB, now, timeZone: AMS }), "Sent 23 Oct, 16:20 CEST");
-  assert.deepEqual(ready.action, { blocked: "", command: "withdrawal-prove", failure: "", kind: "prove", label: "Prove on Dusk", quiet: false });
-  assert.equal(ready.title, "Prove the withdrawal of 200 DUSK");
+  assert.deepEqual(ready.action, { blocked: "", command: "withdrawal-prove", failure: "", kind: "prove", label: "Prove withdrawal", quiet: false });
+  assert.deepEqual([ready.title, ready.headline], ["200 DUSK · DuskEVM → Dusk", "Prove the withdrawal of 200 DUSK"]);
   assert.deepEqual(ready.tracker.map(({ label }) => label), ["Sent", "Prove now", "Claim"]);
+  // On its way until it's past its wait; then held, for its claim.
+  assert.equal(ready.statusWord, "In progress");
+  const claimable = transferView({ amountLux: "200000000000", hash: L2_HASH, sourceAt: sentAt, stage: "ready_to_finalize", status: "pending" }, { cfg, now, route: withdrawal });
+  assert.equal(claimable.statusWord, "Held");
+  assert.equal(transferView({ amountLux: "200000000000", hash: L2_HASH, pendingAction: "finalize", sourceAt: sentAt, stage: "ready_to_finalize", status: "pending" }, { cfg, now, route: withdrawal }).statusWord, "In progress");
 
   // Proven only by another account: the user still proves, and is told why.
   const other = transferView({ hash: L2_HASH, provenByOther: true, sourceAt: sentAt, stage: "ready_to_prove", status: "pending" }, { cfg, route: withdrawal });
@@ -142,14 +158,14 @@ test("a withdrawal shows its three steps, their times and the next action", () =
   assert.equal(paying(ACCOUNT, ACCOUNT), "Another account proved it. Prove it yourself to claim it.");
   const stranger = `25z9o6${"x".repeat(40)}5Etftt`;
   // Proving and claiming it still pays that account: said plainly, by your .dusk name where you have one.
-  assert.equal(paying(stranger, ACCOUNT), "Another account proved it. This pays 25z9o6…5Etftt, not your connected Dusk account. If you prove and claim, the DUSK still goes there.");
-  assert.equal(paying(stranger, ""), "Another account proved it. This pays 25z9o6…5Etftt. If you prove and claim, the DUSK still goes there.");
+  assert.equal(paying(stranger, ACCOUNT), "Another account proved it. It pays 25z9o6…5Etftt, not you");
+  assert.equal(paying(stranger, ""), "Another account proved it. It pays 25z9o6…5Etftt");
   const named = { amountLux: "1008000000000", destination: stranger, hash: L2_HASH, provenByOther: true, sourceAt: sentAt, stage: "ready_to_prove", status: "pending" };
   const namedView = transferView(named, { account: ACCOUNT, cfg, name: "alice.dusk", route: withdrawal });
-  assert.equal(namedView.steps[1].detail, "Another account proved it. This pays 25z9o6…5Etftt, not alice.dusk. If you prove and claim, the DUSK still goes there.");
+  assert.equal(namedView.steps[1].detail, "Another account proved it. It pays 25z9o6…5Etftt, not alice.dusk");
   assert.equal(transferSubline(namedView, named, withdrawal, cfg, { account: ACCOUNT, name: "alice.dusk" }), namedView.steps[1].detail);
   // Not "your withdrawal": it may pay another account.
-  assert.equal(namedView.title, "Prove the withdrawal of 1,008 DUSK");
+  assert.equal(namedView.headline, "Prove the withdrawal of 1,008 DUSK");
   assert.equal(other.action.kind, "prove");
   assert.equal(other.tracker[1].label, "Proved by another");
 
@@ -167,7 +183,7 @@ test("a withdrawal shows its three steps, their times and the next action", () =
   const receipt = receiptPage({ ...receiptModel(proved, { cfg, route: withdrawal, submitter: `0x${"3d".repeat(20)}`, url: "https://bridge.example/#/transfer/x" }), canAct: true });
   assert.match(receipt, /<p class="note">.*Switch Dusk Wallet to 21n5nc…fMMLNz, the account that proved it/u);
   assert.doesNotMatch(receipt, /data-action="withdrawal-finalize"/u);
-  assert.match(transferRow({ action: elsewhere, amountText: "200 DUSK", href: "#", id: "w", pair: ["dusk-evm", "dusk"], status: "pending", statusWord: "Pending", subline: "", title: "DuskEVM to Dusk" }), /Switch account to claim/u);
+  assert.match(transferRow({ action: elsewhere, amountText: "200 DUSK", href: "#", id: "w", pair: ["dusk-evm", "dusk"], status: "pending", statusWord: "In progress", subline: "", title: "DuskEVM → Dusk" }), /Switch account to claim/u);
   assert.match(receiptPage({ ...receiptModel(proved, { cfg, route: withdrawal, submitter: `0x${"2c".repeat(20)}`, url: "https://bridge.example/#/transfer/x" }), canAct: true }), /data-action="withdrawal-finalize"/u);
 });
 
@@ -180,7 +196,7 @@ test("a withdrawal that pays someone else asks nothing of you: no turn of yours,
   assert.deepEqual(view.tracker.map(({ label, state }) => [label, state]), [["Sent", "done"], ["Proved by another", "now"], ["Claim", "todo"]]);
   // Its receipt offers Prove as a quiet button.
   const receipt = receiptPage({ ...receiptModel(entry, { cfg, own: { account: ACCOUNT, name: "alice.dusk" }, route: withdrawal, url: "https://bridge.example/#/transfer/x" }), canAct: true });
-  assert.match(receipt, /<button type="button" class="btn sec" data-action="withdrawal-prove" data-id="w">Prove on Dusk<\/button>/u);
+  assert.match(receipt, /<button type="button" class="btn sec" data-action="withdrawal-prove" data-id="w">Prove withdrawal<\/button>/u);
   // A followed account counts as the one it's for.
   assert.equal(transferView(entry, { cfg, owner: ACCOUNT, route: withdrawal }).action.quiet, true);
   // One that pays you, or with no Dusk account known, is yours to prove.
@@ -232,35 +248,22 @@ test("a waiting withdrawal counts down to its claim time, across a clock change"
   assert.equal(rejected.countdown, null);
 
   const refused = transferView({ actionError: WITHDRAWAL_GAS_REFUSAL, hash: L2_HASH, stage: "ready_to_finalize", status: "pending" }, { cfg, route: withdrawal });
-  assert.equal(refused.action.label, "Claim on Dusk");
+  // No amount known: what it does, alone.
+  assert.equal(refused.action.label, "Claim");
   assert.equal(refused.action.failure, WITHDRAWAL_GAS_REFUSAL);
-  assert.equal(refused.title, "DUSK is ready to claim");
+  assert.deepEqual([refused.title, refused.headline], ["DUSK · DuskEVM → Dusk", "DUSK is ready to claim"]);
 });
 
-test("what becomes public names the accounts themselves, not a label", () => {
-  // By its .dusk name too, as the wallet's window says it.
-  assert.equal(
-    privacyLine(deposit, cfg, { dusk: ACCOUNT, evm: EVM, name: "alice.dusk" }),
-    "Public on Dusk and DuskEVM, and linked: your Dusk account alice.dusk (21n5nc…fMMLNz), 0x3E5B…a11d and the amount.",
-  );
-  assert.equal(
-    privacyLine(deposit, cfg, { dusk: ACCOUNT, evm: EVM }),
-    "Public on Dusk and DuskEVM, and linked: your Dusk account 21n5nc…fMMLNz, 0x3E5B…a11d and the amount.",
-  );
-  // From the sending side to the paid one, on both networks.
-  assert.equal(
-    privacyLine(migration, cfg, { dusk: ACCOUNT, evm: EVM }),
-    "Public on Sepolia and Dusk, and linked: 0x3E5B…a11d, the Dusk account 21n5nc…fMMLNz and the amount.",
-  );
-  assert.equal(privacyLine(service, cfg, {}), "Public on Dusk and Sepolia, and linked: your Dusk account, your EVM address and the amount.");
+test("what becomes public is one line: the review names both accounts above it", () => {
+  assert.equal(PUBLIC_LINE, "Public: both accounts and the amount");
 });
 
 test("wallet errors say what happened, naming the wallet", () => {
-  assert.equal(friendlyWalletError({ code: 4001 }), "You cancelled in your wallet, so nothing was sent.");
+  assert.equal(friendlyWalletError({ code: 4001 }), "Cancelled in your wallet. Nothing was sent.");
   // viem wraps an EVM wallet's rejection in its own error.
   assert.equal(
     friendlyWalletError({ cause: { code: 4001 }, shortMessage: "User rejected the request." }, "evm"),
-    "You cancelled in your wallet, so nothing was sent.",
+    "Cancelled in your wallet. Nothing was sent.",
   );
   assert.match(friendlyWalletError({ code: 4100, message: "Wallet locked" }), /^The Dusk wallet is locked/u);
   assert.match(friendlyWalletError({ code: 4100 }, "evm"), /^The EVM wallet is locked/u);
@@ -329,7 +332,8 @@ test("after the proof, the claim date reads as the chain gives it: exact, about,
   // The receipt says it under the countdown, and its claim step doesn't repeat it.
   const model = receiptModel({ ...base }, { cfg, now, route: withdrawal, locale: GB, timeZone: AMS, timing, url: "https://bridge.example/#/transfer/x" });
   assert.equal(model.view.steps[2].detail, "");
-  assert.match(receiptPage({ ...model, canAct: true }), /<div class="k">You can claim in<\/div><div class="v">5 days<\/div><div class="s">Claim from about Mon 2 Nov 2026, 04:20 CET<\/div>/u);
+  // As every date on the receipt: the year only where it isn't this one.
+  assert.match(receiptPage({ ...model, canAct: true }), /<div class="k">You can claim in<\/div><div class="v">5 days<\/div><div class="s">Claim from about 2 Nov, 04:20 CET<\/div>/u);
 });
 
 test("a late claim says only the wait and its soonest date: no countdown, nothing for a calendar", () => {
@@ -339,7 +343,7 @@ test("a late claim says only the wait and its soonest date: no countdown, nothin
   const entry = { amountLux: "1000000000", claimOverdue: true, hash: L2_HASH, provenAt, readyAt: Date.UTC(2026, 10, 2, 3, 20, 39) / 1_000, sourceAt: provenAt - 86_400_000, stage: "proven_waiting", status: "pending" };
   const model = receiptModel(entry, { cfg, now, route: withdrawal, locale: GB, timeZone: AMS, timing, url: "https://bridge.example/#/transfer/x" });
   const html = receiptPage({ ...model, canAct: true });
-  assert.match(html, /<div class="group count"><p>Waiting for DuskEVM to settle this proof\. Claim from Mon 2 Nov 2026, 04:20 CET at the soonest\.<\/p><\/div>/u);
+  assert.match(html, /<div class="group count"><p>Waiting for DuskEVM to settle this proof\. Claim from 2 Nov, 04:20 CET at the soonest\.<\/p><\/div>/u);
   assert.doesNotMatch(html, /You can claim in/u);
   assert.doesNotMatch(html, /data-action="calendar"/u);
   // In My transfers, its claim step counts down to nothing either.
@@ -355,16 +359,16 @@ test("a proof or claim you rejected in your wallet says so in grey, as a deposit
   const at = Date.UTC(2026, 9, 7, 7, 7);
   const entry = { actionError: WALLET_CANCELLED, amountLux: "1008000000000", hash: L2_HASH, id: "w", provenByOther: true, sourceAt: at, stage: "ready_to_prove", status: "pending" };
   const view = transferView(entry, { cfg, route: withdrawal });
-  assert.equal(view.action.failure, "You cancelled in your wallet, so nothing was sent.");
+  assert.equal(view.action.failure, "Cancelled in your wallet. Nothing was sent.");
   const receipt = receiptPage({ ...receiptModel(entry, { cfg, route: withdrawal, url: "https://bridge.example/#/transfer/x" }), canAct: true });
-  assert.match(receipt, /<div class="action-box"><p class="message">You cancelled in your wallet, so nothing was sent\.<\/p><button type="button" class="btn pri" data-action="withdrawal-prove"/u);
+  assert.match(receipt, /<div class="action-box"><p class="message">Cancelled in your wallet\. Nothing was sent\.<\/p><button type="button" class="btn pri" data-action="withdrawal-prove"/u);
   assert.doesNotMatch(receipt, /message error|Try again/u);
   // A proof that did fail is still red, and offered again.
   const failed = receiptPage({ ...receiptModel({ ...entry, actionError: "Proof transaction failed: out of gas" }, { cfg, route: withdrawal, url: "x" }), canAct: true });
   assert.match(failed, /<p class="message error">The proof wasn&#039;t sent\. Try again\.<\/p>/u);
   // In the review, the same: grey for a rejection, red for a failure.
-  const sheet = (error) => reviewSheet({ canConfirm: true, cfgLinks: { explorer: () => null }, checks: [], confirmLabel: "Prove on Dusk", error, feeRows: [], lead: { amount: "0.051", label: "Proving costs up to", line: "" }, privacy: "x", steps: [], sub: "", walletCheckName: "Dusk Wallet" });
-  assert.match(sheet(WALLET_CANCELLED), /<div class="sheet-foot"><p class="message" role="status">You cancelled in your wallet, so nothing was sent\.<\/p>/u);
+  const sheet = (error) => reviewSheet({ canConfirm: true, checks: [], confirmLabel: "Prove", error, feeRows: [], lead: { amount: "1,008", label: "Withdrawal", payee: "x" }, privacy: "x", steps: [], sub: "" });
+  assert.match(sheet(WALLET_CANCELLED), /<div class="sheet-foot"><p class="message" role="status">Cancelled in your wallet\. Nothing was sent\.<\/p>/u);
   assert.match(sheet("The Dusk wallet disconnected. Reconnect it and try again."), /<p class="message error" role="alert">The Dusk wallet disconnected/u);
 });
 
