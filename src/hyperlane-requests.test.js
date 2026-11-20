@@ -151,8 +151,8 @@ test("Dusk Wallet gets the request the review showed, with its deposit, and show
   assert.deepEqual([rows.From.value, rows.From.full], ["xGX8tZ…zQjkw9", SENDER]);
   assert.equal(rows.Contract.value, "979fb7…ee5a0b");
   assert.equal(rows.Deposit.value, "17.876 DUSK");
-  assert.deepEqual(amountsIn(rows["Network fee"].value), ["0.005 DUSK"]);
-  assert.deepEqual(amountsIn(rows.Total.value), ["17.881 DUSK"]);
+  assert.deepEqual(amountsIn(rows["Network fee"].value), ["≤0.005 DUSK"]);
+  assert.deepEqual(amountsIn(rows.Total.value), ["≤17.881 DUSK"]);
 });
 
 test("an EVM wallet's lines for a transfer back to Dusk name the token, Dusk's domain, the account's hash and the fee as its value", () => {

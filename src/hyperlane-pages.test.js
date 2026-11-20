@@ -7,6 +7,11 @@ import { groupTransfers } from "./discovery.js";
 import { duskRecipientHash } from "./hyperlane.js";
 import { balanceLine, receiptModel, reviewChecks, routeLine, routeSteps, transfersModel } from "./page-models.js";
 import { amountsIn, assertShownInFull, decode, exactly, fieldOf, textOf } from "./pages.fixtures.js";
+
+const DUSK_TX = (hash) => `https://explorer.testnet.dusk.network/transactions/transaction?id=${hash}`;
+// That the first transfer to an account waits for its claim: never released by itself.
+const CLAIMED = /\bclaim/iu;
+const AUTOMATIC = /\bautomatic/iu;
 import { buildQuote } from "./quote.js";
 import { cardPage, cardRegions, receiptPage, transferRow } from "./views.js";
 import { tokenChoices } from "./bridge-card.js";
@@ -81,10 +86,8 @@ test("a transfer to Sepolia shows its message on its way, its fees in DUSK, and 
   assert.deepEqual(amountsOf(page, ["You sent", "Bridge fee", "Network fee", "You receive"]), [["95.085867 EURd"], ["16.876 DUSK"], ["0.002216155 DUSK"], ["95.085867 EURd"]]);
   // The message, the recipient and the transaction in full, each copied as it is, and on its explorer.
   assertShownInFull(fieldOf(page, "Message ID"), OUT.messageId);
-  assertShownInFull(fieldOf(page, "To, on Sepolia"), EVM);
-  assert.ok(fieldOf(page, "To, on Sepolia").html.includes(`href="https://sepolia.etherscan.io/address/${EVM}"`));
-  assertShownInFull(fieldOf(page, "Dusk transaction"), OUT.hash);
-  assert.ok(fieldOf(page, "Dusk transaction").html.includes(`href="https://explorer.testnet.dusk.network/transactions/transaction?id=${OUT.hash}"`));
+  assertShownInFull(fieldOf(page, "To, on Sepolia"), EVM, `https://sepolia.etherscan.io/address/${EVM}`);
+  assertShownInFull(fieldOf(page, "Dusk transaction"), OUT.hash, DUSK_TX(OUT.hash));
   assert.equal(model.arrives, true);
 
   const done = receipt({ ...OUT, destinationAt: OUT.sourceAt + 19_000, destinationHash: "0xfdd8a84db201bfc08be9983224c7982f8c70ca0691f1b69c11c9930f2a401fd8", status: "completed" });
@@ -100,7 +103,7 @@ test("a transfer to Dusk the route holds needs its account's claim, there and in
   assert.deepEqual(steps(model), [["confirmed", "done"], ["arrived", "done"], ["claim", "turn"]]);
   const { blocked, command, failure, kind, quiet } = model.view.action;
   assert.deepEqual({ blocked, command, failure, kind, quiet }, { blocked: "", command: "escrow-claim", failure: "", kind: "claim", quiet: false });
-  assert.deepEqual(amountsIn(model.actionFee), ["0.003 DUSK"]);
+  assert.deepEqual(amountsIn(model.actionFee), ["≤0.003 DUSK"]);
   // Nothing comes by itself: it isn't offered to be told when it arrives.
   assert.equal(model.arrives, false);
   // Field by field: what was sent, the bridge fee and the fee on Sepolia in ETH, and what's held for the claim.
@@ -119,7 +122,7 @@ test("a transfer to Dusk the route holds needs its account's claim, there and in
   assert.deepEqual(Object.entries(groupTransfers([HELD], routeOf, OTHER)).filter(([, list]) => list.length).map(([key]) => key), ["other"]);
   const forOther = receipt(HELD, { own: { account: OTHER, name: "" } });
   assert.equal(forOther.view.action.quiet, true);
-  assert.deepEqual(amountsIn(forOther.actionFee), ["0.08 DUSK"]);
+  assert.deepEqual(amountsIn(forOther.actionFee), ["≤0.08 DUSK"]);
 });
 
 test("a transfer to Dusk waits for a claim as soon as it's known to be the account's first, and once claimed, it arrived", () => {
@@ -134,7 +137,7 @@ test("a transfer to Dusk waits for a claim as soon as it's known to be the accou
   // The claim's own fee, and its transaction in full, copied as it is.
   const page = receiptPage(claimed);
   assert.deepEqual(amountsOf(page, ["Claim fee on Dusk"]), [["0.001908588 DUSK"]]);
-  assertShownInFull(fieldOf(page, "Claim on Dusk"), "cd".repeat(32));
+  assertShownInFull(fieldOf(page, "Claim on Dusk"), "cd".repeat(32), DUSK_TX("cd".repeat(32)));
   // Paid straight away, no claim at all.
   const direct = receipt({ ...HELD, destinationAt: HELD.deliveredAt, escrow: null, status: "completed" });
   assert.deepEqual(steps(direct), [["confirmed", "done"], ["arrived", "done"]]);
@@ -161,9 +164,11 @@ test("a Hyperlane route's row and checks say its time, its fees' coin, and the f
   assert.deepEqual(amountsIn(checks[0].html), ["71.508029 USDd"]);
   assert.match(textOf(checks[0].html), exactly("0x8A51…B75d"));
   assert.match(textOf(checks[2].html), exactly("xGX8tZ…zQjkw9"));
-  // The first USDd to the account waits on Dusk for its claim: said for this token, with the claim's fee.
+  // The first USDd to the account waits on Dusk for its claim, never released by itself: said for this token, with the claim's fee.
   assert.match(textOf(checks[3].html), exactly("USDd"));
-  assert.deepEqual(amountsIn(checks[3].html), ["0.003 DUSK"]);
+  assert.match(textOf(checks[3].html), CLAIMED);
+  assert.doesNotMatch(textOf(checks[3].html), AUTOMATIC);
+  assert.deepEqual(amountsIn(checks[3].html), ["≤0.003 DUSK"]);
   // An account the route pays already: no claim to mention.
   assert.equal(reviewChecks(route, { cfg, destination: ACCOUNT, duskAccount: ACCOUNT, evm: { account: EVM }, quote, reads: { hyperlane: { registered: true } } }).length, 1);
 
@@ -176,7 +181,7 @@ test("a Hyperlane route's row and checks say its time, its fees' coin, and the f
     outChecks.map((check) => [check.ok, amountsIn(check.html)]),
     [
       [true, ["49,805.396789 EURd"]],
-      [true, ["20 DUSK", "16.881 DUSK"]],
+      [true, ["20 DUSK", "≤16.881 DUSK"]],
       [true, ["20 EURd"]],
       [true, []],
     ],
@@ -269,7 +274,7 @@ test("where Sepolia's own DUSK route runs beside Hyperlane's, the token list say
     unit: "DUSK",
   });
   // Each option: the route a press picks, the token it shows, and the token that arrives where two send DUSK.
-  const arrives = (sub) => sub.match(/(?:ERC20 |BEP20 )?DUSK$/u)?.[0] ?? "";
+  const arrives = (sub) => sub.match(/\bas\s+(.+)$/u)?.[1] ?? "";
   assert.deepEqual(tokenOptions(page).map(({ route: id, sub, symbol }) => [id, symbol, arrives(sub)]), [
     ["dusk-to-ethereum", "DUSK", "ERC20 DUSK"],
     ["dusk-to-sepolia", "DUSK", "DUSK"],

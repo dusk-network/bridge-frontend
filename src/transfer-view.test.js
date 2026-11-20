@@ -13,7 +13,7 @@ import {
   transferView,
 } from "./transfer-view.js";
 import { receiptModel } from "./page-models.js";
-import { amountsIn, exactly } from "./pages.fixtures.js";
+import { ESTIMATE, amountsIn, exactly, textOf } from "./pages.fixtures.js";
 import { proofSubmitterFor } from "./services.js";
 import { receiptPage, transferRow } from "./views.js";
 
@@ -306,14 +306,18 @@ test("after the proof, the claim date is the chain's: exact, about, or late at t
   const lines = [{ readyAtExact: true }, {}, { claimOverdue: true }].map((patch) => view(patch).countdown.line);
   for (const line of lines) assert.match(line, exactly("2 Nov, 04:20 CET"));
   assert.equal(new Set(lines).size, 3);
+  // A sure date says nothing of an estimate; the earliest, and the late one at the soonest, say they're estimates.
+  const [sure, earliest, late] = lines;
+  assert.doesNotMatch(sure, ESTIMATE);
+  for (const estimate of [earliest, late]) assert.match(estimate, ESTIMATE);
   assert.match(subline({ readyAtExact: true }), exactly("5 days"));
   assert.equal(subline({ claimOverdue: true }), view({ claimOverdue: true }).countdown.line);
   // The receipt says it under the countdown, and its claim step doesn't repeat it.
   const model = receiptModel({ ...base }, { cfg, now, route: withdrawal, locale: GB, timeZone: AMS, timing, url: "https://bridge.example/#/transfer/x" });
   assert.equal(model.view.steps[2].detail, "");
   const html = receiptPage({ ...model, canAct: true });
-  assert.match(html, exactly("5 days"));
-  assert.match(html, exactly("2 Nov 2026, 04:20 CET"));
+  assert.match(textOf(html), exactly("5 days"));
+  assert.match(textOf(html), exactly("2 Nov 2026, 04:20 CET"));
 });
 
 test("a late claim says only the wait and its soonest date: no countdown, nothing for a calendar", () => {
@@ -323,8 +327,8 @@ test("a late claim says only the wait and its soonest date: no countdown, nothin
   const entry = { amountLux: "1000000000", claimOverdue: true, hash: L2_HASH, provenAt, readyAt: Date.UTC(2026, 10, 2, 3, 20, 39) / 1_000, sourceAt: provenAt - 86_400_000, stage: "proven_waiting", status: "pending" };
   const model = receiptModel(entry, { cfg, now, route: withdrawal, locale: GB, timeZone: AMS, timing, url: "https://bridge.example/#/transfer/x" });
   const html = receiptPage({ ...model, canAct: true });
-  assert.match(html, exactly("2 Nov 2026, 04:20 CET"));
-  assert.doesNotMatch(html, exactly("5 days"));
+  assert.match(textOf(html), exactly("2 Nov 2026, 04:20 CET"));
+  assert.doesNotMatch(textOf(html), exactly("5 days"));
   assert.doesNotMatch(html, /data-action="calendar"/u);
   // In My transfers, its claim step counts down to nothing either.
   const view = transferView(entry, { cfg, now, route: withdrawal, locale: GB, timeZone: AMS, timing });

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { calendarEvent, claimReminder, foldLine, icsText, icsTime } from "./calendar.js";
-import { exactly } from "./pages.fixtures.js";
+import { ESTIMATE, exactly } from "./pages.fixtures.js";
 
 const CLAIM = Date.UTC(2026, 9, 31, 12, 38);
 const NOW = Date.UTC(2026, 9, 26, 9, 38, 5);
@@ -37,6 +37,9 @@ test("an estimated claim time is said apart from a sure one, at the same time", 
   assert.equal(line(estimate, "DTSTART"), line(sure, "DTSTART"));
   assert.notEqual(line(estimate, "DESCRIPTION"), line(sure, "DESCRIPTION"));
   assert.match(line(estimate, "DESCRIPTION"), exactly("1 DUSK"));
+  // The estimate says it's one; the sure time doesn't.
+  assert.match(line(estimate, "DESCRIPTION"), ESTIMATE);
+  assert.doesNotMatch(line(sure, "DESCRIPTION"), ESTIMATE);
 });
 
 test("text values are escaped and long lines folded", () => {

@@ -46,8 +46,13 @@ test("the first transfer's claim is said for the account the review pays, as rea
   const claim = first.checks.filter((check) => !known.has(check.html));
   assert.equal(claim.length, 1);
   assert.match(textOf(claim[0].html), exactly("EURd"));
-  assert.deepEqual(amountsIn(claim[0].html), ["0.003 DUSK"]);
+  assert.deepEqual(amountsIn(claim[0].html), ["≤0.003 DUSK"]);
   assert.notEqual(first.what, paid.what);
+  // Held for the account's claim, never released by itself.
+  for (const said of [textOf(claim[0].html), textOf(first.what)]) {
+    assert.match(said, /\bclaim/iu);
+    assert.doesNotMatch(said, /\bautomatic/iu);
+  }
 });
 
 test("a reviewed claim is built again as it's sent: unchanged it goes, another amount is reviewed again, nothing held isn't sent", async () => {

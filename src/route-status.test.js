@@ -50,14 +50,14 @@ test("a route that isn't running, or that nothing was read of yet, says nothing 
 test("it says how much it can pay where a balance limits that, and warns only where what's sent is more", () => {
   const route = { canPay: 1_234_567_890_123n, lastPayout: paid(5 * MINUTE), limit: "balance", paying: "yes" };
   assert.equal(line(route).warn, false);
-  assert.deepEqual(amountsIn(line(route).text), ["1,234.5678 DUSK"]);
+  assert.deepEqual(amountsIn(line(route).text), ["≤1,234.5678 DUSK"]);
   assert.equal(line(route, { amountLux: 1_234_567_890_123n }).warn, false);
   const more = line(route, { amountLux: 1_234_567_890_124n });
   assert.equal(more.warn, true);
-  assert.deepEqual(amountsIn(more.text), ["1,234.5678 DUSK"]);
+  assert.deepEqual(amountsIn(more.text), ["≤1,234.5678 DUSK"]);
   // What's paid is minted as it's paid: no balance says how much it can pay.
   assert.deepEqual(amountsIn(line({ ...route, canPay: null, limit: "mints" }).text), []);
-  for (const paying of ["on-claim", "unknown", "yes"]) assert.deepEqual(amountsIn(line({ canPay: 5_000_000_000n, limit: "balance", paying }).text), ["5 DUSK"], paying);
+  for (const paying of ["on-claim", "unknown", "yes"]) assert.deepEqual(amountsIn(line({ canPay: 5_000_000_000n, limit: "balance", paying }).text), ["≤5 DUSK"], paying);
 });
 
 test("a route is read once as its card opens, and again once what was read is old", async () => {

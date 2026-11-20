@@ -271,7 +271,7 @@ test("Sepolia's own DUSK routes and Hyperlane's are told apart: in the token lis
   const hyperlaneDusk = all.find((route) => route.id === "dusk-to-sepolia");
   // Both send DUSK from Dusk: each says what arrives.
   assert.deepEqual(
-    tokenChoices(all, hyperlaneDusk).map(({ id, note, selected, symbol }) => [symbol, id, (note ?? "").match(/(?:ERC20 )?DUSK\b/u)?.[0] ?? "", selected]),
+    tokenChoices(all, hyperlaneDusk).map(({ id, note, selected, symbol }) => [symbol, id, (note ?? "").match(/\bas\s+(.+)$/u)?.[1] ?? "", selected]),
     [
       ["DUSK", "dusk-to-ethereum", "ERC20 DUSK", false],
       ["DUSK", "dusk-to-sepolia", "DUSK", true],
