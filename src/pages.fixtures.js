@@ -67,11 +67,11 @@ export function assertShownInFull(field, value, link) {
 
 // An amount and its unit, standing alone: no digit, letter, dot, comma or sign
 // right before it. Its own sign is kept, and a bound before it is said as a
-// sign of its own: "up to" ≤, "at least" ≥, "less than" <, "more than" >. Its
-// unit ends it: "0.005 ETH/s" is no amount in ETH.
-const BOUNDS = { "<": "<", ">": ">", "at least": "≥", "at most": "≤", "less than": "<", "more than": ">", "up to": "≤", "≤": "≤", "≥": "≥" };
+// sign of its own: "up to" or "max" ≤, "at least" ≥, "less than" <, "more
+// than" >. Its unit ends it: "0.005 ETH/s" is no amount in ETH.
+const BOUNDS = { "<": "<", ">": ">", "at least": "≥", "at most": "≤", "less than": "<", max: "≤", maximum: "≤", minimum: "≥", "more than": ">", "up to": "≤", "≤": "≤", "≥": "≥" };
 const AMOUNT =
-  /(?<![\w.,−+-])(?:(<|>|≤|≥|[Uu]p to|[Aa]t least|[Aa]t most|[Ll]ess than|[Mm]ore than)\s*)?([−+-])?(\d[\d,]*(?:\.\d+)?)\s((?:[A-Z]{2,5}\d+\s)?(?:DUSK|EURd|USDd|ETH|BNB))(?=$|[\s.,;:!?)])/gu;
+  /(?<![\w.,−+-])(?:(<|>|≤|≥|[Uu]p to|[Aa]t least|[Aa]t most|[Ll]ess than|[Mm]ore than|[Mm]ax(?:imum)?|[Mm]inimum)\s*)?([−+-])?(\d[\d,]*(?:\.\d+)?)\s((?:[A-Z]{2,5}\d+\s)?(?:DUSK|EURd|USDd|ETH|BNB))(?=$|[\s.,;:!?)])/gu;
 
 /** The amounts a fragment says, in order: "−0.005 DUSK", "≤0.105 DUSK", "<0.000001 ETH", "1,008 DUSK". */
 export const amountsIn = (fragment) =>
