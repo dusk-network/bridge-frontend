@@ -152,6 +152,29 @@ test("the gas price is the one Dusk Wallet starts from, so its window doesn't ca
   assert.equal(await down.gasPrice(), 1n);
 });
 
+test("the node says the network is busy where what waits asks more than the most the price goes up to", async () => {
+  const { defaultGasPrice } = await import("./gas.js");
+  const waiting = (mempoolTxs) => createDuskNode({ fetch: ruskLike({ graphql: () => ({ mempoolTxs }) }).fetch, url: NODE });
+  const full = (gasPrice, count = 1_000) => Array.from({ length: count }, () => ({ gasLimit: 2_500_000, gasPrice }));
+  // A full mempool at 2,000 Lux: the price stops at 5 Lux, so what's sent may wait. That's said, as app-core's rule says it.
+  assert.deepEqual(defaultGasPrice(full(2_000)), { busy: true, ceiling: 5n, median: 2_000n, minimum: 1n, price: 5n });
+  assert.deepEqual(await waiting(full(2_000)).networkGas(), { busy: true, price: 5n });
+  // At or under the ceiling, or with room in the next block however high one waits: not busy.
+  assert.deepEqual(await waiting(full(5)).networkGas(), { busy: false, price: 5n });
+  assert.deepEqual(await waiting(full(3)).networkGas(), { busy: false, price: 3n });
+  assert.deepEqual(await waiting([{ gasLimit: 2_500_000, gasPrice: 2_000 }]).networkGas(), { busy: false, price: 1n });
+  assert.deepEqual(defaultGasPrice([{ gasLimit: 2_500_000, gasPrice: 2_000 }]), { busy: false, ceiling: 5n, median: 2_000n, minimum: 1n, price: 1n });
+  // A node that can't say: the minimum, not busy.
+  assert.deepEqual(await waiting(null).networkGas(), { busy: false, price: 1n });
+  const down = createDuskNode({
+    fetch: async () => {
+      throw new Error("offline");
+    },
+    url: NODE,
+  });
+  assert.deepEqual(await down.networkGas(), { busy: false, price: 1n });
+});
+
 test("amounts past 2^53 Lux keep every digit, in transactions and in query answers", async () => {
   // Rusk writes a transfer's value and deposit as bare numbers; its fees as text.
   const inner = '{"type":"moonlight","value":18446744073709551615,"nonce":19,"deposit":9007199254740993,"fee":{"gas_limit":"5000000","gas_price":"1"},"memo":"12345678901234567890"}';

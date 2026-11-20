@@ -15,8 +15,12 @@ const WEI_PER_LUX = 1_000_000_000n;
  */
 export function createFormReads({ services, onChange = () => {}, onPrice = () => {} }) {
   // `hyperlane` is what a Hyperlane route's form reads, and `escrow` what
-  // each of its routes holds for the connected Dusk account.
-  const reads = { duskBalance: null, escrow: null, gasPrice: 1n, hyperlane: null, l2: null, migration: null };
+  // each of its routes holds for the connected Dusk account. `networkBusy`:
+  // what waits on Dusk asks more than the gas price pays, so a transaction
+  // there may take longer.
+  const reads = { duskBalance: null, escrow: null, gasPrice: 1n, hyperlane: null, l2: null, migration: null, networkBusy: false };
+  // The node's price and whether it's busy; a node that only gives its price isn't busy.
+  const networkGas = async () => (services.node.networkGas ? services.node.networkGas() : { busy: false, price: await services.node.gasPrice() });
   let loads = 0;
   let estimates = 0;
   // Loads and estimates both write `hyperlane`: only the one started last does.
@@ -42,7 +46,8 @@ export function createFormReads({ services, onChange = () => {}, onPrice = () =>
       return true;
     };
     try {
-      set({ gasPrice: await services.node.gasPrice() });
+      const { busy, price } = await networkGas();
+      set({ gasPrice: price, networkBusy: busy });
     } catch {}
     // What Hyperlane's routes hold for the account, whichever route the card
     // is on; not from a load a newer one took over, which reads no route either.
@@ -90,14 +95,16 @@ export function createFormReads({ services, onChange = () => {}, onPrice = () =>
   }
 
   /**
-   * The node's gas price alone, for pages without a form; whether it
-   * changed. Where it moved, what quotes it is drawn again.
+   * The node's gas price alone, for pages without a form, and whether the
+   * network is busy; whether either changed. Where one moved, what quotes it
+   * is drawn again.
    */
   async function price() {
     try {
-      const next = await services.node.gasPrice();
-      const moved = next !== reads.gasPrice;
+      const { busy, price: next } = await networkGas();
+      const moved = next !== reads.gasPrice || busy !== reads.networkBusy;
       reads.gasPrice = next;
+      reads.networkBusy = busy;
       if (moved) onPrice();
       return moved;
     } catch {

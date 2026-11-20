@@ -77,6 +77,12 @@ export const FEE_OVER_AMOUNT = "Bridge fee is more than the amount";
  */
 export const feeNotes = (quote) => (quote?.feeOverAmount ? [FEE_OVER_AMOUNT] : []);
 
+/** Said on the card and the review of what's signed on Dusk while what waits there asks more than the gas price pays. */
+export const NETWORK_BUSY = "Network busy: this may take longer";
+
+/** The busy line, where the network is busy (`busy`, read with the gas price), for what's signed on Dusk. */
+export const busyNotes = (busy) => (busy ? [NETWORK_BUSY] : []);
+
 /** Who does what, in one line: the route's steps and the wallets they take. */
 export function routeSteps(route, quote = null) {
   if (route.mode === "hyperlane" && route.signer === "evm") return "One, in your EVM wallet";

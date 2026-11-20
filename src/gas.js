@@ -32,13 +32,16 @@ function whole(value) {
  * waits in the node's mempool (`mempool`, each `{ gasPrice, gasLimit }`): the
  * network's minimum while it all fits in the next block, as every
  * transaction at the minimum goes in then; once more waits, its median, the
- * two middle prices' mean rounded down, within the minimum and 5 times it.
- * The minimum where the node can't say. Dusk Wallet calls a site's price of
- * twice its own or more a high fee: the node's median of what waits, which
- * one transaction at a high price sets, can be thousands of times it.
+ * two middle prices' mean rounded down, within the minimum and 5 times it
+ * (`ceiling`). `busy` where that median is past the ceiling: what's asked
+ * then may wait. The minimum where the node can't say. Dusk Wallet calls a
+ * site's price of twice its own or more a high fee: the node's median of what
+ * waits, which one transaction at a high price sets, can be thousands of
+ * times it. `{ busy, ceiling, median, minimum, price }`, as app-core's.
  */
 export function defaultGasPrice(mempool) {
-  if (!Array.isArray(mempool)) return GAS_PRICE_MINIMUM;
+  const quiet = (median = null) => ({ busy: false, ceiling: GAS_PRICE_CEILING, median, minimum: GAS_PRICE_MINIMUM, price: GAS_PRICE_MINIMUM });
+  if (!Array.isArray(mempool)) return quiet();
   let gas = 0n;
   const prices = [];
   for (const tx of mempool) {
@@ -46,11 +49,18 @@ export function defaultGasPrice(mempool) {
     const price = whole(tx?.gasPrice);
     if (price !== null) prices.push(price);
   }
-  if ((mempool.length < BLOCK_TRANSACTIONS && gas < BLOCK_GAS) || !prices.length) return GAS_PRICE_MINIMUM;
   prices.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   const middle = Math.floor(prices.length / 2);
-  const median = prices.length % 2 ? prices[middle] : (prices[middle - 1] + prices[middle]) / 2n;
-  return median < GAS_PRICE_MINIMUM ? GAS_PRICE_MINIMUM : median > GAS_PRICE_CEILING ? GAS_PRICE_CEILING : median;
+  const median = !prices.length ? null : prices.length % 2 ? prices[middle] : (prices[middle - 1] + prices[middle]) / 2n;
+  // What waits fits in the next block, which takes every transaction at the minimum too.
+  if ((mempool.length < BLOCK_TRANSACTIONS && gas < BLOCK_GAS) || median === null) return quiet(median);
+  return {
+    busy: median > GAS_PRICE_CEILING,
+    ceiling: GAS_PRICE_CEILING,
+    median,
+    minimum: GAS_PRICE_MINIMUM,
+    price: median < GAS_PRICE_MINIMUM ? GAS_PRICE_MINIMUM : median > GAS_PRICE_CEILING ? GAS_PRICE_CEILING : median,
+  };
 }
 
 /**

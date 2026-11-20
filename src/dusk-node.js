@@ -125,12 +125,22 @@ export function createDuskNode({ url, fetch = globalThis.fetch }) {
    * Not the node's own median of what waits, which one transaction at a high
    * price sets. The minimum where the mempool can't be read.
    */
-  async function gasPrice() {
+  /**
+   * The price Dusk Wallet starts from, as the node's mempool says it now, and
+   * whether the network is busy: what waits asks more than that price pays.
+   * The minimum, not busy, where the node can't say.
+   */
+  async function networkGas() {
     try {
-      return defaultGasPrice((await query("mempoolTxs { gasPrice gasLimit }"))?.mempoolTxs);
+      const { busy, price } = defaultGasPrice((await query("mempoolTxs { gasPrice gasLimit }"))?.mempoolTxs);
+      return { busy, price };
     } catch {
-      return GAS_PRICE_MINIMUM;
+      return { busy: false, price: GAS_PRICE_MINIMUM };
     }
+  }
+
+  async function gasPrice() {
+    return (await networkGas()).price;
   }
 
   // Transaction lookups made in the same tick share one aliased query, with
@@ -191,6 +201,7 @@ export function createDuskNode({ url, fetch = globalThis.fetch }) {
     accountBalance,
     contractCall,
     gasPrice,
+    networkGas,
     latestBlock,
     query,
     transaction,

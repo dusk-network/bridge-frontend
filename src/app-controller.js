@@ -42,6 +42,7 @@ import {
   recipientLine,
   DUSK_WALLET_URL,
   evmWalletName,
+  busyNotes,
   feeNotes,
   openApproval,
   receiptModel,
@@ -175,6 +176,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   // One gas price for every "up to" fee on the page, and for the requests its
   // reviews send: the node's, as last read.
   const duskGasPrice = () => formReads.reads.gasPrice ?? 1n;
+  // What's signed on Dusk while the network is busy may take longer: said, never blocking.
+  const duskBusy = () => busyNotes(formReads.reads.networkBusy);
+  const busyFor = (route) => (route.signer === "dusk" ? duskBusy() : []);
   /** Reads the gas price again; the page is drawn again where it moved. */
   const refreshPrice = () => formReads.price();
   // Says when a transfer ends to whoever isn't looking. A phone's browser can't notify from a page.
@@ -696,7 +700,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       // What Hyperlane's routes hold for the connected Dusk account, to claim.
       escrow: escrowVm(),
       // A bridge fee more than the amount, said under the route line; it blocks nothing.
-      feeNotes: route.paused ? [] : feeNotes(quote),
+      // Under the route line, blocking nothing: a bridge fee more than the amount, a busy network.
+      warnings: route.paused ? [] : [...feeNotes(quote), ...busyFor(route)],
       from: {
         balance: balance.text,
         balanceExact: balance.exact,
@@ -1231,6 +1236,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       lead: review.lead ?? null,
       notYours: review.notYours ?? "",
       notes: review.notes ?? [],
+      warnings: review.warnings ?? [],
       privacy: review.privacy,
       receive: review.receive,
       send: review.send,
@@ -1268,8 +1274,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       // The fees as one figure, their split under Details.
       fees: quote.fees ?? null,
       kind: "send",
-      // Lines it always says, as a bridge fee more than the amount.
-      notes: feeNotes(quote),
+      // Said in amber, blocking nothing: a bridge fee more than the amount, a busy network.
+      warnings: [...feeNotes(quote), ...busyFor(route)],
       // A contract, or DUSK paid to another Dusk account than the connected one: said first.
       paysConnected: route.to.kind === "evm" && evmAccount() && destination === checkEvmRecipient(evmAccount()).address ? destination : "",
       paysTo: destination,
@@ -1479,6 +1485,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       lead: first,
       // Only the account that proved can claim with that proof.
       notes: kind === "prove" ? ["Only the account that proves can claim"] : [],
+      // Signed on Dusk: a busy network is said.
+      warnings: duskBusy(),
       privacy: actionPrivacy(kind),
       routeId: route.id,
       steps: [{ confirmLabel: confirmLabel(view.amount), ready: false, title: kind === "prove" ? "Prove the withdrawal" : "Claim the DUSK", wait: "Preparing…", walletName: "Dusk Wallet" }],
@@ -1541,7 +1549,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       // The fees as one figure, their split under Details.
       fees: quote.fees ?? null,
       // At the request's own fee: one that moved past the amount, or back under it, says so.
-      notes: feeNotes(quote),
+      warnings: [...feeNotes(quote), ...busyFor(route)],
     };
   }
 
@@ -1873,6 +1881,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       error: "",
       feeRows: feeRows((own ? HYPERLANE_GAS.claim : HYPERLANE_GAS.claimFor).limit * gasPrice),
       kind: "claim",
+      // Signed on Dusk: a busy network is said.
+      warnings: duskBusy(),
       lead: lead(duskAccount(), held),
       privacy: own ? "Public: your account and the amount" : PUBLIC_LINE,
       // Whose escrow it claims: what the card says is claimed, once it's sent.

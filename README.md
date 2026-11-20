@@ -427,7 +427,11 @@ block, else its median, at most 5 Lux. It isn't the node's `gas-price`
 median, which one transaction waiting at a high price sets: Dusk Wallet
 calls a site's price of twice its own or more a high fee. The page asks the
 price it last read: the quote, the review and the request all use it, so
-each step shows one fee.
+each step shows one fee. Where the median is past the 5 Lux the price stops
+at, the network is busy (`busy`, as app-core says it): what's signed on Dusk
+may wait, and the card, under its route line, and the review say "Network
+busy: this may take longer" in amber, as they say a bridge fee more than the
+amount. It blocks nothing.
 
 ## Configuration
 

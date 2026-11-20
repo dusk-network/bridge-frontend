@@ -87,6 +87,24 @@ test("the gas price read again draws what quotes it, where it moved", async () =
   assert.equal(drawn, 1);
 });
 
+test("the form reads whether the network is busy with its gas price, and draws again when that changes", async () => {
+  let drawn = 0;
+  let gas = { busy: false, price: 5n };
+  const accountBalance = async () => 10n;
+  const reads = createFormReads({ onPrice: () => (drawn += 1), services: { node: { accountBalance, networkGas: async () => gas } } });
+  await reads.load({ dusk: "a", route: { mode: "duskevm-deposit", signer: "dusk" } });
+  assert.deepEqual([reads.reads.gasPrice, reads.reads.networkBusy], [5n, false]);
+  // What waits now asks more than 5 Lux: the price stays, the network is busy, and what says so is drawn again.
+  gas = { busy: true, price: 5n };
+  assert.equal(await reads.price(), true);
+  assert.deepEqual([reads.reads.gasPrice, reads.reads.networkBusy, drawn], [5n, true, 1]);
+  assert.equal(await reads.price(), false);
+  // A node that only gives its price isn't busy.
+  const plain = createFormReads({ services: { node: { accountBalance, gasPrice: async () => 2n } } });
+  await plain.load({ dusk: "a", route: { mode: "duskevm-deposit", signer: "dusk" } });
+  assert.deepEqual([plain.reads.gasPrice, plain.reads.networkBusy], [2n, false]);
+});
+
 test("a Hyperlane route's form reads its quote and a token's balance and allowance, and what the routes hold for the account", async () => {
   const ACCOUNT = "xGX8tZ9zvamEVKM9vb8GeUQ3xihLd7fQP4w3RSZMD1R61YasXZsgRYRmjStAePvqd4ykZ3mGQhk76e4rvRQ35U2fdS1NGJEvxzKYjB8fD9zShiYphcMmgL6LowdnTzQjkw9";
   const token = { native: false, symbol: "EURd" };

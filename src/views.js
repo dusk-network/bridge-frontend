@@ -255,14 +255,14 @@ function approvalBox(open, note = "") {
 }
 
 /**
- * The route's line under the card: its time and fees, what they say where
- * the bridge fee is more than the amount (`feeNotes`), then how it's doing
- * where that could make someone wait. Its split behind it, where there's
- * one (`routeRows`): a summary that opens, else a plain line.
+ * The route's line under the card: its time and fees, then its warnings,
+ * which block nothing (`warnings`: a bridge fee more than the amount, a
+ * busy network), then how it's doing where that bears on a transfer. Its
+ * split behind it, where there's one (`routeRows`): a summary that opens,
+ * else a plain line.
  */
 function routeHead(vm, open) {
-  // Its fees, then what they say, as a bridge fee more than the amount.
-  const lines = [...vm.routeLines.map((line) => `<span>${html(line)}</span>`), ...(vm.feeNotes ?? []).map((note) => `<span class="route-status warn">${html(note)}</span>`)].join("");
+  const lines = [...vm.routeLines.map((line) => `<span>${html(line)}</span>`), ...(vm.warnings ?? []).map((note) => `<span class="route-status warn">${html(note)}</span>`)].join("");
   // How it's doing, where that bears on a transfer; else it's under the line, with the fees.
   const status = vm.status?.inline ? `<span class="route-status${vm.status.warn ? " warn" : ""}">${html(vm.status.text)}</span>` : "";
   const sum = `${icon("clock")}<span class="route-sum">${lines}${status}</span>`;
@@ -458,6 +458,8 @@ export function reviewSheet(vm) {
   const checks = failing.length
     ? `<ul class="ck" aria-label="Checked">${failing.map((check) => `<li class="bad">${icon("info")}<span>${check.html}</span></li>`).join("")}</ul>`
     : "";
+  // Warnings that block nothing, in amber as the card says them: a bridge fee more than the amount, a busy network.
+  const warnings = (vm.warnings ?? []).map((text) => `<p class="note warn">${icon("info")}<span>${html(text)}</span></p>`).join("");
   const notes = [...vm.checks.filter((check) => check.ok && check.note).map((check) => check.html), ...(vm.notes ?? []).map(html)].map(noteLine).join("");
   // Another account paid: said first, after what's public.
   const notYours = vm.lead ? vm.lead.notYours : vm.notYours;
@@ -470,6 +472,7 @@ export function reviewSheet(vm) {
     </div>`}
     <p class="note">${icon("eye")}<span>${publicLine(vm.privacy)}</span></p>
     ${notYours ? otherAccount(notYours) : ""}
+    ${warnings}
     ${notes}
     ${checks}
     <dl class="group kvs">${quoteRows({ rows: rows.shown })}</dl>
