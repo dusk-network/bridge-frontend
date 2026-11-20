@@ -579,9 +579,10 @@ export function receiptModel(entry, { approvalSpentBy = false, cfg, evm = null, 
   const sourceNetwork = route.from.kind === "dusk" ? "dusk" : route.from.id;
   const destinationNetwork = route.to.kind === "dusk" ? "dusk" : route.to.id;
   // The sender short, the account it pays in full, with its copy and explorer page: "mabvHs…yuwwqv → 0x0d7f0114…".
+  // The arrow keeps with the account it points to, onto the next line if that's where it goes.
   const sender = entry.sender ? `<code class="mono">${html(short(entry.sender))}</code>` : "";
   const paid = entry.destination ? `<span class="paid">${addressHtml(cfg, destinationNetwork, entry.destination, `recipient on ${to}`)}</span>` : "";
-  const fromTo = sender && paid ? `${sender} → ${paid}` : paid ? `To ${paid}` : sender ? `From ${sender}` : "";
+  const fromTo = sender && paid ? `${sender}<span class="to">→ ${paid}</span>` : paid ? `<span class="to">To ${paid}</span>` : sender ? `From ${sender}` : "";
   // Its state is its pill: the caption says only why it failed, a claim on its way, or how long it takes
   // while it's on its way. A withdrawal that waits for you, to prove or to claim, says that on its steps.
   const waitsForYou = route.mode === "duskevm-withdrawal" && !["submitted", "waiting_for_output"].includes(entry.stage ?? "submitted");

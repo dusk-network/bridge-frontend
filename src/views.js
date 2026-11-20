@@ -392,9 +392,15 @@ function actionLead(lead) {
   return `<div class="flow group lead"><div><div class="k">${html(lead.label)}</div><div class="v num">${html(lead.amount)}${unit ? `<span class="u">${html(unit)}</span>` : ""}</div><div class="w">${lead.chain ? chainMark(lead.chain, "xs") : ""}<span>${line}</span></div></div></div>`;
 }
 
-/** One side of what moves: its network, the .dusk name where there's one, then its account, in full where it's paid (`full`). */
+/**
+ * One side of what moves: its network, the .dusk name where there's one, then
+ * its account; in full where it's paid (`full`), on lines of its own that
+ * break evenly, its 0x never cut from the rest.
+ */
 const flowSide = (part) =>
-  `${chainMark(part.chain, "xs")}<span>${html(part.where)}${part.account ? ` · <code class="mono${part.full ? " wrap" : ""}">${html(part.account)}</code>` : ""}</span>`;
+  `${chainMark(part.chain, "xs")}<span>${html(part.where)}${
+    !part.account ? "" : part.full ? `<code class="mono wrap acct">${html(part.account)}</code>` : ` · <code class="mono">${html(part.account)}</code>`
+  }</span>`;
 
 /** One line of a call the wallet can't read: an ID or address in its own type, all of it on hover; else a value and what it is. */
 const callRow = (row) =>
@@ -441,8 +447,9 @@ const sameKey = (value) => {
   return /^(?:0x)?[0-9a-f]{40,64}$/iu.test(text) ? text.toLowerCase().replace(/^0x/u, "") : text;
 };
 
-// Window lines the review says itself or the screen implies: the network (the badge and From say it), the fee and the total, the change.
-const IMPLIED_LINES = new Set(["Estimated change", "Network", "Network fee", "Total"]);
+// Window lines the review says itself or the screen implies: the network (the badge and From say it), the fee and the total, the change,
+// and the site's own words for the transfer, which are the review's.
+const IMPLIED_LINES = new Set(["Estimated change", "From the site, not checked by the wallet", "Network", "Network fee", "Total"]);
 
 /**
  * What a review keeps for reference: the fees' split (`split`), what else
@@ -509,8 +516,10 @@ export function reviewSheet(vm) {
     ${checks}
     <dl class="group kvs">${quoteRows({ rows: rows.shown })}</dl>
     ${step && !step.ready ? `<p class="small t2">${waiting(step.wait ?? "Preparing…")}</p>` : ""}`;
+  // Beside it, no taller than it: what doesn't fit scrolls in its own column.
+  const reference = `${split}${preview}${callRows ? `<div class="wlh">${CALL_TITLE}</div>${callRows}` : ""}`;
   const body = vm.wide
-    ? `<div class="sheet-body cols"><div class="rv-main">${decision}</div><aside class="rv-side" aria-label="Details">${split}${preview}${callRows ? `<div class="wlh">${CALL_TITLE}</div>${callRows}` : ""}</aside></div>`
+    ? `<div class="sheet-body cols"><div class="rv-main">${decision}</div>${reference ? `<aside class="rv-side" aria-label="Details"><div class="rv-ref" tabindex="0">${reference}</div></aside>` : ""}</div>`
     : `<div class="sheet-body">${decision}
     ${split || preview ? `<details class="wl-more"><summary>Details</summary>${split}${preview}</details>` : ""}
     ${callRows ? `<details class="wl-more"><summary>${CALL_TITLE}</summary>${callRows}</details>` : ""}

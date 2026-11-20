@@ -232,7 +232,8 @@ networks yet.
   With two steps, the button names the one at hand, "1 of 2" beside it. A
   check (balances, gas) is said only where it fails, as what keeps Confirm
   off. That's whole by itself. For reference, beside it on a screen 1024 px
-  wide or more and under Details on a narrower one: the fees' split, and
+  wide or more, no taller than it (the rest scrolls in its column), and under
+  Details on a narrower one: the fees' split, and
   what else the step's wallet window will show, in its order and words, with
   its contract, method and raw units; nothing the review says already. A
   call the window can't read and says to check on the site, as Hyperlane's

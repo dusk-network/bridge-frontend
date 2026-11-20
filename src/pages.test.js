@@ -403,6 +403,24 @@ test("a deposit lists Dusk Wallet's bridge window: the recipient in full, the am
   assert.deepEqual([unnamed.Contract.name, unnamed.Contract.value], [undefined, "ababab…ababab"]);
 });
 
+test("a deposit's review lists under Details only what Dusk Wallet shows that the review doesn't: its contract and its call", async () => {
+  const lines = await duskCallLines({ ...shotDeposit, chainId: "dusk:2", from: ACCOUNT });
+  const sheet = reviewSheet({
+    canConfirm: true, cfgLinks: explorer, checks: [], confirmLabel: "Send 0.1 DUSK", feeRows: [{ key: "fee", label: "Network fee", value: "up to 0.005 DUSK" }], privacy: PUBLIC_LINE,
+    receive: { account: SHOT, amount: "0.1", chain: "dusk-evm", full: true, unit: "DUSK", where: "DuskEVM" }, send: { account: "21n5nc…fMMLNz", amount: "0.1", chain: "dusk", unit: "DUSK", where: "Dusk" },
+    steps: [{ current: true, lines, ready: true, walletName: "Dusk Wallet" }], sub: "",
+  });
+  // Not the recipient, the amount, the account it's from, the fee, the total or the site's own words: the review says those.
+  const [details] = partsOf(sheet, "wl-more");
+  assert.deepEqual(fieldsOf(details).map((field) => [field.label, field.text]), [
+    ["Contract", "DuskEVM bridge · 2257e5…a1b31d"],
+    ["Method", "depositETHToWithValue"],
+    ["Call data", "40 bytes · sha256=2f64b19f5ac0…731c7c2a Older Dusk Wallets show it as bytes: check the sha256."],
+  ]);
+  // Whom it pays is in view, in full, on its own line.
+  assert.ok(textOf(sheet).split(" ").includes(SHOT));
+});
+
 test("a proof or claim lists what the withdrawal pays, to whom, and who sent it; proving moves no DUSK, its fee is all it costs", async () => {
   // Testnet's 1,008 DUSK withdrawal to an account, proved, as the Portal's driver encodes the call.
   const portal = {

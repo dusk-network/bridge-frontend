@@ -268,7 +268,7 @@ h1 { font-size: 28px; font-weight: 500; letter-spacing: -0.01em; line-height: 1.
 .kvs .kv { position: relative; display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 11px 16px; font-size: 14px; }
 .kvs .kv + .kv::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; border-top: 1px solid var(--hair); }
 .kv .k { color: var(--text-2); flex: 0 0 auto; max-width: 45%; }
-.kv .v { margin: 0; text-align: right; min-width: 0; }
+.kv .v { margin: 0; text-align: right; min-width: 0; text-wrap: balance; }
 .kv .v.mono { font-size: 13px; }
 .kv .stack { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
 .kv .small { color: var(--text-2); font-size: 12.5px; }
@@ -443,6 +443,7 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 /* Whom it pays, in full: it wraps within its side. */
 /* An account in full, and a wallet line's long value, break into even lines. */
 .flow .w > span { min-width: 0; text-wrap: balance; }
+.flow .w .acct { display: block; margin-top: 1px; }
 .wls .mono.wrap { text-wrap: balance; }
 .flow.lead { grid-template-columns: 1fr; }
 .flow .dn { color: var(--text-3); }
@@ -481,8 +482,10 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 .sheet.cols { width: min(980px, calc(100% - 48px)); }
 .sheet-body.cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 21rem); gap: 24px; align-items: start; }
 .rv-main { min-width: 0; }
-.rv-side { min-width: 0; padding: 4px 16px 10px; border-radius: 16px; background: var(--surface); color: var(--text-2); font-size: 13px; }
-.rv-side:empty { display: none; }
+/* As tall as the decision beside it, which leads; what's past that scrolls inside. */
+.rv-side { position: relative; align-self: stretch; min-width: 0; min-height: 14rem; border-radius: 16px; background: var(--surface); color: var(--text-2); font-size: 13px; }
+.rv-ref { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 16px 10px; border-radius: inherit; }
+.rv-ref:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .rv-side .group { border-radius: 0; background: none; }
 .rv-side .kvs .kv { padding: 9px 0; font-size: 13px; }
 .rv-side .kvs .kv + .kv::before { left: 0; }
@@ -490,7 +493,7 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 .rv-side .kvs .kv:has(.mono) .v { max-width: 100%; text-align: left; }
 .rv-side .wls .wl { grid-template-columns: 1fr; gap: 2px; }
 .rv-side .wlh { margin: 12px 0 2px; }
-.rv-side > .wlh:first-child { margin-top: 10px; }
+.rv-ref > .wlh:first-child { margin-top: 10px; }
 .wl-more > summary { padding: 8px 0; color: var(--text-2); font-size: 13px; cursor: pointer; }
 .wl-more > summary:hover { color: var(--text); }
 .sheet .kvs { margin-top: 12px; }
@@ -538,7 +541,10 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 .okc .pair .cm svg.glyph, .okc .pair .cm .mk-svg { width: 14px; height: 14px; }
 .okc .pair .evm-tag, .okc .pair svg.pa { display: none; }
 .hero .t { font-size: 26px; font-weight: 500; letter-spacing: -0.01em; }
-.hero .l { color: var(--text-2); }
+/* The sender, then the arrow with the account it points to: together on the next line where they don't fit. */
+.hero .l { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 2px 6px; color: var(--text-2); }
+.hero .l .to { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.hero .l .to .fullval code { padding-top: 0; }
 .hero .l code { color: var(--text); }
 .hero .pl { margin-top: 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
 .hero .cap { color: var(--text-2); font-size: 13.5px; }
