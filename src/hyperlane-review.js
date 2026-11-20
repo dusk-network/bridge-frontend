@@ -14,14 +14,17 @@ import { approveRequest, claimRequest } from "./hyperlane-requests.js";
 import { networkName } from "./names.js";
 import { reviewChecks } from "./page-models.js";
 import { buildQuote } from "./quote.js";
+import { transferRemoteLines } from "./wallet-lines.js";
 
 /**
  * A transfer back to Dusk's review at the delivery fee `fee` and the route's
  * word on whether it pays `destination` yet (`registered`), both read for
- * the review: its fee rows and its checks (the gas coin for the fees, the
- * first transfer's claim), all at that one fee, and whether its step can be
- * sent (`ready`): once the fee is read. `reads` is the form's, for the rest:
- * the token and gas coin held, the gas price and the transfer's gas.
+ * the review: its fee rows, as one figure too (`fees`), and its checks (the
+ * gas coin for the fees, the first transfer's claim), all at that one fee,
+ * and, once the fee is read, what the EVM wallet will show (`lines`), for
+ * Details, and that its step can be sent (`ready`). `reads` is the form's,
+ * for the rest: the token and gas coin held, the gas price and the
+ * transfer's gas.
  */
 export function evmReviewParts(route, { amountLux, cfg, destination, duskAccount, evm, fee, reads, registered, timing }) {
   const read = { ...(reads.hyperlane ?? {}), registered };
@@ -36,8 +39,13 @@ export function evmReviewParts(route, { amountLux, cfg, destination, duskAccount
     checks: reviewChecks(route, { cfg, destination, duskAccount, evm, quote, reads: { ...reads, hyperlane: read } }),
     deliveryFee: fee,
     feeRows: quote.rows.filter((row) => !["send", "receive"].includes(row.key)),
+    fees: quote.fees ?? null,
     firstToAccount: registered === false,
-    // What the wallet is asked for is known once the fee is read.
+    // What the wallet is asked for, once the fee is read.
+    lines:
+      fee === null || fee === undefined
+        ? null
+        : transferRemoteLines({ amount: amountLux, cfg, fee: quote.evmFeeWei ?? null, recipient: destination, recipientHash: duskRecipientHash(destination), token: route.hyperlane, value: fee }),
     ready: fee !== null && fee !== undefined,
   };
 }

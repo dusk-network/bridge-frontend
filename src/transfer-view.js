@@ -50,16 +50,14 @@ const middle = (text, head, tail) => (text.length <= head + tail + 1 ? text : `$
  * An account, address or transaction ID, shortened to 6…6 after any 0x:
  * EVM addresses "0xd63bB1…fE8df4", with their checksum's capitals, EVM
  * transactions "0x04a8a8…1b3213", Dusk accounts, transactions and contract
- * IDs "rz2gFT…3VGXyt". A dense list (`dense`) shortens to 4…4: "0xd63b…8df4".
- * The full value is always a copy or a hover away.
+ * IDs "rz2gFT…3VGXyt". The full value is always a copy or a hover away.
  */
-export function short(value, { dense = false } = {}) {
+export function short(value) {
   const text = String(value ?? "").trim();
-  const [head, tail] = dense ? [4, 4] : [6, 6];
-  if (/^0x[0-9a-f]{40}$/iu.test(text)) return middle(formatEvmAddress(text), head + 2, tail);
-  if (/^0x[0-9a-f]{64}$/iu.test(text)) return middle(text.toLowerCase(), head + 2, tail);
-  if (/^[0-9a-f]{64}$/iu.test(text)) return middle(formatContractId(text), head, tail);
-  return dense ? middle(text, head, tail) : shortAccount(text);
+  if (/^0x[0-9a-f]{40}$/iu.test(text)) return middle(formatEvmAddress(text), 8, 6);
+  if (/^0x[0-9a-f]{64}$/iu.test(text)) return middle(text.toLowerCase(), 8, 6);
+  if (/^[0-9a-f]{64}$/iu.test(text)) return middle(formatContractId(text), 6, 6);
+  return shortAccount(text);
 }
 
 /** The action a withdrawal's stage waits for, if the user can take it now. */
@@ -75,7 +73,7 @@ const ACTION_FAILURE = Object.freeze({
 export const WALLET_CANCELLED = "Cancelled in your wallet. Nothing was sent.";
 
 /** Under a recipient that's a contract: it may be meant, as a smart wallet, so it's said, not refused. */
-export const CONTRACT_RECIPIENT = "Contract, not a wallet: tokens may get stuck";
+export const CONTRACT_RECIPIENT = "A contract, not a wallet: check it can take what's sent, or the tokens may get stuck.";
 
 /** What it says when you reject connecting, where there's nothing to send. */
 export const CONNECT_CANCELLED = "Cancelled in your wallet";
@@ -178,14 +176,30 @@ export const switchToProver = (entry) =>
 export function provenByOtherLine(entry, account = "", name = "") {
   const pays = entry?.destination ?? "";
   if (!pays || pays === account) return "Another account proved it. Prove it yourself to claim it.";
-  return `Another account proved it. It pays ${short(pays)}${account ? `, not ${name || "you"}` : ""}`;
+  // What decides whether to prove it: proving and claiming it still pays that account.
+  return `Another account proved it. It pays ${short(pays)}${account ? `, not ${name || "you"}` : ""}; if you prove and claim, the DUSK still goes there.`;
 }
 
 const amountOf = (entry) =>
   entry.amountLux !== undefined && entry.amountLux !== null ? BigInt(entry.amountLux) : null;
 
 /** What a transfer makes public, in one line: the review names both accounts above it. */
-export const PUBLIC_LINE = "Public: both accounts and the amount";
+export const PUBLIC_LINE = "Public and linked: both accounts and the amount";
+
+/**
+ * What becomes public, in one line, naming the accounts themselves: the Dusk
+ * one by its .dusk name too, when it has one (`name`), as the wallet shows it.
+ * For the card's Details, where the accounts aren't named beside it.
+ */
+export function privacyLine(route, cfg, { dusk, evm, name = "" } = {}) {
+  const duskText = dusk ? `Dusk account ${name ? `${name} (${short(dusk)})` : short(dusk)}` : "Dusk account";
+  const evmText = evm ? short(evm) : "your EVM account";
+  const from = networkName(cfg, route.from.id);
+  const to = networkName(cfg, route.to.id);
+  // From the sending side to the paid one, then the amount.
+  const parties = route.from.kind === "dusk" ? `your ${duskText}, ${evmText}` : `${evmText}, the ${duskText}`;
+  return `Public on ${from} and ${to}, and linked: ${parties} and the amount.`;
+}
 
 function step(key, title, state, extra = {}) {
   return { at: null, detail: "", hash: null, key, network: null, state, title, ...extra };
@@ -273,7 +287,7 @@ function withdrawalSteps(entry, cfg, { account, locale, name, now, time: usual, 
           ? `${timing.exact ? "From" : "From about"} ${time(timing.at)}`
           : afterTheProof(usual),
     });
-  } else claim = step("claim", "Claim on Dusk", "todo");
+  } else claim = step("claim", "Claim on Dusk", "todo", { detail: usual?.maturity ? `${durationWords(usual.maturity)} after you prove` : "" });
   return [sent, prove, claim];
 }
 

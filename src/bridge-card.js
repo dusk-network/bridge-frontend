@@ -76,12 +76,6 @@ export function choosePair(routes, { from, to, token = null }) {
 }
 
 /**
- * What a token is, under its symbol in the token list, where the symbol
- * doesn't say it. The network says which, test or real, and DUSK says itself.
- */
-const TOKEN_WORDS = Object.freeze({ EURd: "Euro", USDd: "US dollar" });
-
-/**
  * The tokens the card's pair moves, each by its route, for the card's token
  * list: those that run, and the one the card is on, each once (`tokenOf`),
  * by what it sends. Two that send the same say what arrives. A pair that
@@ -96,7 +90,7 @@ export function tokenChoices(routes, route) {
   const sends = (each) => routeUnits(each).send;
   return chosen.map((each) => ({
     id: each.id,
-    name: TOKEN_WORDS[sends(each)] ?? "",
+    name: each.token.name,
     ...(chosen.filter((other) => sends(other) === sends(each)).length > 1 ? { note: `Arrives as ${routeUnits(each).receive}` } : {}),
     selected: each.id === route.id,
     symbol: sends(each),

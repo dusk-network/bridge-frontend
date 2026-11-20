@@ -107,6 +107,9 @@ const shortFee = (lux, round) => formatShared(lux, { locale: amountLocale(), rou
  */
 export const formatMaxFee = (lux) => (BigInt(lux) > 0n ? shortFee(lux, "up") : "0");
 
+/** What a Dusk fee usually comes to, to the nearest: "0.002". */
+export const formatTypicalFee = (lux) => shortFee(lux, "nearest");
+
 /**
  * An estimated fee in a coin with `decimals`: "~0.00021 ETH", or
  * "<0.000001 ETH" when it rounds to nothing a person would read.

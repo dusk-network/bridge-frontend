@@ -4,6 +4,7 @@ import test from "node:test";
 import { WITHDRAWAL_GAS_REFUSAL } from "./gas.js";
 import {
   PUBLIC_LINE,
+  privacyLine,
   WALLET_CANCELLED,
   actionErrorOf,
   explorerTxUrl,
@@ -46,7 +47,7 @@ test("explorer links point at each network's own explorer", () => {
   assert.equal(explorerTxUrl(cfg, "ethereum", L2_HASH), `https://sepolia.etherscan.io/tx/${L2_HASH}`);
 });
 
-test("short forms are the same everywhere: 6 + 6 after any 0x, and 4 + 4 in a dense list", () => {
+test("short forms are the same everywhere: 6 + 6 after any 0x", () => {
   assert.equal(short(EVM), "0x3E5B82…C3a11d");
   // An address kept in lower case reads with its checksum's capitals, as wallets write it.
   assert.equal(short(EVM.toLowerCase()), "0x3E5B82…C3a11d");
@@ -57,11 +58,6 @@ test("short forms are the same everywhere: 6 + 6 after any 0x, and 4 + 4 in a de
   assert.equal(short(DUSK_HASH), "cecece…cecece");
   assert.equal(short("14EEB3d4021aff09af2c515603a01f8d956a7f6411d11a1b1c0b0561a93fb1b9"), "14eeb3…3fb1b9");
   assert.equal(short("abc"), "abc");
-  // A list's rows: 4 + 4.
-  assert.deepEqual(
-    [EVM, ACCOUNT, DUSK_HASH, "0x04a8a8977dd251da49bd8997cf4d063ddc385f8d29b437b119bb3c79c11b3213"].map((value) => short(value, { dense: true })),
-    ["0x3E5B…a11d", "21n5…MLNz", "cece…cece", "0x04a8…3213"],
-  );
 });
 
 test("a deposit shows In progress with its steps, then Completed with both transactions", () => {
@@ -129,9 +125,9 @@ test("a withdrawal shows its three steps, their times and the next action", () =
     ["Claim on Dusk", "todo"],
   ]);
   assert.equal(ready.steps[0].atText, "23 Oct, 16:20 CEST");
-  // Ready: its button says so, with its fee, and the card and the review say the wait.
+  // Ready: its button says so, with its fee; the claim, how long after the proof.
   assert.equal(ready.steps[1].detail, "");
-  assert.equal(ready.steps[2].detail, "");
+  assert.equal(ready.steps[2].detail, "7 days after you prove");
   // Before it can be proved: from when it can, about an output after it was sent.
   const sent = transferView({ hash: L2_HASH, sourceAt: sentAt, stage: "waiting_for_output", status: "pending" }, { cfg, now, route: withdrawal, locale: GB, timeZone: AMS, timing });
   assert.equal(sent.steps[1].detail, "From about 23 Oct, 16:48 CEST");
@@ -158,11 +154,11 @@ test("a withdrawal shows its three steps, their times and the next action", () =
   assert.equal(paying(ACCOUNT, ACCOUNT), "Another account proved it. Prove it yourself to claim it.");
   const stranger = `25z9o6${"x".repeat(40)}5Etftt`;
   // Proving and claiming it still pays that account: said plainly, by your .dusk name where you have one.
-  assert.equal(paying(stranger, ACCOUNT), "Another account proved it. It pays 25z9o6…5Etftt, not you");
-  assert.equal(paying(stranger, ""), "Another account proved it. It pays 25z9o6…5Etftt");
+  assert.equal(paying(stranger, ACCOUNT), "Another account proved it. It pays 25z9o6…5Etftt, not you; if you prove and claim, the DUSK still goes there.");
+  assert.equal(paying(stranger, ""), "Another account proved it. It pays 25z9o6…5Etftt; if you prove and claim, the DUSK still goes there.");
   const named = { amountLux: "1008000000000", destination: stranger, hash: L2_HASH, provenByOther: true, sourceAt: sentAt, stage: "ready_to_prove", status: "pending" };
   const namedView = transferView(named, { account: ACCOUNT, cfg, name: "alice.dusk", route: withdrawal });
-  assert.equal(namedView.steps[1].detail, "Another account proved it. It pays 25z9o6…5Etftt, not alice.dusk");
+  assert.equal(namedView.steps[1].detail, "Another account proved it. It pays 25z9o6…5Etftt, not alice.dusk; if you prove and claim, the DUSK still goes there.");
   assert.equal(transferSubline(namedView, named, withdrawal, cfg, { account: ACCOUNT, name: "alice.dusk" }), namedView.steps[1].detail);
   // Not "your withdrawal": it may pay another account.
   assert.equal(namedView.headline, "Prove the withdrawal of 1,008 DUSK");
@@ -254,8 +250,10 @@ test("a waiting withdrawal counts down to its claim time, across a clock change"
   assert.deepEqual([refused.title, refused.headline], ["DUSK · DuskEVM → Dusk", "DUSK is ready to claim"]);
 });
 
-test("what becomes public is one line: the review names both accounts above it", () => {
-  assert.equal(PUBLIC_LINE, "Public: both accounts and the amount");
+test("what becomes public is one line: the review names both accounts above it, the card's Details each", () => {
+  assert.equal(PUBLIC_LINE, "Public and linked: both accounts and the amount");
+  const route = { from: { id: "dusk", kind: "dusk" }, to: { id: "dusk-evm", kind: "evm" } };
+  assert.equal(privacyLine(route, cfg, { dusk: ACCOUNT, evm: EVM, name: "alice.dusk" }), `Public on Dusk and DuskEVM, and linked: your Dusk account alice.dusk (21n5nc…fMMLNz), 0x3E5B82…C3a11d and the amount.`);
 });
 
 test("wallet errors say what happened, naming the wallet", () => {
@@ -332,8 +330,8 @@ test("after the proof, the claim date reads as the chain gives it: exact, about,
   // The receipt says it under the countdown, and its claim step doesn't repeat it.
   const model = receiptModel({ ...base }, { cfg, now, route: withdrawal, locale: GB, timeZone: AMS, timing, url: "https://bridge.example/#/transfer/x" });
   assert.equal(model.view.steps[2].detail, "");
-  // As every date on the receipt: the year only where it isn't this one.
-  assert.match(receiptPage({ ...model, canAct: true }), /<div class="k">You can claim in<\/div><div class="v">5 days<\/div><div class="s">Claim from about 2 Nov, 04:20 CET<\/div>/u);
+  // As every date on the receipt, a record: with its day and year.
+  assert.match(receiptPage({ ...model, canAct: true }), /<div class="k">You can claim in<\/div><div class="v">5 days<\/div><div class="s">Claim from about Mon 2 Nov 2026, 04:20 CET<\/div>/u);
 });
 
 test("a late claim says only the wait and its soonest date: no countdown, nothing for a calendar", () => {
@@ -343,7 +341,7 @@ test("a late claim says only the wait and its soonest date: no countdown, nothin
   const entry = { amountLux: "1000000000", claimOverdue: true, hash: L2_HASH, provenAt, readyAt: Date.UTC(2026, 10, 2, 3, 20, 39) / 1_000, sourceAt: provenAt - 86_400_000, stage: "proven_waiting", status: "pending" };
   const model = receiptModel(entry, { cfg, now, route: withdrawal, locale: GB, timeZone: AMS, timing, url: "https://bridge.example/#/transfer/x" });
   const html = receiptPage({ ...model, canAct: true });
-  assert.match(html, /<div class="group count"><p>Waiting for DuskEVM to settle this proof\. Claim from 2 Nov, 04:20 CET at the soonest\.<\/p><\/div>/u);
+  assert.match(html, /<div class="group count"><p>Waiting for DuskEVM to settle this proof\. Claim from Mon 2 Nov 2026, 04:20 CET at the soonest\.<\/p><\/div>/u);
   assert.doesNotMatch(html, /You can claim in/u);
   assert.doesNotMatch(html, /data-action="calendar"/u);
   // In My transfers, its claim step counts down to nothing either.

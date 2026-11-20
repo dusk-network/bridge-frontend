@@ -79,7 +79,8 @@ test("a transfer to Sepolia shows its message on its way, its fees in DUSK, and 
     ["You sent", "Bridge fee", "Network fee", "You receive"].map((label) => rows[label]),
     ["95.085867 EURd", "16.876 DUSK", "0.002216155 DUSK", "95.085867 EURd"],
   );
-  assert.match(rows["Message ID"], /<code class="mono" title="0xed2cb1330bb4746d16af2e23b0d68272a74c890459bd4702352de0b294d1213b">0xed2cb1…d1213b<\/code>/u);
+  // Under Details, in full.
+  assert.match(rows["Message ID"], /<code class="mono">0xed2cb1330bb4746d16af2e23b0d68272a74c890459bd4702352de0b294d1213b<\/code>/u);
   assert.match(rows.To, /https:\/\/sepolia\.etherscan\.io\/address\/0x8A51d0619286d937699D85c1a2c88D67A5a1B75d/u);
   assert.match(rows["Dusk transaction"], /https:\/\/explorer\.testnet\.dusk\.network\/transactions\/transaction\?id=86123720/u);
   assert.equal(model.arrives, true);
@@ -157,7 +158,13 @@ test("a Hyperlane route's line and checks say its time, its fees summed in their
   assert.deepEqual(routeLines(byId["sepolia-to-dusk-usdd"], cfg), ["~1 min · fees in ETH"]);
   assert.deepEqual(routeLines(byId["sepolia-to-dusk-usdd"], cfg, { quote: { bridgeFeeWei: 132_000_000_001n, evmFeeWei: 4_696_029n } }), ["~1 min · fees <0.000001 ETH"]);
   const split = routeDetailRows(byId["dusk-to-sepolia"], buildQuote(byId["dusk-to-sepolia"], "1", { cfg, gasPrice: 1n, hyperlane: { fee: 16_876_000_000n } }));
-  assert.deepEqual(split.map((row) => [row.label, row.value]), [["Bridge fee", "16.876 DUSK"], ["Network fee", "up to 0.005 DUSK"]]);
+  // Behind the line: each fee, what it is or usually comes to, and the steps.
+  assert.deepEqual(split.map((row) => [row.label, row.value, row.detail ?? ""]), [
+    ["Bridge fee", "16.876 DUSK", "on top of the amount"],
+    ["Network fee", "up to 0.005 DUSK", "usually ~0.0022 DUSK"],
+    ["Total", "up to 17.881 DUSK", ""],
+    ["Steps", "One, in Dusk Wallet", ""],
+  ]);
   assert.deepEqual(balanceLine(byId["sepolia-to-dusk"], 2_599_214_807n), { exact: "2.599214807 DUSK", text: "2.5992 DUSK" });
   // EURd and USDd to the cent, rounded down; never 0 for what isn't.
   assert.deepEqual(balanceLine(byId["sepolia-to-dusk-eurd"], 265_883_514n), { exact: "265.883514 EURd", text: "265.88 EURd" });
@@ -236,17 +243,17 @@ test("the card offers the pair's tokens beside the amount, and what the routes h
   // Another account's, typed or handed over: claimed for it.
   const other = cardRegions({ ...vm, escrow: { held: [{ account: ACCOUNT, amount: "10 USDd", route: "sepolia-to-dusk-usdd", sent: "" }], link: "", owner: "xGX8tZ…zQjkw9" } }).escrow;
   assert.match(other, /<b>Held for xGX8tZ…zQjkw9:<\/b> <span class="num">10 USDd<\/span><\/span>/u);
-  assert.match(other, new RegExp(`data-action="escrow-claim" data-route="sepolia-to-dusk-usdd" data-account="${ACCOUNT}">Claim for it<span class="sr-only"> 10 USDd</span></button>`, "u"));
+  assert.match(other, new RegExp(`data-action="escrow-claim" data-route="sepolia-to-dusk-usdd" data-account="${ACCOUNT}">Claim 10 USDd for it</button>`, "u"));
   // Without DUSK for its own claim's fee: the link another account claims it with, in place of Claim.
   const link = "https://bridge.test/#/move/sepolia-to-dusk-usdd?to=" + ACCOUNT;
   const stuck = cardRegions({ ...vm, escrow: { held: [{ account: "", amount: "10 USDd", route: "sepolia-to-dusk-usdd", sent: "" }], link, owner: "" } }).escrow;
   assert.match(stuck, /<span class="num">10 USDd<\/span> · No DUSK for the fee: share this link<\/span>/u);
   assert.ok(stuck.includes(`data-copy="${link}"`) && !stuck.includes("escrow-claim"), stuck);
-  // Both fees in one line, the split behind it; the steps are the review's.
+  // Both fees in one line, the split behind it, with what each is, and the steps.
   assert.match(row, /<span>~20 s · fees up to 16\.884 DUSK<\/span>/u);
-  assert.match(row, /<dt class="k">Bridge fee<\/dt><dd class="v"><span class="stack"><span class="num">16\.876 DUSK<\/span><\/span><\/dd>/u);
-  assert.match(row, /<dt class="k">Network fee<\/dt><dd class="v"><span class="stack"><span class="num">up to 0\.008 DUSK<\/span><\/span><\/dd>/u);
-  assert.doesNotMatch(row, /Approve|wallet step/u);
+  assert.match(row, /<dt class="k">Bridge fee<\/dt><dd class="v"><span class="stack"><span class="num">16\.876 DUSK<\/span><span class="small">paid in DUSK<\/span><\/span><\/dd>/u);
+  assert.match(row, /<dt class="k">Network fee<\/dt><dd class="v"><span class="stack"><span class="num">up to 0\.008 DUSK<\/span><span class="small">usually ~0\.0041 DUSK, for two wallet steps<\/span><\/span><\/dd>/u);
+  assert.match(row, /<dt class="k">Steps<\/dt><dd class="v"><span class="stack"><span class="num">Approve, then send, in Dusk Wallet<\/span><\/span><\/dd>/u);
   assert.match(page, /data-region="escrow"/u);
 });
 
@@ -283,7 +290,7 @@ test("where Sepolia's own DUSK route runs beside Hyperlane's, the token list say
   });
   const options = [...page.matchAll(/data-action="pick-token" data-route="([^"]+)"[^>]*>.*?<span class="nm">([^<]+)<\/span><span class="sb">([^<]+)<\/span>/gu)].map((match) => [match[1], match[2], match[3]]);
   assert.deepEqual(options.slice(0, 2), [
-    ["dusk-to-ethereum", "DUSK", "Arrives as ERC20 DUSK"],
-    ["dusk-to-sepolia", "DUSK", "Arrives as DUSK"],
+    ["dusk-to-ethereum", "DUSK", "Dusk · Arrives as ERC20 DUSK"],
+    ["dusk-to-sepolia", "DUSK", "Dusk · Arrives as DUSK"],
   ]);
 });

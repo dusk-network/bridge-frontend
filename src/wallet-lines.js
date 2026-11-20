@@ -1,0 +1,346 @@
+// What each wallet window will show, in its order, so the review can list it
+// before the window opens and every line can be compared. EVM wallets word
+// things their own way, so their labels are the fields every wallet shows.
+// Dusk Wallet's lines are its approval windows' own words and number forms:
+// what each window shows before anything in it is opened (its raw call data
+// and its Details stay folded), group by group. A `head` line is the window's
+// title, amount and recipient; `gap` starts the window's next group.
+
+import { labelFor, networkFor, routeForAccount } from "@dusk-network/networks";
+import { decodeBridgeCall } from "@dusk-network/networks/duskevm";
+import { formatContractId, formatEvmAddress, shortAccount } from "@dusk-network/networks/format";
+
+import { sha256Hex } from "./data-driver.js";
+import { aboutFee, formatDusk, formatLux, formatMaxFee, formatToken, formatUnitsGrouped } from "./format.js";
+import { networkName, tokenName } from "./names.js";
+
+const WEI_PER_LUX = 1_000_000_000n;
+
+/**
+ * A bridge account on Dusk as Dusk Wallet knows it: one of its network's
+ * service routes in @dusk-network/networks, as the wallet reads them, with
+ * the chain it pays out on as the window names it, the bridge's fee, and
+ * whether it pays out there now. Null for any other account: a transfer to
+ * one shows as "Bridge to <chain>", to any other as "Pay".
+ */
+function walletServiceRoute(chainId, account) {
+  const net = networkFor(chainId);
+  const route = net ? routeForAccount(net, account, "out") : null;
+  return route ? { chain: route.chain.name, feeLux: route.feeLux, network: route.chain.id, running: route.running } : null;
+}
+
+export const OLDER_WALLET_NOTE = "Older Dusk Wallets show it as bytes: check the sha256.";
+
+/** "40 bytes · sha256=1f2e3d4c5b6a…01234567", as Dusk Wallet prints call data. */
+export async function argsSummary(bytes) {
+  const data = Uint8Array.from(bytes);
+  const hash = await sha256Hex(data);
+  return `${data.length} bytes · sha256=${hash.slice(0, 12)}…${hash.slice(-8)}`;
+}
+
+// ---- Dusk Wallet's forms ----------------------------------------------------
+
+/**
+ * A maximum, fee or total, as Dusk Wallet writes it: exact to 4 decimals,
+ * rounded up past them so it never reads lower than it can be, trailing
+ * zeros trimmed.
+ */
+export const walletFee = (lux) => `${formatMaxFee(lux)} DUSK`;
+
+/** A withdrawal's amount: DuskEVM counts 18 decimals, Dusk 9. Anything finer than a Lux keeps all 18. */
+export function withdrawalAmount(wei) {
+  const value = BigInt(wei);
+  if (value % WEI_PER_LUX === 0n) return `${formatLux(value / WEI_PER_LUX)} DUSK`;
+  const fraction = (value % 10n ** 18n).toString().padStart(18, "0").replace(/0+$/u, "");
+  return `${value / 10n ** 18n}.${fraction} DUSK`;
+}
+
+// ---- EVM wallets ------------------------------------------------------------
+
+const chainLine = (cfg, network) => {
+  const chainId = network === "dusk-evm" ? cfg.duskEvm.chainId : cfg.evmNetworks[network].chainId;
+  return { label: "Network", value: `${networkName(cfg, network)}, chain ${chainId}` };
+};
+
+const evmFeeLine = (fee, coin) => ({
+  label: "Network fee",
+  value: fee === null || fee === undefined ? `shown by your wallet, paid in ${coin}` : aboutFee(fee, 18, coin),
+});
+
+/** Approve: the migration contract may take exactly this amount of ERC20 or BEP20 DUSK. */
+export function approveLines({ amountLux, cfg, fee, network }) {
+  const chain = cfg.evmNetworks[network];
+  return [
+    chainLine(cfg, network),
+    { address: chain.tokenContract, label: "Token", network, value: tokenName(network) },
+    { address: chain.migrationContract, label: "Spender", network, value: "Dusk migration contract" },
+    {
+      label: "Spending cap",
+      note: "Exactly this transfer.",
+      value: `${formatLux(amountLux)} ${tokenName(network)}`,
+    },
+    evmFeeLine(fee, chain.currency?.symbol ?? "ETH"),
+  ];
+}
+
+/** Revoke: an approval of 0, so the migration contract may take no more. */
+export function revokeLines({ cfg, fee, network }) {
+  const chain = cfg.evmNetworks[network];
+  return [
+    chainLine(cfg, network),
+    { address: chain.tokenContract, label: "Token", network, value: tokenName(network) },
+    { address: chain.migrationContract, label: "Spender", network, value: "Dusk migration contract" },
+    { label: "Spending cap", note: "It can take nothing more.", value: `0 ${tokenName(network)}` },
+    evmFeeLine(fee, chain.currency?.symbol ?? "ETH"),
+  ];
+}
+
+/** Migrate: the ERC20 or BEP20 DUSK goes into the contract, naming the Dusk account to pay. */
+export function migrateLines({ amountLux, cfg, duskAccount, fee, network }) {
+  const chain = cfg.evmNetworks[network];
+  const wei = BigInt(amountLux) * WEI_PER_LUX;
+  return [
+    chainLine(cfg, network),
+    { address: chain.migrationContract, label: "Interacting with", network, value: "Dusk migration contract" },
+    { label: "Method", mono: true, value: "migrate" },
+    {
+      label: "amount",
+      mono: true,
+      note: `= ${formatLux(amountLux)} DUSK, in 18 decimals: 18 more digits than you typed.`,
+      value: wei.toString(),
+    },
+    {
+      address: duskAccount,
+      label: "targetAddress",
+      network: "dusk",
+      note: "Receives the DUSK.",
+    },
+    { label: "Estimated change", value: `−${formatLux(amountLux)} ${tokenName(network)}` },
+    evmFeeLine(fee, chain.currency?.symbol ?? "ETH"),
+  ];
+}
+
+/** The DuskEVM step of a withdrawal: the L2 bridge call with the DUSK as its value. */
+export function withdrawLines({ amountLux, cfg, duskAccount, fee }) {
+  return [
+    chainLine(cfg, "dusk-evm"),
+    { address: cfg.duskEvm.predeploys.l2StandardBridge, label: "Interacting with", network: "dusk-evm", value: "Bridge on DuskEVM" },
+    { label: "Amount", value: formatDusk(amountLux) },
+    { label: "Method", mono: true, value: "bridgeETHTo" },
+    {
+      address: duskAccount,
+      label: "Recipient on Dusk",
+      network: "dusk",
+      note: "In the call data: the wallet shows it as bytes.",
+    },
+    evmFeeLine(fee, "DUSK"),
+  ];
+}
+
+/**
+ * A Hyperlane transfer back to Dusk: `transferRemote` on the chain's token,
+ * which burns what it sends. The Dusk account is paid by its hash, which the
+ * wallet shows as the call's `recipient`; the account itself is listed under
+ * it. The call's value is the bridge's fee for delivery.
+ */
+export function transferRemoteLines({ amount, cfg, fee, recipient, recipientHash, token, value }) {
+  const network = cfg.hyperlane.network;
+  const coin = cfg.evmNetworks[network].currency?.symbol ?? "ETH";
+  return [
+    chainLine(cfg, network),
+    { address: token.evm.token, label: "Interacting with", network, value: `${token.symbol} on ${networkName(cfg, network)}` },
+    { label: "Method", mono: true, value: "transferRemote" },
+    { label: "destination", mono: true, note: "Dusk's Hyperlane domain.", value: String(cfg.hyperlane.dusk.domain) },
+    { label: "recipient", mono: true, note: "The hash of the Dusk account below.", value: recipientHash },
+    { address: recipient, label: "Pays on Dusk", network: "dusk" },
+    {
+      label: "amount",
+      mono: true,
+      note: `= ${formatToken(amount, token)}, in the token's smallest unit.`,
+      value: BigInt(amount).toString(),
+    },
+    { label: "Value", note: "The bridge fee.", value: `${formatUnitsGrouped(value, 18)} ${coin}` },
+    evmFeeLine(fee, coin),
+  ];
+}
+
+// ---- Dusk Wallet ------------------------------------------------------------
+
+const maxFee = (gas) => BigInt(gas.limit) * BigInt(gas.price);
+
+/** The fee group: the most it can cost, then everything that can leave. */
+const feeLines = (gas, spentLux) => [
+  { gap: true, label: "Network fee", value: `up to ${walletFee(maxFee(gas))}` },
+  { label: "Total", value: `up to ${walletFee(BigInt(spentLux) + maxFee(gas))}` },
+];
+
+/**
+ * The paying account and its rail: "alice.dusk · Public" by the .dusk name
+ * Dusk Wallet sent, or "21n5nc…fMMLNz · Public" without one.
+ */
+const fromLine = (from, name = "") =>
+  name
+    ? { full: from, label: "From", suffix: "Public", value: name }
+    : { full: from, label: "From", mono: true, note: "Or your .dusk name.", suffix: "Public", value: shortAccount(from) };
+
+// Under Details, folded as the window folds them: the method, the call
+// data's size and hash, and the site's own words.
+const siteLine = (display) =>
+  display === undefined || display === null
+    ? []
+    : [{ fold: true, label: "From the site, not checked by the wallet", mono: true, value: JSON.stringify(display) }];
+
+/**
+ * The call as a person checks it, the contract and what it sends; its method
+ * and hash under Details. The contract reads as the window writes it: by the
+ * name its network gives it, then its ID without 0x, 6…6.
+ */
+async function callRows({ chainId, contractId, depositLux, fnArgs, fnName, from, fromName, note, read }) {
+  const id = formatContractId(contractId);
+  const net = networkFor(chainId);
+  const name = net ? labelFor(net, id) : null;
+  return [
+    ...(from ? [fromLine(from, fromName)] : []),
+    { full: id, gap: !from, label: "Contract", mono: true, ...(name ? { name } : { note }), value: formatContractId(id, { short: true }) },
+    ...(depositLux > 0n ? [{ label: "Deposit", value: `${formatLux(depositLux)} DUSK` }] : []),
+    { fold: true, label: "Method", mono: true, value: fnName },
+    {
+      fold: true,
+      label: "Call data",
+      mono: true,
+      note: read ? OLDER_WALLET_NOTE : "Dusk Wallet shows it as bytes: check the sha256.",
+      value: await argsSummary(fnArgs),
+    },
+  ];
+}
+
+/** Whether Dusk Wallet reads `memo` as an EVM address: 0x and 40 hex digits, mixed case only with its checksum. */
+const walletReadsAddress = (memo) =>
+  /^0x(?:[0-9a-f]{40}|[0-9A-F]{40})$/u.test(memo) || (/^0x[0-9a-fA-F]{40}$/u.test(memo) && formatEvmAddress(memo) === memo);
+
+/**
+ * A public transfer, as Dusk Wallet's window shows it. To a bridge account
+ * it knows (walletServiceRoute): "Bridge to <chain>", the amount
+ * to the memo's address there, and what arrives once the bridge takes its
+ * fee, or that nothing does; then the fee, and who pays, the bridge's
+ * account and the recipient there. To any other account: "Pay", with the
+ * memo last.
+ */
+export function duskTransferLines({ amountLux, chainId, from, fromName = "", gas, memo, to }) {
+  const service = walletServiceRoute(chainId, to);
+  // What everyone sees, as the window says it under the amount, before the
+  // fee: under the .dusk name Dusk Wallet sent, or else the account.
+  const me = fromName ? `your name ${fromName}` : "your account";
+  if (!service)
+    return [
+      { amount: `${formatLux(amountLux)} DUSK`, kind: "head", title: "Pay", to: shortAccount(to), toFull: to },
+      { kind: "visible", text: memo ? `Visible to everyone: amount, memo, and ${me}.` : `Visible to everyone: amount and ${me}.` },
+      ...feeLines(gas, amountLux),
+      { ...fromLine(from, fromName), gap: true },
+      { address: to, label: "To", network: "dusk" },
+      { label: "Memo", mono: true, note: "Where the bridge pays out. It must be your address.", value: memo },
+    ];
+  const { chain } = service;
+  const sent = BigInt(amountLux);
+  const arrivesLux = sent > service.feeLux ? sent - service.feeLux : 0n;
+  const recipient = String(memo ?? "").trim();
+  const recipientOk = walletReadsAddress(recipient);
+  const arrives =
+    !service.running || arrivesLux <= 0n
+      ? `Nothing arrives on ${chain}`
+      : recipientOk
+        ? `${formatLux(arrivesLux)} DUSK arrives on ${chain}`
+        : `Nothing arrives without ${/^[aeiou]/iu.test(chain) ? "an" : "a"} ${chain} address in the memo`;
+  return [
+    {
+      amount: `${formatLux(sent)} DUSK`,
+      kind: "head",
+      sub: `${formatLux(sent)} DUSK sent · ${formatLux(service.feeLux)} DUSK bridge fee · ${arrives}`,
+      tag: "Known bridge account",
+      title: `Bridge to ${chain}`,
+      ...(recipientOk ? { to: formatEvmAddress(recipient, { short: true }), toFull: recipient, where: `on ${chain}` } : {}),
+    },
+    { kind: "visible", text: `Visible to everyone: amount, the recipient on ${chain}, and ${me}.` },
+    ...feeLines(gas, sent),
+    { ...fromLine(from, fromName), gap: true },
+    { address: to, label: "To", network: "dusk", value: `The bridge's account for ${chain}` },
+    recipientOk
+      ? { address: recipient, label: `Recipient on ${chain}`, network: service.network }
+      : { label: `Recipient on ${chain}`, mono: true, value: recipient || "(none)" },
+  ];
+}
+
+/**
+ * A contract call, as Dusk Wallet's window for it shows it. Calls to the
+ * DuskEVM bridge on its network lead with what they do, read from their
+ * arguments as the wallet reads them: a deposit, or the withdrawal a proof
+ * or claim is for. Any other call shows as its bytes and their hash.
+ */
+export async function duskCallLines({ chainId, contractId, depositLux = 0n, display, fnArgs, fnName, from, fromName = "", gas, note }) {
+  const deposit = BigInt(depositLux ?? 0n);
+  const net = networkFor(chainId);
+  const known = net ? decodeBridgeCall(net, { args: Uint8Array.from(fnArgs), contractId, fnName }) : null;
+  const call = { chainId, contractId, depositLux: deposit, fnArgs, fnName, fromName, note };
+
+  if (known?.kind === "deposit") {
+    const amount = `${formatLux(known.amountLux)} DUSK`;
+    return [
+      {
+        amount,
+        kind: "head",
+        tag: known.amountLux === deposit ? "Known DuskEVM bridge call" : "",
+        title: "Bridge to DuskEVM",
+        to: formatEvmAddress(known.recipient, { short: true }),
+        toFull: known.recipient,
+        where: "on DuskEVM",
+      },
+      { address: known.recipient, label: "DuskEVM recipient", network: "dusk-evm" },
+      { label: "Amount", value: amount },
+      fromLine(from, fromName),
+      ...feeLines(gas, deposit),
+      ...(await callRows({ ...call, read: true })),
+      ...siteLine(display),
+    ];
+  }
+
+  if (known) {
+    const amount = withdrawalAmount(known.amountWei);
+    // A Dusk account (`account`) or a contract (`contractId`).
+    const pays = known.recipient;
+    // What it costs leads: it moves none of the account's DUSK. Then the
+    // withdrawal it's for and whom that pays.
+    return [
+      {
+        amount: walletFee(maxFee(gas)),
+        kind: "head",
+        lead: "Costs up to",
+        prefix: `for a ${amount} withdrawal that pays`,
+        sub:
+          known.kind === "prove"
+            ? "Proving moves no DUSK. You claim it once the waiting period ends."
+            : "Claiming pays this DUSK to the account above. You pay only the network fee.",
+        tag: "Known DuskEVM bridge call",
+        title: known.kind === "prove" ? "Prove a DuskEVM withdrawal" : "Claim a DuskEVM withdrawal",
+        to: pays.account ? shortAccount(pays.account) : formatContractId(pays.contractId, { short: true }),
+        toFull: pays.account ?? pays.contractId,
+        where: pays.account ? "on Dusk" : "on Dusk, a contract",
+      },
+      pays.account
+        ? { address: pays.account, label: "Pays to", network: "dusk" }
+        : { label: "Pays to contract", mono: true, value: pays.contractId },
+      { label: "Amount", value: amount },
+      { address: known.from, label: "Sent from DuskEVM", network: "dusk-evm" },
+      ...feeLines(gas, deposit),
+      ...(await callRows({ ...call, read: true })),
+      ...siteLine(display),
+    ];
+  }
+
+  // Any other call: "Contract call", with what it sends and its method.
+  return [
+    { amount: deposit > 0n ? `${formatLux(deposit)} DUSK` : "", kind: "head", title: "Contract call" },
+    ...(await callRows({ ...call, from, read: false })),
+    ...feeLines(gas, deposit),
+    ...siteLine(display),
+  ];
+}

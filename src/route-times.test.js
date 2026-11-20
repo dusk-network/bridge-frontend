@@ -146,10 +146,10 @@ test("every page says the same time for the same route", () => {
   const route = byId(testnet, "dusk-evm-to-dusk");
   // Sent now, it says when that is: proved about an output later, 7 days after.
   const when = buildQuote(route, "10", { balance: null, cfg: testnet, gasPrice: 1n, locale: "en-GB", timeZone: "UTC", timing: { chain: CHAIN, now } }).rows.find((row) => row.key === "when");
-  assert.deepEqual([when.value, when.detail], ["Claim from about 3 Nov, 09:28 UTC", undefined]);
+  assert.deepEqual([when.value, when.detail], ["Claim from about 3 Nov, 09:28 UTC", "Claim 7 days after you prove. You can prove about 30 minutes after sending."]);
   const view = transferView({ hash: "0x01", stage: "ready_to_prove", status: "pending" }, { cfg: testnet, route, timing: { chain: CHAIN } });
-  // The receipt's claim step leaves it to the card and the review.
-  assert.equal(view.steps[2].detail, "");
+  // The receipt's claim step says how long after the proof.
+  assert.equal(view.steps[2].detail, "7 days after you prove");
   assert.equal(actionLead("prove", {}, { maturity: view.time.maturity, maxLux: 1n }).rows.find((row) => row.key === "when").value, "Claim 7 days after you prove.");
   // Unknown on this network: no time anywhere, and no Arrives line in the review.
   const unknown = pages(testnet, byId(testnet, "dusk-to-ethereum"), {});

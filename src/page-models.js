@@ -16,6 +16,7 @@ import { buildQuote, routeDuskFees, withdrawalStepMax } from "./quote.js";
 import { routeTime, routeTimeText } from "./route-times.js";
 import { explorerTxUrl, heldForAnother, heldInEscrow, html, short, transferSubline, transferView } from "./transfer-view.js";
 import { copyButton } from "./views.js";
+import { revokeLines } from "./wallet-lines.js";
 
 export const DUSK_WALLET_URL = "https://docs.dusk.network/use/wallets/#dusk-wallet";
 
@@ -76,15 +77,24 @@ export const FEE_OVER_AMOUNT = "Bridge fee is more than the amount";
  */
 export const feeNotes = (quote) => (quote?.feeOverAmount ? [FEE_OVER_AMOUNT] : []);
 
+/** Who does what, in one line: the route's steps and the wallets they take. */
+export function routeSteps(route, quote = null) {
+  if (route.mode === "hyperlane" && route.signer === "evm") return "One, in your EVM wallet";
+  // Before its approval is read, how many steps a token's transfer takes isn't known.
+  if (route.mode === "hyperlane") return quote?.steps === 2 ? "Approve, then send, in Dusk Wallet" : quote?.steps === null ? "In Dusk Wallet" : "One, in Dusk Wallet";
+  if (route.mode === "duskevm-withdrawal") return "Send on DuskEVM, then prove and claim on Dusk";
+  if (route.mode === "migration") return quote?.steps === 1 ? "One, in your EVM wallet" : "Approve, then migrate, in your EVM wallet";
+  return "One, in Dusk Wallet";
+}
+
 /**
  * What the card keeps behind its route line, from the quote's rows: the
- * split of the fees it sums, a fee it leaves out, and a withdrawal's claim.
- * None where the line says it all.
+ * split of the fees it sums, with what each usually comes to, a
+ * withdrawal's claim, then the route's steps.
  */
 export function routeDetailRows(route, quote) {
-  const keys =
-    route.mode === "hyperlane" ? ["bridge", "fee"] : route.mode === "service-transfer" ? ["fee"] : route.mode === "duskevm-withdrawal" ? ["fee-dusk", "when"] : [];
-  return quote.rows.filter((row) => keys.includes(row.key));
+  const rows = quote.rows.filter((row) => ["bridge", "fee", "fee-dusk", "total", "when"].includes(row.key));
+  return [...rows, { key: "steps", label: "Steps", value: routeSteps(route, quote) }];
 }
 
 // ---------------------------------------------------------------------------
@@ -170,8 +180,8 @@ export function revokeReview(route, { cfg, evm, feeWei = null, reads, walletName
       unit: allowance >= NO_LIMIT ? "" : unit,
     },
     privacy: "Public: your account and the revoke",
-    // The wallet's own window shows the token, the spender and the new limit, 0.
-    steps: [{ confirmLabel: "Revoke approval", ready: true, title: "Revoke the approval", walletName }],
+    // What the wallet's window will show, the token, the spender and the new limit, 0, under Details.
+    steps: [{ confirmLabel: "Revoke approval", lines: revokeLines({ cfg, fee: feeWei, network }), ready: true, title: "Revoke the approval", walletName }],
     sub: "",
   };
 }
@@ -320,18 +330,18 @@ const extIcon =
   '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 6h10v10"/><path d="M18 6 6 18"/></svg>';
 
 /**
- * An account, address or transaction ID in a receipt's Details: short, all
- * of it on hover and on copy, with its explorer page where there is one.
+ * An account, address or transaction ID in a receipt's Details: in full,
+ * with copy, and its explorer page where there is one.
  */
-function shortValue(value, { copy, explorer = null, label }) {
-  return `<span class="fullval"><code class="mono" title="${html(value)}">${html(short(value))}</code><span class="full-actions">${copyButton(value, copy)}${explorer ? `<a class="icon-btn" href="${html(explorer)}" target="_blank" rel="noreferrer" aria-label="${html(label)} in the explorer (opens in a new tab)">${extIcon}</a>` : ""}</span></span>`;
+function fullValue(value, { copy, explorer = null, label }) {
+  return `<span class="fullval"><code class="mono">${html(value)}</code><span class="full-actions">${copyButton(value, copy)}${explorer ? `<a class="icon-btn" href="${html(explorer)}" target="_blank" rel="noreferrer" aria-label="${html(label)} in the explorer (opens in a new tab)">${extIcon}</a>` : ""}</span></span>`;
 }
 
 function addressHtml(cfg, network, address, label) {
   if (!address) return "";
   // An EVM address with its checksum's capitals, as every app writes it.
   const value = /^0x[0-9a-f]{40}$/iu.test(address) ? formatEvmAddress(address) : address;
-  return shortValue(value, { copy: label, explorer: explorerAddressUrl(cfg, network, value), label });
+  return fullValue(value, { copy: label, explorer: explorerAddressUrl(cfg, network, value), label });
 }
 
 /**
@@ -344,6 +354,7 @@ export function pricedReview(route, { amount, cfg, destination, duskAccount, evm
   return {
     checks: reviewChecks(route, { cfg, destination, duskAccount, evm, quote, reads }),
     feeRows: quote.rows.filter((row) => !["send", "receive"].includes(row.key)),
+    fees: quote.fees ?? null,
   };
 }
 
@@ -548,10 +559,10 @@ export function feesTotal(rows) {
  * spent its approval since (false for none, null while that's being read).
  * `wallet` is the connected EVM wallet, with whether it takes adding DUSK of
  * the transfer's chain (`addsDusk`), and whether this visit added it (`addedDusk`).
- * Whom it pays is in full; everything else is short, in full on copy.
+ * Whom it pays is in full; under Details, every account and transaction too.
  */
 export function receiptModel(entry, { approvalSpentBy = false, cfg, evm = null, gasPrice = 1n, locale, now = Date.now(), own = null, owner = own?.account ?? "", route, submitter = null, timeZone, timing, url, wallet = null }) {
-  const view = transferView(entry, { account: own?.account ?? "", cfg, locale, name: own?.name ?? "", now, owner, route, submitter, timeZone, timing });
+  const view = transferView(entry, { account: own?.account ?? "", cfg, locale, name: own?.name ?? "", now, owner, route, submitter, timeZone, timing, year: true });
   const from = networkName(cfg, route.from.id);
   const to = networkName(cfg, route.to.id);
   // The sender short, the account it pays in full: "mabvHs…yuwwqv → 0x0d7f01…".
@@ -559,7 +570,7 @@ export function receiptModel(entry, { approvalSpentBy = false, cfg, evm = null, 
   const sender = entry.sender ? `<code class="mono">${html(short(entry.sender))}</code>` : "";
   const paid = payee ? `<code class="mono wrap">${html(payee)}</code>` : "";
   const fromTo = sender && paid ? `${sender} → ${paid}` : paid ? `To ${paid}` : sender ? `From ${sender}` : "";
-  const time = (ms) => (ms ? formatDateTime(ms, { locale, now, timeZone }) : "");
+  const time = (ms) => (ms ? formatDateTime(ms, { locale, now, timeZone, year: true }) : "");
   // Its state is its pill: the caption says only why it failed, a claim on its way, or how long it takes
   // while it's on its way. A withdrawal that waits for you, to prove or to claim, says that on its steps.
   const waitsForYou = route.mode === "duskevm-withdrawal" && !["submitted", "waiting_for_output"].includes(entry.stage ?? "submitted");
@@ -576,9 +587,9 @@ export function receiptModel(entry, { approvalSpentBy = false, cfg, evm = null, 
   if (entry.destination) details.push({ html: addressHtml(cfg, destinationNetwork, entry.destination, `recipient on ${to}`), label: "To" });
   // Paid to a Dusk account by its hash, where this page doesn't know the account.
   else if (route.mode === "hyperlane" && entry.recipientHash)
-    details.push({ html: shortValue(entry.recipientHash, { copy: "the Dusk account's hash" }), label: "To (account hash)" });
+    details.push({ html: fullValue(entry.recipientHash, { copy: "the Dusk account's hash" }), label: "To (account hash)" });
   // Hyperlane's message, the one each side's Mailbox knows it by.
-  if (route.mode === "hyperlane" && entry.messageId) details.push({ html: shortValue(entry.messageId, { copy: "the message ID" }), label: "Message ID" });
+  if (route.mode === "hyperlane" && entry.messageId) details.push({ html: fullValue(entry.messageId, { copy: "the message ID" }), label: "Message ID" });
   // The approval the migration spent, as its chain says, or the one this browser sent for it, as for a Hyperlane transfer of a token issued on Dusk.
   const approval =
     route.mode === "migration" ? (evm?.approvalState === "found" && evm.approval?.hash ? evm.approval.hash : entry.approvalHash) : route.mode === "hyperlane" ? entry.approvalHash : null;
@@ -650,7 +661,7 @@ export function receiptModel(entry, { approvalSpentBy = false, cfg, evm = null, 
 }
 
 function txHtml(cfg, network, hash, label) {
-  return shortValue(hash, { copy: `the ${label} ID`, explorer: explorerTxUrl(cfg, network, hash), label: `The ${label}` });
+  return fullValue(hash, { copy: `the ${label} ID`, explorer: explorerTxUrl(cfg, network, hash), label: `The ${label}` });
 }
 
 // ---------------------------------------------------------------------------
@@ -672,8 +683,8 @@ export function transfersModel(entries, { account = "", accounts, cfg, locale, n
       action: view.action,
       amountExact: view.amountExact,
       amountText: view.amountText,
-      // Its transaction, as the receipt and Look up know it, short as a list writes it.
-      hash: short(entry.hash, { dense: true }),
+      // Its transaction, as the receipt and Look up know it.
+      hash: short(entry.hash),
       href: transferHref(entry.hash),
       id: entry.id,
       pair: view.pair,
@@ -682,7 +693,7 @@ export function transfersModel(entries, { account = "", accounts, cfg, locale, n
       subline: transferSubline(view, entry, route, cfg, { account, locale, name, now, timeZone }),
       title: routeTitle(cfg, route),
       // Whom it pays: your account by its .dusk name, any other by its short form.
-      to: !entry.destination ? null : entry.destination === account && name ? { name } : { address: short(entry.destination, { dense: true }) },
+      to: !entry.destination ? null : entry.destination === account && name ? { name } : { address: short(entry.destination) },
       tracker: view.tracker,
     };
   };

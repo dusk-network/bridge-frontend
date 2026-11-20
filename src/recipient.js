@@ -9,10 +9,10 @@ import { getAddress, isAddress, zeroAddress } from "viem";
 import { normalizeDuskAddress } from "./validation.js";
 
 export const NOT_EVM_ADDRESS = "Not an EVM address (0x + 40 hex)";
-export const EVM_CHECKSUM_MISMATCH = "Checksum mismatch: a character may be wrong";
+export const EVM_CHECKSUM_MISMATCH = "Checksum mismatch: a character may be wrong. Copy it again from your wallet.";
 export const ZERO_ADDRESS_RECIPIENT = "That's the zero address, not a wallet";
 // Whichever route's token or bridge contract it is.
-export const BRIDGE_CONTRACT_RECIPIENT = "That's a bridge contract, not a wallet";
+export const BRIDGE_CONTRACT_RECIPIENT = "That's the DUSK token's or a bridge contract, not a wallet";
 export const NOT_DUSK_RECIPIENT = "Not a Dusk account or .dusk name";
 
 /**

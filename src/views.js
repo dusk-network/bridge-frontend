@@ -6,6 +6,8 @@
 // checked, on the review and the receipt; other accounts and transactions
 // short, in full on copy, with an explorer link, in Söhne Mono.
 
+import { formatContractId, formatEvmAddress } from "@dusk-network/networks/format";
+
 import { NOTICE_WORDS } from "./arrival-notice.js";
 import { GLYPH, chainMark, icon, pairMark } from "./icons.js";
 import { CONNECT_CANCELLED, CONTRACT_RECIPIENT, LATER_STEP_CANCELLED, WALLET_CANCELLED, html, short } from "./transfer-view.js";
@@ -27,6 +29,12 @@ export const explorerLink = (href, label) =>
   href
     ? `<a class="icon-btn" href="${html(href)}" target="_blank" rel="noreferrer" aria-label="${html(label)} (opens in a new tab)" title="Open in explorer">${icon("ext")}</a>`
     : "";
+
+/** A full address or hash: wrapped monospace, copy, explorer. */
+export function fullValue({ explorer, label, value }) {
+  if (!value) return "";
+  return `<span class="fullval"><code class="mono">${html(value)}</code><span class="full-actions">${copyButton(value, label)}${explorerLink(explorer, `${label} in the explorer`)}</span></span>`;
+}
 
 const statusPill = (status, word) =>
   status === "completed"
@@ -65,7 +73,8 @@ export function strip(vm) {
 
 /** "0x7568…b72D", its tail in a span a phone leaves out ("0x7568…"), so the header labels both wallets. */
 function shortLabel(value) {
-  const text = short(value);
+  // An EVM address as main writes it here: on a phone with both wallets, a longer one is cut off.
+  const text = /^0x[0-9a-f]{40}$/iu.test(String(value ?? "").trim()) ? formatEvmAddress(String(value).trim(), { short: true }) : short(value);
   const cut = text.indexOf("…") + 1;
   return cut ? `${html(text.slice(0, cut))}<span class="tail">${html(text.slice(cut))}</span>` : html(text);
 }
@@ -134,7 +143,7 @@ export function quoteRows(quote) {
   return quote.rows
     .map(
       (row) =>
-        `<div class="kv${row.strong ? " total" : ""}"><dt class="k">${html(row.label)}</dt><dd class="v"><span class="stack"><span class="num">${html(row.value)}</span>${row.detail ? `<span class="small">${html(row.detail)}</span>` : ""}</span></dd></div>`,
+        `<div class="kv${row.strong ? " total" : ""}"><dt class="k">${html(row.label)}</dt><dd class="v">${row.html ?? `<span class="stack"><span class="num">${html(row.value)}</span>${row.detail ? `<span class="small">${html(row.detail)}</span>` : ""}</span>`}</dd></div>`,
     )
     .join("");
 }
@@ -144,9 +153,9 @@ export function quoteRows(quote) {
  * capitals' fix, or the .dusk name a bare name likely is.
  */
 function recipientNote(to) {
-  if (to.resolved) return `${html(to.resolved.name)} = <code class="mono" title="${html(to.resolved.address)}">${html(short(to.resolved.address))}</code>`;
+  if (to.resolved) return `${html(to.resolved.name)} points to <code class="mono wrap">${html(to.resolved.address)}</code>`;
   if (to.looking) return `Looking up ${html(to.looking)}…`;
-  if (to.fix) return `<button type="button" class="linkish" data-action="recipient-fix">Fix capitals</button>`;
+  if (to.fix) return `<button type="button" class="linkish" data-action="recipient-fix">If every character is right, fix the capitals</button>`;
   if (to.suggest) return `<button type="button" class="linkish" data-action="recipient-suggest">Did you mean ${html(to.suggest)}?</button>`;
   if (to.contract) return CONTRACT_RECIPIENT;
   return "";
@@ -211,7 +220,7 @@ function escrowBox(escrow) {
         .map((each) =>
           each.sent
             ? `<span class="small t2">${html(each.sent)}</span>`
-            : `<button type="button" class="btn sec sm" data-action="escrow-claim" data-route="${html(each.route)}"${each.account ? ` data-account="${html(each.account)}"` : ""}>${each.account ? `Claim for it<span class="sr-only"> ${html(each.amount)}</span>` : `Claim ${html(each.amount)}`}</button>`,
+            : `<button type="button" class="btn sec sm" data-action="escrow-claim" data-route="${html(each.route)}"${each.account ? ` data-account="${html(each.account)}"` : ""}>Claim ${html(each.amount)}${each.account ? " for it" : ""}</button>`,
         )
         .join("");
   return `<div class="card notice-box" role="note"><div class="note">${icon("info")}<span>${lead} <span class="num">${html(listed)}</span>${why}</span></div><div class="btn-row">${buttons}</div></div>`;
@@ -242,7 +251,7 @@ const addDuskButton = (offer, look) =>
 function approvalBox(open, note = "") {
   if (!open) return note ? `<p class="message" id="approval-note" role="status" tabindex="-1">${html(note)}</p>` : "";
   const finish = open.finishLux > 0n ? '<button type="button" class="btn sec sm" data-action="approval-finish">Finish</button>' : "";
-  return `<div class="card notice-box" role="note"><div class="note">${icon("info")}<span><b>Open approval:</b> <span class="num">${html(open.text)}</span></span></div><div class="btn-row">${finish}<button type="button" class="btn sec sm" data-action="approval-revoke">Revoke</button></div></div>`;
+  return `<div class="card notice-box" role="note"><div class="note">${icon("info")}<span><b>Open approval:</b> the Dusk migration contract may still take <b class="num">${html(open.text)}</b> from <code class="mono">${html(short(open.evm))}</code>.</span></div><div class="btn-row">${finish}<button type="button" class="btn sec sm" data-action="approval-revoke">Revoke</button></div></div>`;
 }
 
 /**
@@ -254,7 +263,8 @@ function approvalBox(open, note = "") {
 function routeHead(vm, open) {
   // Its fees, then what they say, as a bridge fee more than the amount.
   const lines = [...vm.routeLines.map((line) => `<span>${html(line)}</span>`), ...(vm.feeNotes ?? []).map((note) => `<span class="route-status warn">${html(note)}</span>`)].join("");
-  const status = vm.status ? `<span class="route-status${vm.status.warn ? " warn" : ""}">${html(vm.status.text)}</span>` : "";
+  // How it's doing, where that bears on a transfer; else it's under the line, with the fees.
+  const status = vm.status?.inline ? `<span class="route-status${vm.status.warn ? " warn" : ""}">${html(vm.status.text)}</span>` : "";
   const sum = `${icon("clock")}<span class="route-sum">${lines}${status}</span>`;
   return open ? `<summary>${sum}${icon("chev-d", "chev")}</summary>` : `<div class="route-head">${sum}</div>`;
 }
@@ -275,7 +285,14 @@ export function cardRegions(vm) {
     "from-foot": `<span>${vm.from.balance ? html(vm.from.balanceLabel) : ""}</span><span class="bal">${vm.from.balance ? `<span class="num"${exactTitle(vm.from.balanceExact, vm.from.balance)}>${html(vm.from.balance)}</span>` : ""}${vm.canMax ? '<button type="button" class="mini" data-action="max">Max</button>' : ""}${vm.addDusk ? addDuskButton(vm.addDusk, "mini") : ""}</span>`,
     receive: html(vm.receive || "0"),
     "recipient-note": recipientNote(vm.to),
-    route: vm.routeLines.length ? `${routeHead(vm, folds)}${folds ? `<dl class="kvs" aria-label="Fees">${quoteRows({ rows: vm.routeRows })}</dl>` : ""}` : "",
+    // Behind the route line: the fees' split and the steps, how the route is doing as usual, and what's public.
+    route: vm.routeLines.length
+      ? `${routeHead(vm, folds)}${
+          folds
+            ? `<dl class="kvs" aria-label="Fees">${quoteRows({ rows: vm.routeRows })}</dl>${vm.status && !vm.status.inline ? `<p class="pubnote">${html(vm.status.text)}</p>` : ""}${vm.privacy ? `<p class="pubnote">${publicLine(vm.privacy)}</p>` : ""}`
+            : ""
+        }`
+      : "",
   };
 }
 
@@ -327,6 +344,43 @@ export function cardPage(vm) {
 // Review sheet
 // ---------------------------------------------------------------------------
 
+// The top of a wallet's window: its title, the amount, to whom, its small
+// print and its tag. A cost ("Costs up to 0.051 DUSK") takes its own line,
+// then what it's for ("for a 1,008 DUSK withdrawal that pays …").
+function walletHead(head) {
+  const amount = head.amount ? `${head.lead ? `${html(head.lead)} ` : ""}<span class="num">${html(head.amount)}</span>` : "";
+  const to = head.to
+    ? `${html(head.prefix ?? "to")} <code class="mono" title="${html(head.toFull ?? head.to)}">${html(head.to)}</code>${head.where ? ` ${html(head.where)}` : ""}`
+    : "";
+  const lines = (head.prefix ? [amount, to] : [[amount, to].filter(Boolean).join(" ")]).filter(Boolean);
+  return `<div class="wlhd"><div class="wlt">${html(head.title)}</div>${lines.map((line) => `<div class="wlto">${line}</div>`).join("")}${head.sub ? `<div class="wlto">${html(head.sub)}</div>` : ""}${head.tag ? `<span class="tag">${icon("check")}${html(head.tag)}</span>` : ""}</div>`;
+}
+
+/**
+ * What a wallet's window will show, line by line, in its order and words:
+ * under the review's Details, so in one list, what the window folds last.
+ */
+export function walletLines(lines, cfgLinks) {
+  const head = lines.find((line) => line.kind === "head");
+  // What everyone sees, under the window's head and before its fee, as the window says it.
+  const visible = lines.find((line) => line.kind === "visible");
+  const row = (line) => {
+    const text = `<span class="${line.mono ? "mono wrap" : "num"}"${line.full ? ` title="${html(line.full)}"` : ""}>${html(line.value)}</span>`;
+    // A contract by its network's name reads "DuskEVM bridge · 2257e5…a1b31d", the "·" kept with its ID.
+    const value = line.address
+      ? `${line.value ? `<span class="wl-name">${html(line.value)}</span>` : ""}${fullValue({ explorer: cfgLinks.explorer(line.network, line.address), label: line.label, value: line.address })}`
+      : line.name
+        ? `<span class="wl-contract"><span class="wl-name">${html(line.name)}</span> <span class="wl-id">· ${text}</span></span>`
+        : line.suffix
+          ? `<span>${text}<span class="t2"> · ${html(line.suffix)}</span></span>`
+          : text;
+    return `<div class="wl${line.gap ? " gap" : ""}"><dt>${html(line.label)}</dt><dd>${value}${line.note ? `<span class="wl-note">${html(line.note)}</span>` : ""}</dd></div>`;
+  };
+  // What the window folds under its own Details (the function, the hash, the site's words) comes last.
+  const ordered = [...lines.filter((line) => !line.kind && !line.fold), ...lines.filter((line) => line.fold)];
+  return `${head ? walletHead(head) : ""}${visible ? `<p class="note wl-visible">${icon("eye")}<span>${html(visible.text)}</span></p>` : ""}<dl class="wls">${ordered.map(row).join("")}</dl>`;
+}
+
 // Before what it costs: it pays another account than the connected one, or a contract.
 const otherAccount = (text) =>
   `<div class="group pad warn-box" role="note"><div class="note">${icon("person")}<span>${html(text)}</span></div></div>`;
@@ -361,15 +415,45 @@ const callFold = (call) =>
 const noteLine = (text) => `<p class="note">${icon("info")}<span>${text}</span></p>`;
 
 /**
- * The review: what moves, from whom and to whom in full, the one line on
- * what's public, what could cost money said once, the fees and the time,
- * and the steps where there are two. What the wallet's window shows is the
- * window's own, not repeated here; a call it can't read, it says to check
- * on the site, so that's under Details (`callFold`). A check is said only
- * where it fails, as what keeps Confirm off.
+ * The review: what moves, from whom and to whom in full, the spender of an
+ * approval in full, the one line on what's public, what could cost money
+ * said once, the fees as one figure and the time, and the steps where there
+ * are two. A check is said only where it fails, as what keeps Confirm off.
+ * Under Details, for reference: the fees' split (`detailRows`) and what the
+ * step's wallet window will show (`lines`); a call the window can't read, it
+ * says to check on the site, so that has its own fold (`callFold`).
  */
+/** The fee rows a review sums into one figure, where there's more than one. */
+const FEE_KEYS = ["fee", "bridge", "total", "fee-dusk"];
+
+/**
+ * A review's rows: in view, an approval's spender in full, which the wallet
+ * may not name; the fees as one figure, `fees` where they're more than one,
+ * the time and the steps. Under Details: the fees' split.
+ */
+function reviewRows(vm, step) {
+  const rows = vm.feeRows ?? [];
+  const fees = rows.filter((row) => FEE_KEYS.includes(row.key));
+  const rest = rows.filter((row) => !FEE_KEYS.includes(row.key));
+  const split = fees.length > 1 && vm.fees;
+  const spender = step?.spender
+    ? [
+        {
+          html: `<span class="stack"><span>${html(step.spender.name)}</span><code class="mono wrap">${html(/^0x/u.test(step.spender.address) ? formatEvmAddress(step.spender.address) : formatContractId(step.spender.address))}</code></span>`,
+          key: "spender",
+          label: "Spender",
+        },
+      ]
+    : [];
+  return { details: split ? fees : [], shown: [...spender, ...(split ? [vm.fees] : fees), ...rest] };
+}
+
 export function reviewSheet(vm) {
   const step = vm.steps.find((each) => each.current);
+  const rows = reviewRows(vm, step);
+  const preview = step?.ready && step.lines?.length && !step.call?.length ? `<div class="wlh">${html(step.walletName)} will show</div>${walletLines(step.lines, vm.cfgLinks)}` : "";
+  const split = rows.details.length ? `<dl class="group kvs">${quoteRows({ rows: rows.details })}</dl>` : "";
+  const details = split || preview ? `<details class="wl-more"><summary>Details</summary>${split}${preview}</details>` : "";
   const failing = vm.checks.filter((check) => !check.ok);
   const checks = failing.length
     ? `<ul class="ck" aria-label="Checked">${failing.map((check) => `<li class="bad">${icon("info")}<span>${check.html}</span></li>`).join("")}</ul>`
@@ -388,7 +472,8 @@ export function reviewSheet(vm) {
     ${notYours ? otherAccount(notYours) : ""}
     ${notes}
     ${checks}
-    <dl class="group kvs">${quoteRows({ rows: vm.feeRows })}</dl>
+    <dl class="group kvs">${quoteRows({ rows: rows.shown })}</dl>
+    ${details}
     ${step?.ready ? callFold(step.call) : ""}
     ${step && !step.ready ? `<p class="small t2">${waiting(step.wait ?? "Preparing…")}</p>` : ""}
   </div>
@@ -471,6 +556,7 @@ export function receiptPage(vm) {
       ${fees}
       ${notes}
       <div class="lk"><span>${icon("link")}Receipt link</span>${copyButton(vm.url, "receipt link")}</div>
+      <p class="small t2">Anyone with the link can see this transfer.</p>
       <div class="bt"><a class="btn ${view.status === "completed" ? "pri" : "sec"}" href="#/">New transfer</a></div>
     </div>
     <section class="rc-side" aria-label="Details"><details><summary class="gh">Details</summary><dl class="kvs">${details}</dl></details></section>
@@ -606,7 +692,7 @@ export function walletsSheet(vm) {
         `<li><button type="button" class="netopt" data-action="choose-dusk" data-wallet="${html(wallet.id)}"><span class="av">${icon("wallet")}</span><span><span class="nm">${html(wallet.name)}</span><span class="sb">${html(wallet.rdns)}</span></span>${icon("chev-r")}</button></li>`,
     )
     .join("");
-  return `<div class="sheet-head"><div><h2 id="sheet-title">Choose a wallet</h2></div><button type="button" class="icon-btn round" data-action="close-sheet" aria-label="Close">${icon("close")}</button></div>
+  return `<div class="sheet-head"><div><h2 id="sheet-title">Choose a wallet</h2>${vm.wallets.length > 1 ? "" : `<p class="sub">The wallet you used here before isn't installed.</p>`}</div><button type="button" class="icon-btn round" data-action="close-sheet" aria-label="Close">${icon("close")}</button></div>
   <div class="sheet-body"><ul class="group wallets">${rows}</ul></div>`;
 }
 

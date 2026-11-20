@@ -43,7 +43,7 @@ test("a deposit quote shows the fee as a maximum, in DUSK", () => {
   assert.deepEqual(rows(quote), {
     // DuskEVM testnet's configured time, until the chain's own is read.
     arrives: "~1 min",
-    fee: "up to 0.005 DUSK",
+    fee: "up to 0.005 DUSK | usually ~0.002 DUSK",
     receive: "25 DUSK on DuskEVM",
     send: "25 DUSK",
   });
@@ -63,10 +63,10 @@ test("the bridge fee comes off what arrives, and a send at or under it is refuse
   assert.equal(buildQuote(routes["service-transfer"], "5", { balance: 10_000_000_000n, cfg, gasPrice: 1n }).insufficient, undefined);
   // Paid out as the chain's own DUSK token.
   assert.equal(rows(quote).receive, "49 ERC20 DUSK on Sepolia");
-  assert.equal(rows(quote).fee, "up to 0.0025 DUSK");
+  assert.equal(rows(quote).fee, "up to 0.0025 DUSK | usually ~0.0019 DUSK");
   // No time is known for this testnet payout, so none is quoted.
   assert.equal(rows(quote).arrives, undefined);
-  assert.equal(buildQuote(routes["service-transfer"], "1", { cfg }).error, "Send more than the 1 DUSK fee");
+  assert.equal(buildQuote(routes["service-transfer"], "1", { cfg }).error, "Send more than the 1 DUSK bridge fee");
   assert.match(
     buildQuote(routes["service-transfer"], "100", { balance: 100n * DUSK, cfg, gasPrice: 1n }).error,
     /^That's more than you have after the network fee\. You can send up to 99\.9975 DUSK\./u,
@@ -81,12 +81,12 @@ test("a migration prices both wallet steps in ETH until the allowance covers it"
   };
   const both = buildQuote(routes.migration, "1000", ctx);
   assert.equal(rows(both).send, "1,000 ERC20 DUSK");
-  assert.equal(rows(both).fee, "~0.00021 ETH");
+  assert.equal(rows(both).fee, "~0.00021 ETH | two wallet steps");
   assert.equal(rows(both).receive, "1,000 DUSK on Dusk");
   assert.equal(both.steps, 2);
   const approved = buildQuote(routes.migration, "1000", { ...ctx, allowanceWei: 1_000n * 10n ** 18n });
   assert.equal(approved.steps, 1);
-  assert.equal(rows(approved).fee, "~0.00012 ETH");
+  assert.equal(rows(approved).fee, "~0.00012 ETH | one wallet step");
   assert.match(buildQuote(routes.migration, "3000", ctx).error, /^That's more than the 2,500 ERC20 DUSK in this wallet\./u);
   // ERC20 DUSK finer than a Lux can't be migrated, so Max stops at whole Lux.
   assert.equal(buildQuote(routes.migration, "", { ...ctx, balance: 10n ** 18n + 1n }).maxLux, DUSK);
@@ -125,12 +125,12 @@ test("a withdrawal quotes its DuskEVM step and the two Dusk steps after it", () 
   // proved about an output later (1,700 s), it can be claimed 7 days after.
   const read = { chain: { withdrawal: { finalitySeconds: 302_400, maturitySeconds: 604_800, outputSeconds: 1_700 } }, now: Date.UTC(2026, 9, 29, 11) };
   const timed = rows(buildQuote(routes["duskevm-withdrawal"], "200", { cfg, gasPrice: 1n, locale: "en-GB", timeZone: "Europe/Amsterdam", timing: read }));
-  assert.equal(timed.when, "Claim from about 5 Nov, 12:28 CET");
+  assert.equal(timed.when, "Claim from about 5 Nov, 12:28 CET | Claim 7 days after you prove. You can prove about 30 minutes after sending.");
   assert.equal(timed.arrives, undefined);
   // A game's finality longer than the proof's maturity: the date waits for it, as the Portal does.
   const slow = { ...read, chain: { withdrawal: { ...read.chain.withdrawal, finalitySeconds: 1_209_600 } } };
   const later = rows(buildQuote(routes["duskevm-withdrawal"], "200", { cfg, gasPrice: 1n, locale: "en-GB", timeZone: "Europe/Amsterdam", timing: slow }));
-  assert.equal(later.when, "Claim from about 12 Nov, 12:28 CET");
+  assert.equal(later.when, "Claim from about 12 Nov, 12:28 CET | Claim 7 days after you prove. You can prove about 30 minutes after sending.");
   // Before outputs can be timed, no date: the wait alone.
   const untimed = { ...read, chain: { withdrawal: { ...read.chain.withdrawal, outputSeconds: null } } };
   assert.equal(rows(buildQuote(routes["duskevm-withdrawal"], "200", { cfg, gasPrice: 1n, timing: untimed })).when, "Claim 7 days after you prove.");
@@ -196,8 +196,8 @@ test("DUSK to Sepolia pays the route's own quote and the network fee on top, in 
   // The wallet asks for the DUSK and its bridge fee in one deposit: the review's total says the most that leaves.
   assert.deepEqual(rows(quote), {
     arrives: "~20 s",
-    bridge: "16.876 DUSK",
-    fee: "up to 0.005 DUSK",
+    bridge: "16.876 DUSK | on top of the amount",
+    fee: "up to 0.005 DUSK | usually ~0.0022 DUSK",
     receive: "1 DUSK on Sepolia",
     send: "1 DUSK",
     total: "up to 17.881 DUSK",
@@ -208,7 +208,7 @@ test("DUSK to Sepolia pays the route's own quote and the network fee on top, in 
   assert.deepEqual([over.insufficient, over.error], [true, "That's more than you have after the fees. You can send up to 3.119 DUSK."]);
   // Before the route's quote is read, no fee is guessed: a dash, and no Max.
   const unread = buildQuote(route, "1", { balance: 20n * DUSK, cfg, gasPrice: 1n });
-  assert.deepEqual([rows(unread).bridge, unread.maxLux, rows(unread).total], ["—", null, undefined]);
+  assert.deepEqual([rows(unread).bridge, unread.maxLux, rows(unread).total], ["— | on top of the amount", null, undefined]);
 });
 
 test("EURd to Sepolia approves the route first where it can't take the amount, and pays its fees in DUSK", () => {
@@ -217,8 +217,8 @@ test("EURd to Sepolia approves the route first where it can't take the amount, a
   const quote = buildQuote(route, "10", ctx);
   assert.deepEqual(rows(quote), {
     arrives: "~20 s",
-    bridge: "16.876 DUSK",
-    fee: "up to 0.008 DUSK",
+    bridge: "16.876 DUSK | paid in DUSK",
+    fee: "up to 0.008 DUSK | usually ~0.0041 DUSK, for two wallet steps",
     receive: "10 EURd on Sepolia",
     send: "10 EURd",
   });
@@ -238,8 +238,8 @@ test("from Sepolia, one call pays the token's delivery fee as its value, in ETH"
   const quote = buildQuote(route, "32.156353", { balance: 71_508_029n, cfg, evm });
   assert.deepEqual(rows(quote), {
     arrives: "~1 min",
-    bridge: "<0.000001 ETH",
-    fee: "~0.00055 ETH",
+    bridge: "<0.000001 ETH | paid in ETH, with the transfer",
+    fee: "~0.00055 ETH | one wallet step",
     receive: "32.156353 USDd on Dusk",
     send: "32.156353 USDd",
   });
@@ -248,7 +248,7 @@ test("from Sepolia, one call pays the token's delivery fee as its value, in ETH"
   const poor = buildQuote(route, "1", { balance: 71_508_029n, cfg, evm: { ...evm, gasCoinWei: 1_000n } });
   assert.deepEqual([poor.short, poor.error], ["ETH", "The fees take ~0.00055 ETH, more than the 0.000000000000001 ETH in this wallet."]);
   // Unread, the fees are said in what pays them.
-  assert.deepEqual(rows(buildQuote(route, "1", { cfg })).fee, "paid in ETH");
+  assert.deepEqual(rows(buildQuote(route, "1", { cfg })).fee, "paid in ETH | one wallet step");
 });
 
 test("a Hyperlane route's time is said to the 10 seconds under a minute, and what this browser's transfers took once there are two", () => {
@@ -288,4 +288,21 @@ test("a bridge fee larger than the amount sent is noted, and blocks nothing", ()
   assert.equal(eurd.feeOverAmount, false);
   const back = buildQuote(byId["sepolia-to-dusk"], "0.0000001", { balance: DUSK, cfg, evm: { deliveryFeeWei: 132_000_000_001n, gas: 1n, gasCoinWei: 10n ** 18n, priceWei: 1n } });
   assert.equal(back.feeOverAmount, false);
+});
+
+test("each quote gives its fees as one figure, for the review to show, with their split behind it", () => {
+  const fees = (route, amount, extra = {}) => buildQuote(routes[route] ?? byId[route], amount, { balance: 2_000n * DUSK, cfg, gasPrice: 1n, ...extra }).fees;
+  // One network fee: as it is.
+  assert.deepEqual(fees("duskevm-deposit", "25"), { key: "fees", label: "Network fee", value: "up to 0.005 DUSK" });
+  // The bridge's fee and the network's, summed; the bridge's taken from the amount, as said.
+  assert.deepEqual(fees("service-transfer", "50"), { detail: "1 DUSK of it from the amount", key: "fees", label: "Fees", value: "up to 1.0025 DUSK" });
+  // DUSK to Sepolia: both in DUSK.
+  assert.deepEqual(fees("dusk-to-sepolia", "1", { hyperlane: { fee: BRIDGE_FEE } }), { key: "fees", label: "Fees", value: "up to 16.881 DUSK" });
+  assert.equal(fees("dusk-to-sepolia", "1", { hyperlane: {} }).value, "—");
+  // From Sepolia: both in ETH, the network's once its gas is read.
+  const evm = { deliveryFeeWei: 500_000_000_000_000n, gas: 1n, gasCoinWei: 10n ** 18n, priceWei: 50_000_000_000_000n };
+  assert.equal(fees("sepolia-to-dusk", "1", { balance: DUSK, evm }).value, "~0.00055 ETH");
+  assert.equal(fees("sepolia-to-dusk", "1", { balance: DUSK, evm: { ...evm, gas: null } }).value, "~0.0005 ETH and the network fee");
+  // A withdrawal: DuskEVM's now, then the most the proof and the claim cost on Dusk.
+  assert.equal(fees("duskevm-withdrawal", "200", { balance: 312n * 10n ** 18n, evmGas: { priceWei: 10_001_000_000n, withdraw: 138_439n } }).value, "~0.0014 DUSK, then up to 0.102 DUSK on Dusk");
 });

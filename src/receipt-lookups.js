@@ -3,7 +3,7 @@
 // isn't indexed, or a network didn't answer), it's looked up again while the
 // receipt stays open; opening the receipt again always looks again.
 
-export const NOT_FOUND = "No bridge transfer with this ID yet";
+export const NOT_FOUND = "No bridge transfer with this ID on this network yet";
 
 /**
  * @param {object} options

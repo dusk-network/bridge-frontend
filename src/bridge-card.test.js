@@ -232,11 +232,11 @@ test("Hyperlane's routes run Sepolia ↔ Dusk on testnet, one per token, beside 
 test("the card offers the tokens its pair moves, each by its route, and none for a pair of one", () => {
   const routes = buildRoutes(testnet);
   const choices = (route) => tokenChoices(routes, route).map(({ id, name, selected, symbol }) => [symbol, id, name, selected]);
-  // Each by what it is, where its symbol doesn't say it: DUSK says itself, and the badge says testnet.
+  // Each by its own name.
   assert.deepEqual(choices(routeBetween(routes, "dusk", "ethereum", "hyperlane-eurd")), [
-    ["DUSK", "dusk-to-sepolia", "", false],
-    ["EURd", "dusk-to-sepolia-eurd", "Euro", true],
-    ["USDd", "dusk-to-sepolia-usdd", "US dollar", false],
+    ["DUSK", "dusk-to-sepolia", "Dusk", false],
+    ["EURd", "dusk-to-sepolia-eurd", "Dusk Euro (testnet)", true],
+    ["USDd", "dusk-to-sepolia-usdd", "Dusk Dollar (testnet)", false],
   ]);
   assert.deepEqual(choices(routeBetween(routes, "ethereum", "dusk")).map(([symbol, id]) => [symbol, id]), [
     ["DUSK", "sepolia-to-dusk"],
