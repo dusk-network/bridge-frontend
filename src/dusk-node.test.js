@@ -107,10 +107,42 @@ test("contract queries post rkyv bytes to the configured node", async () => {
   assert.deepEqual([...(await node.contractCall(`0x${"AB".repeat(32)}`, "gameCount", new Uint8Array([1, 2])))], [9]);
 });
 
-test("the gas price is the node's median, or 1 Lux without one", async () => {
-  const median = createDuskNode({ fetch: ruskLike({}).fetch, url: NODE });
-  assert.equal(await median.gasPrice(), 3n);
+// Dusk Wallet's own check of a site's gas price (src/ui/notification/app.js
+// on dusk-network/wallet main): "This site chose a high fee" from twice the
+// price it starts from itself, by app-core's defaultGasPrice.
+const walletWarns = (asked, walletPrice) => asked >= walletPrice * 2n;
 
+test("the gas price is the one Dusk Wallet starts from, so its window doesn't call the bridge's fee high", async () => {
+  // One transaction waits, at 2,000 Lux: the node's median says 2,000, which
+  // the bridge used to ask. The wallet starts from 1 Lux, the network's
+  // minimum, while what waits fits in the next block.
+  const waiting = (mempoolTxs) =>
+    createDuskNode({
+      fetch: ruskLike({
+        gasPrice: () => new Response(JSON.stringify({ average: 2000, max: 2000, median: 2000, min: 2000 })),
+        graphql: (selection) => {
+          assert.equal(selection, "mempoolTxs { gasPrice gasLimit }");
+          return { mempoolTxs };
+        },
+      }).fetch,
+      url: NODE,
+    });
+  const quiet = await waiting([{ gasLimit: 2_500_000, gasPrice: 2_000 }]).gasPrice();
+  assert.equal(quiet, 1n);
+  assert.equal(walletWarns(quiet, 1n), false);
+  // What the node's median would have asked: 2,000 times the wallet's price.
+  assert.equal(walletWarns(2_000n, 1n), true);
+  assert.equal(await waiting([]).gasPrice(), 1n);
+
+  // Once more waits than a block takes, the mempool's median, as the wallet starts from it too, up to 5 times the minimum.
+  const full = (gasPrice, count = 1_000) => Array.from({ length: count }, () => ({ gasLimit: 2_500_000, gasPrice }));
+  assert.equal(await waiting(full(3)).gasPrice(), 3n);
+  assert.equal(await waiting(full(2_000)).gasPrice(), 5n);
+  // Or more gas than a block takes (3,000,000,000), however few they are; the two middle prices' mean, rounded down.
+  assert.equal(await waiting([{ gasLimit: "2000000000", gasPrice: "2" }, { gasLimit: "2000000000", gasPrice: "5" }]).gasPrice(), 3n);
+
+  // A node that can't say what waits, or none at all: the minimum, as the wallet falls back to.
+  assert.equal(await waiting(null).gasPrice(), 1n);
   const down = createDuskNode({
     fetch: async () => {
       throw new Error("offline");

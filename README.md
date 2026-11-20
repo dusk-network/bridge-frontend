@@ -401,17 +401,24 @@ A route whose time isn't known on this network shows none.
 
 ## Gas
 
-Dusk contract calls ask the wallet for their own limit at the node's price:
-5M for a deposit, 50M plus the withdrawal's own gas for a proof or claim. A
-claim that would need more than `VITE_GAS_LIMIT_UPPER` isn't sent. A
-Hyperlane transfer takes 5M (it spends 2.13M to 2.22M), an approval 3M
-(1.84M), a claim of a route's escrow 3M (1.9M), and one for another account
-80M, its key decoded on chain (about 59M), each refused where it's past
-`VITE_GAS_LIMIT_UPPER`. Transfers
-to the bridge account carry the wallet's public-transfer limit, 2.5M, at the
-node's price. The quote shows each limit as "up to", as Dusk Wallet does.
-The node's price is the one the page last read: the quote, the review and
-the request all use it, so each step shows one fee.
+Dusk contract calls ask the wallet for their own limit at the price Dusk
+Wallet starts from: 5M for a deposit, 50M plus the withdrawal's own gas for
+a proof or claim. A claim that would need more than `VITE_GAS_LIMIT_UPPER`
+isn't sent. A Hyperlane transfer takes 5M (it spends 2.13M to 2.22M), an
+approval 3M (1.84M), a claim of a route's escrow 3M (1.9M), and one for
+another account 80M, its key decoded on chain (about 59M), each refused
+where it's past `VITE_GAS_LIMIT_UPPER`. Transfers to the bridge account
+carry the wallet's public-transfer limit, 2.5M, at the same price. The quote
+shows each limit as "up to", as Dusk Wallet does.
+
+That price is the wallets' one rule (`@dusk-network/app-core/gas`,
+`defaultGasPrice`), read from what waits in the node's mempool
+(`mempoolTxs`): the network's minimum, 1 Lux, while it all fits in the next
+block, else its median, at most 5 Lux. It isn't the node's `gas-price`
+median, which one transaction waiting at a high price sets: Dusk Wallet
+calls a site's price of twice its own or more a high fee. The page asks the
+price it last read: the quote, the review and the request all use it, so
+each step shows one fee.
 
 ## Configuration
 

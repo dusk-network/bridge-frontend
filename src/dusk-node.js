@@ -1,6 +1,8 @@
 // Reads from the deployment's own Dusk node. The wallet extension is only
 // asked to sign and send; chain state never comes through it.
 
+import { GAS_PRICE_MINIMUM, defaultGasPrice } from "./gas.js";
+
 const RETRYABLE = new Set([429, 502, 503, 504]);
 const TX_FIELDS =
   "blockHeight blockTimestamp err gasSpent id tx { txType memo callData { contractId fnName data } json }";
@@ -116,16 +118,18 @@ export function createDuskNode({ url, fetch = globalThis.fetch }) {
     return new Uint8Array(await response.arrayBuffer());
   }
 
-  /** The node's median gas price, the price the wallet itself defaults to. */
+  /**
+   * The gas price Dusk Wallet starts a transaction from (`defaultGasPrice`),
+   * from what waits in the node's mempool, as the wallet reads it: what the
+   * bridge asks for, so the wallet's window reads it as the network's price.
+   * Not the node's own median of what waits, which one transaction at a high
+   * price sets. The minimum where the mempool can't be read.
+   */
   async function gasPrice() {
     try {
-      const response = await post("/on/blocks/gas-price", {
-        body: "100",
-      });
-      const median = BigInt((await response.json())?.median ?? 0);
-      return median > 0n ? median : 1n;
+      return defaultGasPrice((await query("mempoolTxs { gasPrice gasLimit }"))?.mempoolTxs);
     } catch {
-      return 1n;
+      return GAS_PRICE_MINIMUM;
     }
   }
 
