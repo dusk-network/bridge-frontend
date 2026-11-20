@@ -516,10 +516,10 @@ export function reviewSheet(vm) {
     ${checks}
     <dl class="group kvs">${quoteRows({ rows: rows.shown })}</dl>
     ${step && !step.ready ? `<p class="small t2">${waiting(step.wait ?? "Preparing…")}</p>` : ""}`;
-  // Beside it, no taller than it: what doesn't fit scrolls in its own column.
+  // Beside it, at its own height: the decision stays in view while it's read.
   const reference = `${split}${preview}${callRows ? `<div class="wlh">${CALL_TITLE}</div>${callRows}` : ""}`;
   const body = vm.wide
-    ? `<div class="sheet-body cols"><div class="rv-main">${decision}</div>${reference ? `<aside class="rv-side" aria-label="Details"><div class="rv-ref" tabindex="0">${reference}</div></aside>` : ""}</div>`
+    ? `<div class="sheet-body cols"><div class="rv-main">${decision}</div>${reference ? `<aside class="rv-side" aria-label="Details">${reference}</aside>` : ""}</div>`
     : `<div class="sheet-body">${decision}
     ${split || preview ? `<details class="wl-more"><summary>Details</summary>${split}${preview}</details>` : ""}
     ${callRows ? `<details class="wl-more"><summary>${CALL_TITLE}</summary>${callRows}</details>` : ""}

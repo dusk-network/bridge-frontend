@@ -481,11 +481,9 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 /* A review on a wide screen: what to decide on the left; beside it, muted, its reference, open. */
 .sheet.cols { width: min(980px, calc(100% - 48px)); }
 .sheet-body.cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 21rem); gap: 24px; align-items: start; }
-.rv-main { min-width: 0; }
-/* As tall as the decision beside it, which leads; what's past that scrolls inside. */
-.rv-side { position: relative; align-self: stretch; min-width: 0; min-height: 14rem; border-radius: 16px; background: var(--surface); color: var(--text-2); font-size: 13px; }
-.rv-ref { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 16px 10px; border-radius: inherit; }
-.rv-ref:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+/* The decision stays in view while a taller reference beside it scrolls with the sheet; the shorter of the two never sticks out. */
+.rv-main { position: sticky; top: 0; min-width: 0; }
+.rv-side { min-width: 0; padding: 4px 16px 10px; border-radius: 16px; background: var(--surface); color: var(--text-2); font-size: 13px; }
 .rv-side .group { border-radius: 0; background: none; }
 .rv-side .kvs .kv { padding: 9px 0; font-size: 13px; }
 .rv-side .kvs .kv + .kv::before { left: 0; }
@@ -493,7 +491,7 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 .rv-side .kvs .kv:has(.mono) .v { max-width: 100%; text-align: left; }
 .rv-side .wls .wl { grid-template-columns: 1fr; gap: 2px; }
 .rv-side .wlh { margin: 12px 0 2px; }
-.rv-ref > .wlh:first-child { margin-top: 10px; }
+.rv-side > .wlh:first-child { margin-top: 10px; }
 .wl-more > summary { padding: 8px 0; color: var(--text-2); font-size: 13px; cursor: pointer; }
 .wl-more > summary:hover { color: var(--text); }
 .sheet .kvs { margin-top: 12px; }
@@ -520,8 +518,9 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 /* ------------------------------------------------------------------ */
 
 .rc { display: grid; grid-template-columns: minmax(0, 1fr) 24rem; gap: 40px; align-items: start; }
-.rc-main { min-width: 0; display: flex; flex-direction: column; gap: 20px; }
-.rc-side { position: sticky; top: calc(var(--bar) + 24px); padding: 20px 22px 8px; border-radius: 16px; background: var(--surface); }
+/* The transfer stays in view, under the header, while taller details beside it scroll with the page; the details take their own height. */
+.rc-main { position: sticky; top: calc(var(--bar) + 24px); min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+.rc-side { padding: 20px 22px 8px; border-radius: 16px; background: var(--surface); }
 .rc-side .gh { margin: 0 0 6px; color: var(--text); font-size: 17px; font-weight: 500; }
 .rc-side summary.gh { margin: 0; cursor: pointer; }
 .rc-side details[open] > summary.gh { margin-bottom: 6px; }
@@ -641,7 +640,7 @@ form.group .l1 { display: block; color: var(--text); font-size: 14px; font-weigh
   .page, .col { padding: 28px 24px 20px; }
   .foot { padding-left: 24px; padding-right: 24px; }
   .rc { grid-template-columns: minmax(0, 1fr); }
-  .rc-side { position: static; }
+  .rc-main { position: static; }
   .chainchip { display: none; }
 }
 

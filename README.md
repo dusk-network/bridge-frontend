@@ -231,9 +231,9 @@ networks yet.
   Dusk Wallet asks for where it isn't the amount and the fees, and the time.
   With two steps, the button names the one at hand, "1 of 2" beside it. A
   check (balances, gas) is said only where it fails, as what keeps Confirm
-  off. That's whole by itself. For reference, beside it on a screen 1024 px
-  wide or more, no taller than it (the rest scrolls in its column), and under
-  Details on a narrower one: the fees' split, and
+  off. That's whole by itself, and stays in view while a longer reference
+  beside it is read, on a screen 1024 px wide or more; under Details on a
+  narrower one. That reference: the fees' split, and
   what else the step's wallet window will show, in its order and words, with
   its contract, method and raw units; nothing the review says already. A
   call the window can't read and says to check on the site, as Hyperlane's
@@ -247,8 +247,9 @@ networks yet.
 - **Receipt**, at `#/transfer/<hash>`: what moved and whom it paid, in full,
   with its copy and explorer link, the steps with times, explorer links and
   transaction IDs, what its fees came to and the receipt link to copy. Its
-  details sit beside it on a screen 1024 px wide or more and under Details on
-  a narrower one, saying only what the rest doesn't: the sending account in
+  details sit beside it on a screen 1024 px wide or more, the transfer
+  staying in view while longer details are read, and under Details on a
+  narrower one, saying only what the rest doesn't: the sending account in
   full, Hyperlane's message, an approval, and its amounts as every Dusk app
   says them (`transferLedger`): the bridge fee, the network fee, and what you
   sent and received where the title doesn't say it, to the Lux, and gas as
