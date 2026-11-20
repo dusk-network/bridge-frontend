@@ -231,21 +231,23 @@ networks yet.
   Dusk Wallet asks for where it isn't the amount and the fees, and the time.
   With two steps, the button names the one at hand, "1 of 2" beside it. A
   check (balances, gas) is said only where it fails, as what keeps Confirm
-  off. That's whole by itself. For reference, under Details: the fees'
-  split, and what else the step's wallet window will show, in its order and
-  words, with its contract, method and raw units; nothing the review says
-  already. A call the window can't read and says to check on the site, as
-  Hyperlane's transfer and claims, has its own fold, "Call details, to check
-  against Dusk Wallet": its method, its contract as the window prints it,
-  its call data's size and sha256 as the window's Details print them, and
-  its arguments in plain words, read back from its bytes. Cancel
+  off. That's whole by itself. For reference, beside it on a screen 1024 px
+  wide or more and under Details on a narrower one: the fees' split, and
+  what else the step's wallet window will show, in its order and words, with
+  its contract, method and raw units; nothing the review says already. A
+  call the window can't read and says to check on the site, as Hyperlane's
+  transfer and claims, is "Call details, to check against Dusk Wallet", in
+  its own fold on a narrow screen: its method, its contract as the window
+  prints it, its call data's size and sha256 as the window's Details print
+  them, and its arguments in plain words, read back from its bytes. Cancel
   and confirm are equal; a request you reject
   in the wallet is said in grey, not as a failure. A Dusk call is built
   before Confirm can be pressed, and the reviewed request is what is sent.
 - **Receipt**, at `#/transfer/<hash>`: what moved and whom it paid, in full,
   with its copy and explorer link, the steps with times, explorer links and
-  transaction IDs, what its fees came to and the receipt link to copy. Under
-  Details, only what the rest doesn't say: the sending account in
+  transaction IDs, what its fees came to and the receipt link to copy. Its
+  details sit beside it on a screen 1024 px wide or more and under Details on
+  a narrower one, saying only what the rest doesn't: the sending account in
   full, Hyperlane's message, an approval, and its amounts as every Dusk app
   says them (`transferLedger`): the bridge fee, the network fee, and what you
   sent and received where the title doesn't say it, to the Lux, and gas as

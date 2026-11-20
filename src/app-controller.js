@@ -1113,6 +1113,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       }),
       canAct: duskState().installed,
       notice: arrivals.state(),
+      wide: wide(),
     });
   }
 
@@ -1187,8 +1188,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         otherSite: cfg.links.sites[other],
       });
     } else if (state.sheet === "review" && reviews.current) {
-      dialog.className = "sheet wide";
-      dialog.innerHTML = reviewSheet(reviewVm());
+      const vm = reviewVm();
+      dialog.className = vm.wide ? "sheet cols" : "sheet wide";
+      dialog.innerHTML = reviewSheet(vm);
     } else if (state.sheet === "wallets") {
       dialog.className = "sheet narrow";
       dialog.innerHTML = walletsSheet({ wallets: state.dusk?.choices ?? [] });
@@ -1245,6 +1247,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       stepOf: stepOfReview(review, { switching }),
       steps: review.steps.map((item, index) => ({ ...item, current: index === review.current })),
       sub: review.sub,
+      wide: wide(),
     };
   }
 
@@ -2577,6 +2580,15 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   // A phone's Back from a review: its step in the history is gone, so it closes.
   globalThis.addEventListener?.("popstate", () => {
     if (state.sheet === "review" && !globalThis.history?.state?.reviewSheet) closeSheet();
+  });
+
+  // Wide enough for two columns, as the stylesheet lays them out: a review's
+  // reference and a receipt's details beside them, open. Narrower, they fold.
+  const twoColumns = globalThis.matchMedia?.("(min-width: 1024px)") ?? null;
+  const wide = () => Boolean(twoColumns?.matches);
+  twoColumns?.addEventListener?.("change", () => {
+    if (state.page.page === "transfer") renderMain();
+    if (state.sheet === "review" && reviews.current) renderSheet();
   });
 
   // On a phone, the card's button stays above the keyboard: the height the

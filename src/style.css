@@ -477,6 +477,20 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 .req .note.wl-visible { margin: 0 0 10px; font-size: 13px; }
 .wl-note { color: var(--text-2); font-size: 12.5px; }
 .wl-more { margin-top: 6px; border-top: 1px solid var(--hair); }
+/* A review on a wide screen: what to decide on the left; beside it, muted, its reference, open. */
+.sheet.cols { width: min(980px, calc(100% - 48px)); }
+.sheet-body.cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 21rem); gap: 24px; align-items: start; }
+.rv-main { min-width: 0; }
+.rv-side { min-width: 0; padding: 4px 16px 10px; border-radius: 16px; background: var(--surface); color: var(--text-2); font-size: 13px; }
+.rv-side:empty { display: none; }
+.rv-side .group { border-radius: 0; background: none; }
+.rv-side .kvs .kv { padding: 9px 0; font-size: 13px; }
+.rv-side .kvs .kv + .kv::before { left: 0; }
+.rv-side .kvs .kv:has(.mono) { flex-direction: column; gap: 4px; }
+.rv-side .kvs .kv:has(.mono) .v { max-width: 100%; text-align: left; }
+.rv-side .wls .wl { grid-template-columns: 1fr; gap: 2px; }
+.rv-side .wlh { margin: 12px 0 2px; }
+.rv-side > .wlh:first-child { margin-top: 10px; }
 .wl-more > summary { padding: 8px 0; color: var(--text-2); font-size: 13px; cursor: pointer; }
 .wl-more > summary:hover { color: var(--text); }
 .sheet .kvs { margin-top: 12px; }

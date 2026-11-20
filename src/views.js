@@ -476,8 +476,9 @@ const CALL_TITLE = "Call details, to check against Dusk Wallet";
  * approval in full, the one line on what's public, what could cost money
  * said once, the fees as one figure, the total where it isn't the amount and
  * the fees, and the time; with two steps, the button says which it takes. A
- * check is said only where it fails, as what keeps Confirm off. That's whole
- * by itself. Its reference (`reviewReference`) is under Details, with a call
+ * check is said only where it fails, as what keeps Confirm off. That column
+ * is whole by itself. Its reference (`reviewReference`) sits beside it on a
+ * wide screen (`vm.wide`), open; on a narrow one, under Details, with a call
  * the window can't read in a fold of its own.
  */
 export function reviewSheet(vm) {
@@ -508,7 +509,9 @@ export function reviewSheet(vm) {
     ${checks}
     <dl class="group kvs">${quoteRows({ rows: rows.shown })}</dl>
     ${step && !step.ready ? `<p class="small t2">${waiting(step.wait ?? "Preparing…")}</p>` : ""}`;
-  const body = `<div class="sheet-body">${decision}
+  const body = vm.wide
+    ? `<div class="sheet-body cols"><div class="rv-main">${decision}</div><aside class="rv-side" aria-label="Details">${split}${preview}${callRows ? `<div class="wlh">${CALL_TITLE}</div>${callRows}` : ""}</aside></div>`
+    : `<div class="sheet-body">${decision}
     ${split || preview ? `<details class="wl-more"><summary>Details</summary>${split}${preview}</details>` : ""}
     ${callRows ? `<details class="wl-more"><summary>${CALL_TITLE}</summary>${callRows}</details>` : ""}
   </div>`;
@@ -577,9 +580,14 @@ export function receiptPage(vm) {
     .join("");
   const notes = vm.notes.map((note) => `<p class="note">${icon(note.icon ?? "info")}<span>${note.html}</span></p>`).join("");
   const fees = vm.fees?.text ? `<p class="small t2">Fees <span class="num"${exactTitle(vm.fees.exact, vm.fees.text)}>${html(vm.fees.text)}</span></p>` : "";
-  // The transfer and its steps on the left; its details folded in a panel
-  // beside them, as the web wallet shows a transaction.
-  const side = details ? `<section class="rc-side" aria-label="Details"><details><summary class="gh">Details</summary><dl class="kvs">${details}</dl></details></section>` : "";
+  // The transfer and its steps on the left; its details in a panel beside
+  // them, as the web wallet shows a transaction: open on a wide screen
+  // (`vm.wide`), folded under the rest on a narrow one.
+  const side = !details
+    ? ""
+    : vm.wide
+      ? `<section class="rc-side" aria-labelledby="details-h"><h2 class="gh" id="details-h">Details</h2><dl class="kvs">${details}</dl></section>`
+      : `<section class="rc-side" aria-label="Details"><details><summary class="gh">Details</summary><dl class="kvs">${details}</dl></details></section>`;
   return `<main class="page rc" id="main" tabindex="-1">
     <div class="rc-main">
       <div class="topbar">${backLink}</div>
