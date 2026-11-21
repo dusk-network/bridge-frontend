@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createDuskNode, parseJsonExact } from "./dusk-node.js";
+import { confirmedOnDusk, createDuskNode, parseJsonExact } from "./dusk-node.js";
 
 const NODE = "https://testnet.nodes.example";
 
@@ -107,10 +107,42 @@ test("contract queries post rkyv bytes to the configured node", async () => {
   assert.deepEqual([...(await node.contractCall(`0x${"AB".repeat(32)}`, "gameCount", new Uint8Array([1, 2])))], [9]);
 });
 
-test("the gas price is the node's median, or 1 Lux without one", async () => {
-  const median = createDuskNode({ fetch: ruskLike({}).fetch, url: NODE });
-  assert.equal(await median.gasPrice(), 3n);
+// Dusk Wallet's own check of a site's gas price (src/ui/notification/app.js
+// on dusk-network/wallet main): "This site chose a high fee" from twice the
+// price it starts from itself, by app-core's defaultGasPrice.
+const walletWarns = (asked, walletPrice) => asked >= walletPrice * 2n;
 
+test("the gas price is the one Dusk Wallet starts from, so its window doesn't call the bridge's fee high", async () => {
+  // One transaction waits, at 2,000 Lux: the node's median says 2,000, which
+  // the bridge used to ask. The wallet starts from 1 Lux, the network's
+  // minimum, while what waits fits in the next block.
+  const waiting = (mempoolTxs) =>
+    createDuskNode({
+      fetch: ruskLike({
+        gasPrice: () => new Response(JSON.stringify({ average: 2000, max: 2000, median: 2000, min: 2000 })),
+        graphql: (selection) => {
+          assert.equal(selection, "mempoolTxs { gasPrice gasLimit }");
+          return { mempoolTxs };
+        },
+      }).fetch,
+      url: NODE,
+    });
+  const quiet = await waiting([{ gasLimit: 2_500_000, gasPrice: 2_000 }]).gasPrice();
+  assert.equal(quiet, 1n);
+  assert.equal(walletWarns(quiet, 1n), false);
+  // What the node's median would have asked: 2,000 times the wallet's price.
+  assert.equal(walletWarns(2_000n, 1n), true);
+  assert.equal(await waiting([]).gasPrice(), 1n);
+
+  // Once more waits than a block takes, the mempool's median, as the wallet starts from it too, up to 5 times the minimum.
+  const full = (gasPrice, count = 1_000) => Array.from({ length: count }, () => ({ gasLimit: 2_500_000, gasPrice }));
+  assert.equal(await waiting(full(3)).gasPrice(), 3n);
+  assert.equal(await waiting(full(2_000)).gasPrice(), 5n);
+  // Or more gas than a block takes (3,000,000,000), however few they are; the two middle prices' mean, rounded down.
+  assert.equal(await waiting([{ gasLimit: "2000000000", gasPrice: "2" }, { gasLimit: "2000000000", gasPrice: "5" }]).gasPrice(), 3n);
+
+  // A node that can't say what waits, or none at all: the minimum, as the wallet falls back to.
+  assert.equal(await waiting(null).gasPrice(), 1n);
   const down = createDuskNode({
     fetch: async () => {
       throw new Error("offline");
@@ -118,6 +150,29 @@ test("the gas price is the node's median, or 1 Lux without one", async () => {
     url: NODE,
   });
   assert.equal(await down.gasPrice(), 1n);
+});
+
+test("the node says the network is busy where what waits asks more than the most the price goes up to", async () => {
+  const { defaultGasPrice } = await import("./gas.js");
+  const waiting = (mempoolTxs) => createDuskNode({ fetch: ruskLike({ graphql: () => ({ mempoolTxs }) }).fetch, url: NODE });
+  const full = (gasPrice, count = 1_000) => Array.from({ length: count }, () => ({ gasLimit: 2_500_000, gasPrice }));
+  // A full mempool at 2,000 Lux: the price stops at 5 Lux, so what's sent may wait. That's said, as app-core's rule says it.
+  assert.deepEqual(defaultGasPrice(full(2_000)), { busy: true, ceiling: 5n, median: 2_000n, minimum: 1n, price: 5n });
+  assert.deepEqual(await waiting(full(2_000)).networkGas(), { busy: true, price: 5n });
+  // At or under the ceiling, or with room in the next block however high one waits: not busy.
+  assert.deepEqual(await waiting(full(5)).networkGas(), { busy: false, price: 5n });
+  assert.deepEqual(await waiting(full(3)).networkGas(), { busy: false, price: 3n });
+  assert.deepEqual(await waiting([{ gasLimit: 2_500_000, gasPrice: 2_000 }]).networkGas(), { busy: false, price: 1n });
+  assert.deepEqual(defaultGasPrice([{ gasLimit: 2_500_000, gasPrice: 2_000 }]), { busy: false, ceiling: 5n, median: 2_000n, minimum: 1n, price: 1n });
+  // A node that can't say: the minimum, not busy.
+  assert.deepEqual(await waiting(null).networkGas(), { busy: false, price: 1n });
+  const down = createDuskNode({
+    fetch: async () => {
+      throw new Error("offline");
+    },
+    url: NODE,
+  });
+  assert.deepEqual(await down.networkGas(), { busy: false, price: 1n });
 });
 
 test("amounts past 2^53 Lux keep every digit, in transactions and in query answers", async () => {
@@ -165,4 +220,24 @@ test("a public balance is read from the node as Lux, without losing digits", asy
   assert.equal(await node.accountBalance(account), 18_446_744_073_709_551_615n);
   assert.deepEqual(calls, [[`https://node.example/on/account:${account}/status`, "POST"]]);
   await assert.rejects(node.accountBalance("not base58 0OIl"), /base58/u);
+});
+
+test("a transaction this page sent is waited for until it's confirmed: one that isn't by then says so, and to check the wallet first", async () => {
+  // Found: its record, for its fee.
+  assert.deepEqual(await confirmedOnDusk({ transaction: async () => ({ gasSpent: "1840717" }) }, "ab", "approval", { wait: 0 }), { gasSpent: "1840717" });
+  // Failed on Dusk: said so, and marked, so the approval isn't counted as sent.
+  await assert.rejects(confirmedOnDusk({ transaction: async () => ({ error: "Panic" }) }, "ab", "approval", { wait: 0 }), (error) => error.code === "FAILED_ON_DUSK");
+  // Not found by then, or the node not answering: not confirmed yet, in plain words, and where to look before trying again.
+  for (const transaction of [async () => null, async () => Promise.reject(new Error("offline"))]) {
+    let asked = 0;
+    const node = { transaction: (...args) => ((asked += 1), transaction(...args)) };
+    await assert.rejects(confirmedOnDusk(node, "ab", "approval", { tries: 3, wait: 0 }), (error) => {
+      assert.match(error.message, /\bisn't confirmed yet\b/u);
+      assert.match(error.message, /\bcheck Dusk Wallet's activity\b/iu);
+      assert.doesNotMatch(error.message, /\bblock\b/iu);
+      assert.equal(error.code, undefined);
+      return true;
+    });
+    assert.equal(asked, 3);
+  }
 });

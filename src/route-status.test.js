@@ -136,3 +136,15 @@ test("what a route's read found is kept, so the page asks the chains again only 
   globalThis.fetch = realFetch;
   delete globalThis.localStorage;
 });
+
+test("a status that bears on a transfer is said under the route line; paying as usual, or not known, behind it", () => {
+  const inline = (status, options) => line(status, options).inline;
+  // Late, quiet, or paid only when claimed: in view.
+  for (const paying of ["late", "on-claim", "quiet"]) assert.equal(inline({ paying }), true, paying);
+  // As usual, or not known: under the route's Details.
+  for (const paying of ["yes", "unknown"]) assert.equal(inline({ paying }), false, paying);
+  // A balance that can't pay what's sent now: in view, and warned.
+  const room = { canPay: 1_000_000_000n, lastPayout: paid(5 * MINUTE), limit: "balance", paying: "yes" };
+  assert.deepEqual([inline(room, { amountLux: 1_000_000_000n }), line(room, { amountLux: 1_000_000_000n }).warn], [false, false]);
+  assert.deepEqual([inline(room, { amountLux: 1_000_000_001n }), line(room, { amountLux: 1_000_000_001n }).warn], [true, true]);
+});

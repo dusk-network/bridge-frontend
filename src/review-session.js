@@ -48,12 +48,12 @@ export function createReviewSession({ now = () => Date.now() } = {}) {
     /**
      * Whether Confirm takes a click: not within CONFIRM_GUARD_MS of the review
      * or its step coming up. It looks as always meanwhile, not turned off.
-     * Nor while the step's wallet lines aren't up, as when its request is
-     * built again: what would be sent isn't shown.
+     * Nor while the step's request isn't built (`ready`), as when it's built
+     * again: what would be sent isn't known.
      */
     get confirmable() {
       const step = open?.steps?.[open.current ?? 0];
-      return now() - shownAt >= CONFIRM_GUARD_MS && (!open?.steps || Boolean(step?.lines));
+      return now() - shownAt >= CONFIRM_GUARD_MS && (!open?.steps || Boolean(step?.ready));
     },
     end() {
       open = null;

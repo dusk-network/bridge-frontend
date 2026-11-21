@@ -41,10 +41,13 @@ export function createRouteStatus({ read, onChange = () => {}, now = Date.now })
 const lastPayoutWords = ({ lastPayout }, now) => (lastPayout?.at ? `Last payout ${durationWords(Math.max(0, now - lastPayout.at) / 1_000)} ago.` : "");
 
 /**
- * A route's status in a line, for under its route: `text`, and `warn` where it
- * could make someone wait. Null with nothing to say: nothing read yet, or a
- * route that isn't running, which its card says itself. "unknown" says it
- * doesn't know, not that anything is wrong. `amountLux` is what's being sent.
+ * A route's status in a line: `text`, and `warn` where it could make someone
+ * wait. `inline` where it bears on a transfer, for under the route line:
+ * payouts running late or none lately, paid when you claim it, or a balance
+ * that can't pay what's being sent (`amountLux`) now; the rest is for the
+ * route's Details. Null with nothing to say: nothing read yet, or a route
+ * that isn't running, which its card says itself. "unknown" says it doesn't
+ * know, not that anything is wrong.
  */
 export function statusLine(status, { amountLux = null, now = Date.now() } = {}) {
   if (!status || status.paying === "stopped") return null;
@@ -60,5 +63,9 @@ export function statusLine(status, { amountLux = null, now = Date.now() } = {}) 
   const pays = status.limit === "balance" && status.canPay !== null && status.canPay !== undefined ? formatShort(status.canPay).text : "";
   const short = Boolean(pays) && amountLux !== null && amountLux > status.canPay;
   const room = !pays ? "" : short ? `It can pay up to ${pays} DUSK now, less than you're sending, so yours may wait.` : `It can pay up to ${pays} DUSK.`;
-  return { text: [...words, room].filter(Boolean).join(" "), warn: status.paying === "late" || short };
+  return {
+    inline: short || ["late", "on-claim", "quiet"].includes(status.paying),
+    text: [...words, room].filter(Boolean).join(" "),
+    warn: status.paying === "late" || short,
+  };
 }

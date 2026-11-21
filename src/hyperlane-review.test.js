@@ -41,18 +41,15 @@ test("the first transfer's claim is said for the account the review pays, as rea
   assert.equal(first.firstToAccount, true);
   const paid = evmReviewParts(route, { amountLux: 10_000_000n, cfg, destination: OTHER, duskAccount: ACCOUNT, evm: { account: EVM }, fee: 1n, reads: { ...reads, hyperlane: { ...reads.hyperlane, registered: false } }, registered: true });
   assert.equal(paid.firstToAccount, false);
-  // Said where it's the first: a check of its own, for this token, with the claim's fee; and what the transfer does says it.
+  // Said where it's the first: a check of its own, for this token, with the claim's fee.
   const known = new Set(paid.checks.map((check) => check.html));
   const claim = first.checks.filter((check) => !known.has(check.html));
   assert.equal(claim.length, 1);
   assert.match(textOf(claim[0].html), exactly("EURd"));
   assert.deepEqual(amountsIn(claim[0].html), ["≤0.003 DUSK"]);
-  assert.notEqual(first.what, paid.what);
   // Held for the account's claim, never released by itself.
-  for (const said of [textOf(claim[0].html), textOf(first.what)]) {
-    assert.match(said, /\bclaim/iu);
-    assert.doesNotMatch(said, /\bautomatic/iu);
-  }
+  assert.match(textOf(claim[0].html), /\bclaim/iu);
+  assert.doesNotMatch(textOf(claim[0].html), /\bautomatic/iu);
 });
 
 test("a reviewed claim is built again as it's sent: unchanged it goes, another amount is reviewed again, nothing held isn't sent", async () => {
@@ -200,13 +197,14 @@ test("a step whose request is being built again can't be confirmed meanwhile", a
   const { createReviewSession } = await import("./review-session.js");
   let now = 0;
   const reviews = createReviewSession({ now: () => now });
-  const review = reviews.start({ current: 0, request: { fnName: "transfer_remote" }, steps: [{ confirmLabel: "Send", lines: [{ label: "Method" }] }] });
+  const review = reviews.start({ current: 0, request: { fnName: "transfer_remote" }, steps: [{ call: [{ label: "Method" }], confirmLabel: "Send", lines: [{ label: "Method" }], ready: true }] });
   now += 1_000;
   assert.equal(reviews.confirmable, true);
   rebuilding(review);
-  assert.deepEqual([review.request, review.steps[0].lines, Boolean(review.steps[0].linesNote), review.steps[0].confirmLabel], [null, null, true, "Send"]);
-  // Confirm takes no click, whatever the button shows, until the new request's lines are up.
+  // No request, nothing of the old one said, and what it waits for, until the new one is built.
+  assert.deepEqual([review.request, review.steps[0].call, review.steps[0].lines, review.steps[0].ready, Boolean(review.steps[0].wait), review.steps[0].confirmLabel], [null, null, null, false, true, "Send"]);
+  // Confirm takes no click, whatever the button shows, until the new request is built.
   assert.equal(reviews.confirmable, false);
-  review.steps[0] = { ...review.steps[0], lines: [{ label: "Method" }] };
+  review.steps[0] = { ...review.steps[0], ready: true };
   assert.equal(reviews.confirmable, true);
 });

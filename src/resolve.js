@@ -10,6 +10,9 @@ import { BRIDGE_FUNCTIONS } from "@dusk-network/networks/duskevm";
 import { canonicalHash } from "./permalink.js";
 import { networkName } from "./names.js";
 
+/** What's said of something pasted that isn't a transaction ID, by its form. */
+export const NOT_TRANSACTION_ID = "Not a transaction ID (64 hex characters, 0x on EVM)";
+
 const lower = (value) => String(value ?? "").toLowerCase();
 const EVM_TX_HASH = /^0x[0-9a-f]{64}$/iu;
 /** `transferRemote(uint32,bytes32,uint256)`'s selector, the call a Hyperlane token sends to Dusk with. */
@@ -33,7 +36,7 @@ function memoText(hex) {
  */
 export async function resolveTransfer(input, { cfg, node, rpc }) {
   const value = canonicalHash(input);
-  if (!value) return { message: "That isn't a transaction hash. It has 64 hex characters, after 0x on EVM chains." };
+  if (!value) return { message: NOT_TRANSACTION_ID };
   const bare = value.replace(/^0x/u, "");
   const evm = `0x${bare}`;
 

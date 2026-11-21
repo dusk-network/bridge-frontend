@@ -24,7 +24,7 @@ export const NOT_CARRIED = "Enter an amount above 0 that one transfer can carry.
 /** Why a claim isn't sent: the route holds nothing for the account. */
 export const NOTHING_TO_CLAIM = "Nothing is waiting for this account on this route.";
 /** Why a transfer isn't sent: the review's bridge fee is no longer the route's. */
-export const feeChanged = (fee) => `The bridge fee is now ${fee}. Check the review again.`;
+export const feeChanged = (fee) => `Bridge fee is now ${fee}`;
 
 const notEnough = (needed, held) => `It needs ${needed}, with its fees, and you have ${held}. Nothing was sent.`;
 const notHeld = (held) => `You have ${held}, less than this transfer. Nothing was sent.`;

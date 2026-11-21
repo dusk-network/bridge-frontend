@@ -1,11 +1,11 @@
-// What a transfer says, on its receipt and in My transfers: the title, both
+// What a transfer says, on its receipt and in Activity: the title, both
 // accounts, each step with its time and transaction, the next action, the
 // claim countdown, and when it's late. Built from the stored entry, its route
 // and how long the route takes on this network; no balances, no network
 // requests.
 
 import { claimText, evmAddressOf } from "@dusk-network/networks/duskevm";
-import { aboutTime, durationWords, formatContractId, formatEvmAddress, shortAccount } from "@dusk-network/networks/format";
+import { durationWords, formatContractId, formatEvmAddress, shortAccount } from "@dusk-network/networks/format";
 
 import {
   clockChangeBetween,
@@ -15,10 +15,11 @@ import {
   formatShort,
   formatShortDay,
   formatToken,
+  formatTokenShort,
 } from "./format.js";
 import { duskRecipientHash } from "./hyperlane.js";
 import { networkName, tokenName } from "./names.js";
-import { lateAfterSeconds, routeTime } from "./route-times.js";
+import { lateAfterSeconds, routeTime, routeTimeText } from "./route-times.js";
 import { STATUS_WORDS } from "./tracking.js";
 import { WITHDRAWAL_GAS_REFUSAL } from "./gas.js";
 
@@ -42,17 +43,20 @@ export function explorerTxUrl(cfg, network, hash) {
   return explorer ? `${explorer.replace(/\/+$/u, "")}/tx/${withPrefix(hash)}` : null;
 }
 
+/** `text` with its middle left out: `head` characters, "…", `tail` characters. */
+const middle = (text, head, tail) => (text.length <= head + tail + 1 ? text : `${text.slice(0, head)}…${text.slice(-tail)}`);
+
 /**
- * As every Dusk app shortens them (@dusk-network/networks/format): EVM
- * addresses "0xd63b…8DF4", with their checksum's capitals, and EVM
- * transactions "0x04a8…3213"; Dusk accounts, hashes and contract IDs
- * "rz2gFT…3VGXyt".
+ * An account, address or transaction ID, shortened to 6…6 after any 0x:
+ * EVM addresses "0xd63bB1…fE8df4", with their checksum's capitals, EVM
+ * transactions "0x04a8a8…1b3213", Dusk accounts, transactions and contract
+ * IDs "rz2gFT…3VGXyt". The full value is always a copy or a hover away.
  */
 export function short(value) {
   const text = String(value ?? "").trim();
-  if (/^0x[0-9a-f]{40}$/iu.test(text)) return formatEvmAddress(text, { short: true });
-  if (/^0x[0-9a-f]{64}$/iu.test(text)) return `${text.slice(0, 6)}…${text.slice(-4)}`.toLowerCase();
-  if (/^[0-9a-f]{64}$/iu.test(text)) return formatContractId(text, { short: true });
+  if (/^0x[0-9a-f]{40}$/iu.test(text)) return middle(formatEvmAddress(text), 8, 6);
+  if (/^0x[0-9a-f]{64}$/iu.test(text)) return middle(text.toLowerCase(), 8, 6);
+  if (/^[0-9a-f]{64}$/iu.test(text)) return middle(formatContractId(text), 6, 6);
   return shortAccount(text);
 }
 
@@ -66,16 +70,16 @@ const ACTION_FAILURE = Object.freeze({
 });
 
 /** What every page says when you reject a request in your wallet: never in red, it's your choice. */
-export const WALLET_CANCELLED = "You cancelled in your wallet, so nothing was sent.";
+export const WALLET_CANCELLED = "Cancelled in your wallet. Nothing was sent.";
 
 /** Under a recipient that's a contract: it may be meant, as a smart wallet, so it's said, not refused. */
-export const CONTRACT_RECIPIENT = "This address is a contract, not an ordinary wallet. Check it can use what's sent, or the tokens may be stuck there.";
+export const CONTRACT_RECIPIENT = "A contract, not a wallet: check it can take what's sent, or the tokens may get stuck.";
 
 /** What it says when you reject connecting, where there's nothing to send. */
-export const CONNECT_CANCELLED = "You cancelled in your wallet.";
+export const CONNECT_CANCELLED = "Cancelled in your wallet";
 
-/** What it says when you reject a later step: the one before it did go out. */
-export const LATER_STEP_CANCELLED = "You cancelled in your wallet. The step before went through, so it won't ask for that again.";
+/** What it says when you reject a later step: the approval before it did go out. */
+export const LATER_STEP_CANCELLED = "Cancelled. The approval stays; it won't ask again";
 
 /** Whether the wallet's user rejected the request (4001), however the wallet wrapped it. */
 export const walletCancelled = (error) =>
@@ -172,25 +176,28 @@ export const switchToProver = (entry) =>
 export function provenByOtherLine(entry, account = "", name = "") {
   const pays = entry?.destination ?? "";
   if (!pays || pays === account) return "Another account proved it. Prove it yourself to claim it.";
-  const notYours = account ? `, not ${name || "your connected Dusk account"}` : "";
-  return `Another account proved it. This pays ${short(pays)}${notYours}. If you prove and claim, the DUSK still goes there.`;
+  // What decides whether to prove it: proving and claiming it still pays that account.
+  return `Another account proved it. It pays ${short(pays)}${account ? `, not ${name || "you"}` : ""}; if you prove and claim, the DUSK still goes there.`;
 }
 
 const amountOf = (entry) =>
   entry.amountLux !== undefined && entry.amountLux !== null ? BigInt(entry.amountLux) : null;
 
+/** What a transfer makes public, in one line: the review names both accounts above it. */
+export const PUBLIC_LINE = "Public and linked: both accounts and the amount";
+
 /**
  * What becomes public, in one line, naming the accounts themselves: the Dusk
  * one by its .dusk name too, when it has one (`name`), as the wallet shows it.
+ * For the card's Details, where the accounts aren't named beside it; From and
+ * To say the networks.
  */
-export function privacyLine(route, cfg, { dusk, evm, name = "" } = {}) {
+export function privacyLine(route, { dusk, evm, name = "" } = {}) {
   const duskText = dusk ? `Dusk account ${name ? `${name} (${short(dusk)})` : short(dusk)}` : "Dusk account";
-  const evmText = evm ? short(evm) : "your EVM address";
-  const from = networkName(cfg, route.from.id);
-  const to = networkName(cfg, route.to.id);
+  const evmText = evm ? short(evm) : "your EVM account";
   // From the sending side to the paid one, then the amount.
   const parties = route.from.kind === "dusk" ? `your ${duskText}, ${evmText}` : `${evmText}, the ${duskText}`;
-  return `Public on ${from} and ${to}, and linked: ${parties} and the amount.`;
+  return `Public and linked: ${parties} and the amount.`;
 }
 
 function step(key, title, state, extra = {}) {
@@ -234,12 +241,13 @@ function withdrawalSteps(entry, cfg, { account, locale, name, now, time: usual, 
       network: "dusk",
     });
   else if (stage === "ready_to_prove")
+    // Ready: its button says so.
     prove = step("prove", "Prove on Dusk", entry.pendingAction === "prove" ? "now" : "turn", {
       detail: entry.pendingAction === "prove"
         ? "Proof sent, waiting for Dusk"
         : entry.provenByOther
           ? provenByOtherLine(entry, account, name)
-          : "Ready now",
+          : "",
       hash: entry.pendingHash ?? null,
       network: "dusk",
     });
@@ -261,7 +269,7 @@ function withdrawalSteps(entry, cfg, { account, locale, name, now, time: usual, 
     });
   else if (stage === "ready_to_finalize")
     claim = step("claim", "Claim on Dusk", entry.pendingAction === "finalize" ? "now" : "turn", {
-      detail: entry.pendingAction === "finalize" ? "Claim sent, waiting for Dusk" : "Ready now",
+      detail: entry.pendingAction === "finalize" ? "Claim sent, waiting for Dusk" : "",
       hash: entry.pendingHash ?? null,
       network: "dusk",
     });
@@ -285,44 +293,43 @@ function withdrawalSteps(entry, cfg, { account, locale, name, now, time: usual, 
 /** A proven withdrawal whose date isn't read yet: "7 days after the proof at the soonest". */
 const afterTheProof = (time) => (time?.maturity ? `${durationWords(time.maturity)} after the proof at the soonest` : "");
 
+/**
+ * The step of a transfer's own transaction: sent, and done once it's in a
+ * block on its chain (`sourceAt`), with its time and transaction. One step,
+ * not two: it's one transaction. Why one failed is the receipt's caption.
+ */
+function sentStep(entry, from, network, time) {
+  const confirmed = Boolean(entry.sourceAt) || entry.status === "completed";
+  return step("sent", `Sent from ${from}`, confirmed ? "done" : entry.status === "failed" ? "failed" : "now", {
+    at: entry.sourceAt ?? null,
+    atText: time(entry.sourceAt),
+    hash: entry.hash,
+    network,
+  });
+}
+
 function sourceSteps(entry, route, cfg, { locale, now, timeZone, year }) {
   const time = (ms) => (ms ? formatDateTime(ms, { locale, now, timeZone, year }) : "");
-  const from = networkName(cfg, route.from.id);
   const to = networkName(cfg, route.to.id);
   const failed = entry.status === "failed";
   const confirmed = Boolean(entry.sourceAt) || entry.status === "completed";
-  const steps = [];
-  if (route.mode !== "migration")
-    steps.push(
-      step("sent", `Sent from ${from}`, "done", {
-        hash: entry.hash,
-        network: "dusk",
-      }),
-    );
-  steps.push(
-    step("confirmed", route.mode === "migration" ? `Migration confirmed on ${from}` : `Confirmed on ${from}`, confirmed ? "done" : failed ? "failed" : "now", {
-      at: entry.sourceAt ?? null,
-      atText: time(entry.sourceAt),
-      detail: confirmed ? "" : failed ? entry.note ?? "" : `Waiting for ${from}`,
-      hash: route.mode === "migration" ? entry.hash : null,
-      network: route.mode === "migration" ? route.from.id : null,
-    }),
-  );
   const arrived = entry.status === "completed";
-  const verb = "Arrived on";
-  steps.push(
-    step("arrived", arrived ? `${verb} ${to}` : `Arriving on ${to}`, arrived ? "done" : failed ? "todo" : confirmed ? "now" : "todo", {
+  return [
+    sentStep(entry, networkName(cfg, route.from.id), route.mode === "migration" ? route.from.id : "dusk", time),
+    step("arrived", arrived ? `Arrived on ${to}` : `Arriving on ${to}`, arrived ? "done" : failed ? "todo" : confirmed ? "now" : "todo", {
       at: entry.destinationAt ?? null,
       atText: time(entry.destinationAt),
       hash: entry.destinationHash ?? null,
       network: route.to.kind === "dusk" ? "dusk" : route.to.id,
     }),
-  );
-  return steps;
+  ];
 }
 
 /** What a transfer a route holds for its account's claim says it is, in place of pending. */
-export const HELD_WORD = "To claim";
+export const HELD_WORD = "Held";
+
+/** Why a transfer to Dusk waits for its claim, at the step it waits on. */
+export const HELD_LINE = "First transfer to this account: held until claimed";
 
 /**
  * A claim of escrow that went out and failed on Dusk: that, why, and what it
@@ -357,22 +364,13 @@ function hyperlaneSteps(entry, route, cfg, { locale, now, timeZone, year }) {
   const failed = entry.status === "failed";
   const arrived = entry.status === "completed";
   const confirmed = Boolean(entry.sourceAt) || arrived;
-  const message = entry.messageId ? `Message ${short(entry.messageId)}` : "";
-  const confirm = (extra) =>
-    step("confirmed", route.from.id === "dusk" ? `Confirmed on ${from}` : `Sent from ${from}`, confirmed ? "done" : failed ? "failed" : "now", {
-      at: entry.sourceAt ?? null,
-      atText: time(entry.sourceAt),
-      detail: confirmed ? "" : failed ? entry.note ?? "" : `Waiting for ${from}`,
-      ...extra,
-    });
+  // Its message ID is under Details.
   if (route.from.id === "dusk")
     return [
-      step("sent", `Sent from ${from}`, "done", { hash: entry.hash, network: "dusk" }),
-      confirm(),
+      sentStep(entry, from, "dusk", time),
       step("arrived", arrived ? `Arrived on ${to}` : `Arriving on ${to}`, arrived ? "done" : failed ? "todo" : confirmed ? "now" : "todo", {
         at: entry.destinationAt ?? null,
         atText: time(entry.destinationAt),
-        detail: arrived ? "" : message,
         hash: entry.destinationHash ?? null,
         network: route.to.id,
       }),
@@ -381,11 +379,11 @@ function hyperlaneSteps(entry, route, cfg, { locale, now, timeZone, year }) {
   const claimed = entry.escrow === "claimed" || (held && arrived);
   const delivered = Boolean(entry.delivered) || arrived;
   const steps = [
-    confirm({ hash: entry.hash, network: route.from.id }),
+    sentStep(entry, from, route.from.id, time),
     step("arrived", held ? "Delivered to Dusk" : delivered ? `Arrived on ${to}` : `Arriving on ${to}`, delivered ? "done" : failed ? "todo" : confirmed ? "now" : "todo", {
       at: held ? entry.deliveredAt ?? null : entry.destinationAt ?? entry.deliveredAt ?? null,
       atText: time(held ? entry.deliveredAt : entry.destinationAt ?? entry.deliveredAt),
-      detail: delivered ? (held && !claimed ? "Held for its account until it's claimed" : "") : message,
+      detail: delivered && held && !claimed ? HELD_LINE : "",
       // The transaction Dusk's Mailbox delivered it in, once found.
       hash: entry.deliveryHash ?? null,
       network: "dusk",
@@ -397,7 +395,8 @@ function hyperlaneSteps(entry, route, cfg, { locale, now, timeZone, year }) {
       claimed
         ? step("claim", "Claimed on Dusk", "done", { at: entry.claimAt ?? null, atText: time(entry.claimAt), hash: entry.claimHash ?? null, network: "dusk" })
         : step("claim", "Claim on Dusk", !held ? "todo" : entry.pendingAction === "claim" ? "now" : "turn", {
-            detail: !held ? "The first transfer to an account waits until it's claimed" : entry.pendingAction === "claim" ? "Claim sent, waiting for Dusk" : "Ready now",
+            // Ready: its button says so.
+            detail: !held ? HELD_LINE : entry.pendingAction === "claim" ? "Claim sent, waiting for Dusk" : "",
             hash: entry.pendingHash ?? null,
             network: "dusk",
           }),
@@ -405,6 +404,21 @@ function hyperlaneSteps(entry, route, cfg, { locale, now, timeZone, year }) {
   return steps;
 }
 
+/**
+ * What moves and where, as the receipt's title: "1 EURd · Dusk → Sepolia",
+ * "1,000 ERC20 DUSK · Sepolia → Dusk". Its state is its status pill's.
+ */
+function displayTitle(route, cfg, amount) {
+  const moved =
+    route.mode === "hyperlane"
+      ? amount === null ? route.token.symbol : formatToken(amount, route.token)
+      : route.mode === "migration"
+        ? `${amount === null ? "" : `${formatDusk(amount).replace(" DUSK", "")} `}${tokenName(route.from.id)}`
+        : amount === null ? "DUSK" : formatDusk(amount);
+  return `${moved} · ${networkName(cfg, route.from.id)} → ${networkName(cfg, route.to.id)}`;
+}
+
+/** A transfer's state in a sentence, for what's announced or notified as it ends: "1 EURd arrived on Sepolia". */
 function titleFor(entry, route, cfg, amount) {
   const from = networkName(cfg, route.from.id);
   const to = networkName(cfg, route.to.id);
@@ -499,7 +513,9 @@ export function transferView(entry, { account = "", cfg, locale, name = "", now 
   const lateAfter = lateAfterSeconds(route, time);
   // What arrived, once it has, next to the word that says so, in what the route moves.
   const unit = hyperlane ? route.token.symbol : "DUSK";
-  const shown = amount === null ? null : formatShort(status === "completed" && route?.mode === "service-transfer" && cfg?.service?.feeLux && amount > BigInt(cfg.service.feeLux) ? amount - BigInt(cfg.service.feeLux) : amount, route.token?.decimals ?? 9);
+  const moved = status === "completed" && route?.mode === "service-transfer" && cfg?.service?.feeLux && amount > BigInt(cfg.service.feeLux) ? amount - BigInt(cfg.service.feeLux) : amount;
+  // As a list writes it: EURd and USDd to the cent, DUSK to 4 decimals.
+  const shown = amount === null ? null : hyperlane ? formatTokenShort(moved, route.token) : formatShort(moved, 9);
   const late =
     status === "pending" &&
     sentAt &&
@@ -525,7 +541,13 @@ export function transferView(entry, { account = "", cfg, locale, name = "", now 
                 ? held && entry.actionError !== WALLET_CANCELLED ? "The claim wasn't sent. Try again." : entry.actionError
                 : ACTION_FAILURE[entry.stage],
           kind: actionKind,
-          label: actionKind === "prove" ? "Prove on Dusk" : "Claim on Dusk",
+          // What it does, and for whom where that's another account.
+          label:
+            actionKind === "prove"
+              ? "Prove withdrawal"
+              : held && forOther
+                ? `Claim for ${entry.destination ? short(entry.destination) : "its account"}`
+                : shown ? `Claim ${shown.exact} ${unit}` : "Claim",
           quiet: forOther,
         }
       : null,
@@ -535,18 +557,20 @@ export function transferView(entry, { account = "", cfg, locale, name = "", now 
     amountText: shown ? `${shown.text} ${unit}` : "",
     countdown,
     from: { account: entry.sender ?? null, network: fromNetwork },
+    // Its state in a sentence: what's announced, and notified, as it ends.
+    headline: titleFor({ ...entry, status }, route, cfg, amount),
     late: Boolean(late),
     note: status === "failed" ? entry.note ?? "" : "",
     pair: [fromNetwork, toNetwork],
-    rowTitle: `${networkName(cfg, fromNetwork)} to ${networkName(cfg, toNetwork)}`,
     status,
-    // Delivered into escrow, it waits for its claim.
-    statusWord: held ? HELD_WORD : STATUS_WORDS[status],
+    // Delivered into escrow, or a withdrawal past its wait: it waits for its claim.
+    statusWord: held || (withdrawal && status === "pending" && entry.stage === "ready_to_finalize" && !entry.pendingAction) ? HELD_WORD : STATUS_WORDS[status],
     steps,
     time,
-    title: titleFor({ ...entry, status }, route, cfg, amount),
+    // Once a payout arrived, what arrived: the amount less the bridge's fee.
+    title: displayTitle(route, cfg, moved),
     to: { account: entry.destination ?? null, network: toNetwork },
-    trackingError: entry.trackingError ? "Status unavailable. Trying again." : "",
+    trackingError: entry.trackingError ? "Status unavailable, retrying" : "",
     tracker: withdrawal
       ? steps.map((item) => ({ label: trackerLabel(item, entry, now), state: item.state, when: trackerWhen(item, entry, timeZone) }))
       : null,
@@ -582,16 +606,16 @@ function trackerLabel(item, entry, now) {
   return "Claim";
 }
 
-/** The line under a transfer in My transfers. */
+/** The line under a transfer in Activity: its group says its state. */
 export function transferSubline(view, entry, route, cfg, { account = "", locale, name = "", now = Date.now(), timeZone } = {}) {
   const time = (ms) => formatDateTime(ms, { locale, now, timeZone });
-  if (view.status === "failed") return view.note || "This transfer didn't go through.";
+  if (view.status === "failed") return view.note || (entry.sourceAt ? time(entry.sourceAt) : "");
   if (heldInEscrow({ ...entry, status: view.status }, route))
     return entry.pendingAction === "claim"
       ? "Claim sent, waiting for Dusk"
       : entry.claimFailedHash && entry.actionError
         ? "The claim failed on Dusk"
-        : "Held on Dusk until it's claimed";
+        : "Held until claimed";
   if (route.mode === "duskevm-withdrawal") {
     const stage = entry.stage ?? "submitted";
     if (view.status === "completed")
@@ -599,9 +623,9 @@ export function transferSubline(view, entry, route, cfg, { account = "", locale,
     if (entry.pendingAction === "prove" || stage === "prove_submitted") return "Proof sent, waiting for Dusk";
     if (entry.pendingAction === "finalize" || stage === "finalize_submitted") return "Claim sent, waiting for Dusk";
     if (stage === "ready_to_prove")
-      return entry.provenByOther ? provenByOtherLine(entry, account, name) : "Ready to prove on Dusk";
+      return entry.provenByOther ? provenByOtherLine(entry, account, name) : "Ready to prove";
     if (stage === "ready_to_finalize")
-      return entry.readyAt ? `Ready to claim since ${time(Number(entry.readyAt) * 1_000)}` : "Ready to claim on Dusk";
+      return entry.readyAt ? `Ready to claim since ${time(Number(entry.readyAt) * 1_000)}` : "Ready to claim";
     // A rejected proof never matures: it's proved again, once there's a new output.
     if (stage === "proven_waiting" && entry.proofRejected) return REJECTED_PROOF;
     if (stage === "proven_waiting") {
@@ -615,9 +639,9 @@ export function transferSubline(view, entry, route, cfg, { account = "", locale,
   }
   if (view.status === "completed") {
     const at = entry.destinationAt ?? entry.sourceAt;
-    return at ? `Arrived ${time(at)}` : "Completed";
+    return at ? time(at) : "";
   }
-  const sent = entry.sourceAt ? `Sent ${time(entry.sourceAt)}` : "Sent";
-  const usual = view.late ? "taking longer than usual" : view.time ? `takes ${aboutTime(view.time.seconds)}` : "";
-  return [sent, usual].filter(Boolean).join(" · ");
+  // When it was sent, and how long the route takes, as its receipt says it.
+  const usual = view.late ? "Taking longer than usual" : routeTimeText(view.time);
+  return [entry.sourceAt ? time(entry.sourceAt) : "", usual].filter(Boolean).join(" · ");
 }

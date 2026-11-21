@@ -76,9 +76,26 @@ export function formatFee(value, decimals = LUX_DECIMALS, { round = "nearest" } 
 /**
  * An amount in a list or a balance line, as most wallets write it, `text`: up
  * to 4 decimals, rounded down so it's never more than there is, and never 0 for
- * an amount that isn't. In full, `exact`, for whoever asks for it.
+ * an amount that isn't. In full, `exact`, for whoever asks for it. A total
+ * paid, as fees, is rounded to the nearest (`round`).
  */
-export const formatShort = (units, decimals = LUX_DECIMALS) => formatAmount(units, { decimals, locale: amountLocale(), round: "down" });
+export const formatShort = (units, decimals = LUX_DECIMALS, round = "down") => formatAmount(units, { decimals, locale: amountLocale(), round });
+
+/** Tokens that stand for money: written to the cent where an amount is short, as every Dusk app writes EURd and USDd. */
+const CENTS = new Set(["EURd", "USDd"]);
+
+/**
+ * An amount of `token` in a list or a balance line, as `formatShort` writes
+ * it: to the cent for a token that stands for money ("265.88 EURd"), rounded
+ * down, and never 0 for an amount that isn't; up to 4 decimals otherwise.
+ * In full, `exact`, for whoever asks for it.
+ */
+export function formatTokenShort(units, token) {
+  const full = formatShort(units, token.decimals);
+  if (!CENTS.has(token.symbol) || token.decimals <= 2) return full;
+  const cents = BigInt(units) / 10n ** BigInt(token.decimals - 2);
+  return cents === 0n ? full : { exact: full.exact, text: formatAmount(cents, { decimals: 2, locale: amountLocale(), round: "down" }).text };
+}
 
 /** A Dusk fee in the apps' short form: 4 decimals, 2 significant digits under 0.01, the page's separators. */
 const shortFee = (lux, round) => formatShared(lux, { locale: amountLocale(), round }).text;
@@ -90,16 +107,14 @@ const shortFee = (lux, round) => formatShared(lux, { locale: amountLocale(), rou
  */
 export const formatMaxFee = (lux) => (BigInt(lux) > 0n ? shortFee(lux, "up") : "0");
 
-/** What a Dusk fee usually comes to, to the nearest: "0.002". */
-export const formatTypicalFee = (lux) => shortFee(lux, "nearest");
 
 /**
- * An estimated fee in a coin with `decimals`: "about 0.00021 ETH", or "less
- * than 0.000001 ETH" when it rounds to nothing a person would read.
+ * An estimated fee in a coin with `decimals`: "~0.00021 ETH", or
+ * "<0.000001 ETH" when it rounds to nothing a person would read.
  */
 export function aboutFee(value, decimals, unit) {
   const floor = 10n ** BigInt(Math.max(0, decimals - 6));
-  return BigInt(value) < floor ? `less than 0.000001 ${unit}` : `about ${formatFee(value, decimals)} ${unit}`;
+  return BigInt(value) < floor ? `<0.000001 ${unit}` : `~${formatFee(value, decimals)} ${unit}`;
 }
 
 // ---------------------------------------------------------------------------

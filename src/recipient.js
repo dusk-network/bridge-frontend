@@ -8,14 +8,12 @@ import { getAddress, isAddress, zeroAddress } from "viem";
 
 import { normalizeDuskAddress } from "./validation.js";
 
-export const NOT_EVM_ADDRESS = "That isn't an EVM address: 0x and 40 hex characters.";
-export const EVM_CHECKSUM_MISMATCH =
-  "The capital letters don't match this address's checksum, so a character may be wrong. Copy it again from your wallet.";
-export const ZERO_ADDRESS_RECIPIENT = "That's the zero address, not a wallet. Paste the address of the wallet that should receive it.";
-export const BRIDGE_CONTRACT_RECIPIENT =
-  "That's the DUSK token's or the bridge's contract, not a wallet. Paste the address of the wallet that should receive it.";
-export const NOT_DUSK_RECIPIENT =
-  "That isn't a Dusk account or a .dusk name. A Dusk account is the long base58 address your Dusk Wallet shows.";
+export const NOT_EVM_ADDRESS = "Not an EVM address (0x + 40 hex)";
+export const EVM_CHECKSUM_MISMATCH = "Checksum mismatch: a character may be wrong. Copy it again from your wallet.";
+export const ZERO_ADDRESS_RECIPIENT = "That's the zero address, not a wallet";
+// Whichever route's token or bridge contract it is.
+export const BRIDGE_CONTRACT_RECIPIENT = "That's the DUSK token's or a bridge contract, not a wallet";
+export const NOT_DUSK_RECIPIENT = "Not a Dusk account or .dusk name";
 
 /**
  * `{ address }` in its checksummed form, or `{ error }`. When only the

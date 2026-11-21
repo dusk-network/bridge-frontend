@@ -5,9 +5,9 @@
 
 import { normalizeAmount, parseDusk, unclearAmount } from "@dusk-network/app-core/amounts";
 import { beforeProofText, claimAfterProving, claimText } from "@dusk-network/networks/duskevm";
-import { DEPOSIT_GAS, TRANSFER_GAS, WITHDRAWAL_GAS, withdrawalGasLimit as withdrawalStepGas } from "@dusk-network/networks/gas";
+import { DEPOSIT_GAS, TRANSFER_GAS, withdrawalGasLimit as withdrawalStepGas } from "@dusk-network/networks/gas";
 
-import { aboutFee, decimalSeparator, formatDateTime, formatDusk, formatLux, formatMaxFee, formatShort, formatToken, formatTypicalFee, formatUnitsGrouped } from "./format.js";
+import { aboutFee, decimalSeparator, formatDateTime, formatDusk, formatLux, formatMaxFee, formatShort, formatToken, formatUnitsGrouped } from "./format.js";
 import { HYPERLANE_GAS, U64_MAX } from "./hyperlane.js";
 import { gasCoin, networkName, routeUnits, tokenName } from "./names.js";
 import { routeTime, routeTimeText } from "./route-times.js";
@@ -54,36 +54,34 @@ export function parseAmount(input, decimals = 9) {
   const lux = parseUnits(value, decimals);
   if (lux === null) {
     return /^\d*\.\d+$/u.test(value)
-      ? { error: `Use at most ${decimals} decimals.`, lux: null }
+      ? { error: `Max ${decimals} decimals`, lux: null }
       : { error: `Enter an amount like 25 or 0${decimalSeparator()}5.`, lux: null };
   }
   if (lux <= 0n) return { error: "Enter an amount above 0.", lux: null };
   return { error: "", lux };
 }
 
-/** The Dusk fee of one transaction: the most it can cost, and the usual. */
-export function duskFee(limit, typical, gasPrice) {
+/** The Dusk fee of one transaction: the most it can cost, what a wallet's window asks for. */
+export function duskFee(limit, gasPrice) {
   const price = BigInt(gasPrice ?? 1n) > 0n ? BigInt(gasPrice) : 1n;
-  return { maxLux: BigInt(limit) * price, typicalLux: BigInt(typical) * price };
+  return { maxLux: BigInt(limit) * price };
 }
 
-const feeText = ({ maxLux, typicalLux }) => ({
-  detail: `usually about ${formatTypicalFee(typicalLux)} DUSK`,
-  value: `up to ${formatMaxFee(maxLux)} DUSK`,
-});
+/** The most a Dusk fee can be: what a Dusk Wallet window asks for, the one figure said before sending. */
+const feeText = ({ maxLux }) => ({ value: `up to ${formatMaxFee(maxLux)} DUSK` });
 
 /**
- * What each Dusk-side step of a route costs at most, and usually. A proof
+ * What each Dusk-side step of a route costs at most. A proof
  * and a claim share one limit (`withdrawalStepGas`): the withdrawal's own
  * gas on top, at least a bound above what the bridge's withdrawals ask for.
  */
 export function routeDuskFees(route, { gasPrice = 1n, withdrawalGas = 0n } = {}) {
   if (route.mode === "duskevm-deposit")
-    return { send: duskFee(DEPOSIT_GAS.limit, DEPOSIT_GAS.typical, gasPrice) };
+    return { send: duskFee(DEPOSIT_GAS.limit, gasPrice) };
   if (route.mode === "service-transfer")
-    return { send: duskFee(TRANSFER_GAS.limit, TRANSFER_GAS.typical, gasPrice) };
+    return { send: duskFee(TRANSFER_GAS.limit, gasPrice) };
   if (route.mode === "duskevm-withdrawal") {
-    const step = duskFee(withdrawalStepGas(withdrawalGas), WITHDRAWAL_GAS.typical, gasPrice);
+    const step = duskFee(withdrawalStepGas(withdrawalGas), gasPrice);
     return { claim: step, prove: step };
   }
   return {};
@@ -99,23 +97,20 @@ export function withdrawalStepMax({ gasPrice = 1n, withdrawalGas = 0n } = {}) {
   return routeDuskFees({ mode: "duskevm-withdrawal" }, { gasPrice, withdrawalGas }).claim.maxLux;
 }
 
-/** "up to 0.051 DUSK a step", as each page writes it. */
-export const stepFeeText = (inputs) => `up to ${formatMaxFee(withdrawalStepMax(inputs))} DUSK a step`;
-
 /**
  * When it arrives, as a quote row: none where this network's time isn't
  * known. Nothing arrives from DuskEVM without the two steps on Dusk, so a
- * withdrawal says when they can be taken: sent now and proved about an
- * output later, "Claim from about 5 Nov, 12:28 CET", over "Claim 7 days after
- * you prove. You can prove about 30 minutes after sending." The date waits
- * for the longer of the proof's maturity and the game's finality (`wait`),
- * as the Portal does.
+ * withdrawal says when it can be claimed: sent now and proved about an
+ * output later, "Claim from about 5 Nov, 12:28 CET", or, before the chain's
+ * times are read, "Claim 7 days after you prove." The date waits for the
+ * longer of the proof's maturity and the game's finality (`wait`), as the
+ * Portal does. The card's route line says the steps' times.
  */
 function arrivesRow(route, cfg, { locale, timeZone, timing } = {}) {
   const time = routeTime(route, cfg, timing);
   if (route.mode === "duskevm-withdrawal") {
     if (!time?.maturity) return [];
-    if (!time.prove) return [{ detail: "", key: "when", label: "When", value: claimAfterProving(time.maturity) }];
+    if (!time.prove) return [{ key: "when", label: "When", value: claimAfterProving(time.maturity) }];
     const now = timing?.now ?? Date.now();
     const at = now + (time.prove + (time.wait ?? time.maturity)) * 1_000;
     const when = (ms) => formatDateTime(ms, { locale, now, timeZone });
@@ -149,7 +144,7 @@ export function buildQuote(route, amount, ctx) {
   const parsed = parseAmount(amount);
   const lux = parsed.lux;
   const rows = [];
-  const quote = { amountLux: lux, error: parsed.error, leaves: "", maxLux: null, receiveLux: lux, rows };
+  const quote = { amountLux: lux, error: parsed.error, feeOverAmount: false, maxLux: null, receiveLux: lux, rows };
   const shown = (value) => (value === null ? "—" : formatDusk(value));
 
   if (route.mode === "duskevm-deposit" || route.mode === "service-transfer") {
@@ -163,7 +158,7 @@ export function buildQuote(route, amount, ctx) {
     }
     if (!quote.error && lux !== null) {
       if (bridgeFee && lux <= bridgeFee)
-        quote.error = `Send more than the ${formatDusk(bridgeFee)} bridge fee.`;
+        quote.error = `Send more than the ${formatDusk(bridgeFee)} bridge fee`;
       else if (quote.maxLux !== null && lux > quote.maxLux) {
         quote.insufficient = true;
         quote.error = `That's more than you have after the network fee. You can send up to ${formatDusk(quote.maxLux)}.`;
@@ -172,8 +167,10 @@ export function buildQuote(route, amount, ctx) {
     // One line a row; a fee the route doesn't have isn't listed.
     rows.push(
       { key: "send", label: "You send", value: shown(lux) },
-      { key: "fee", label: "Network fee", ...feeText(fee) },
       ...(bridgeFee ? [{ key: "bridge", label: "Bridge fee", value: `${formatDusk(bridgeFee)}, from the amount` }] : []),
+      { key: "fee", label: "Network fee", ...feeText(fee) },
+      // A payout's bridge fee comes from the amount: what leaves is the amount and the network fee, not their sum with it.
+      ...(bridgeFee && lux !== null ? [{ key: "total", label: "Total", value: `up to ${formatDusk(lux + fee.maxLux)}` }] : []),
       {
         key: "receive",
         label: "You receive",
@@ -182,7 +179,10 @@ export function buildQuote(route, amount, ctx) {
       },
       ...arrivesRow(route, cfg, ctx),
     );
-    if (lux !== null) quote.leaves = `up to ${formatLux(lux + fee.maxLux)} DUSK`;
+    // The fees as one figure: the bridge's, taken from the amount, and the network's, on top.
+    quote.fees = bridgeFee
+      ? { detail: `${formatDusk(bridgeFee)} of it from the amount`, key: "fees", label: "Fees", value: `up to ${formatMaxFee(bridgeFee + fee.maxLux)} DUSK` }
+      : { key: "fees", label: "Network fee", value: `up to ${formatMaxFee(fee.maxLux)} DUSK` };
     return quote;
   }
 
@@ -210,12 +210,7 @@ export function buildQuote(route, amount, ctx) {
     quote.steps = steps;
     rows.push(
       { key: "send", label: "You send", value: lux === null ? "—" : `${formatLux(lux)} ${tokenName(route.from.id)}` },
-      {
-        detail: steps === 2 ? "two wallet steps" : "one wallet step",
-        key: "fee",
-        label: "Network fee",
-        value: evmFee === null ? `paid in ${coin}` : aboutFee(evmFee, 18, coin),
-      },
+      { key: "fee", label: "Network fee", value: evmFee === null ? `paid in ${coin}` : aboutFee(evmFee, 18, coin) },
       { key: "receive", label: "You receive", strong: true, value: lux === null ? "—" : `${formatDusk(lux)} on ${to}` },
       ...arrivesRow(route, cfg, ctx),
     );
@@ -224,6 +219,7 @@ export function buildQuote(route, amount, ctx) {
 
   // DuskEVM to Dusk: one step on DuskEVM, then prove and claim on Dusk.
   const l2Fee = gas.priceWei && gas.withdraw ? BigInt(gas.withdraw) * BigInt(gas.priceWei) : null;
+  quote.evmFeeWei = l2Fee;
   if (ctx.balance !== null && ctx.balance !== undefined) {
     if (l2Fee === null) {
       // No gas price yet: the fee comes from the same balance, so there's no
@@ -244,29 +240,25 @@ export function buildQuote(route, amount, ctx) {
   }
   rows.push(
     { key: "send", label: "You send", value: lux === null ? "—" : `${formatDusk(lux)} on ${from}` },
-    {
-      key: "fee",
-      label: `Fee on ${from}`,
-      value: l2Fee === null ? "paid in DUSK" : aboutFee(l2Fee, 18, "DUSK"),
-    },
-    {
-      detail: "to prove, then to claim",
-      key: "fee-dusk",
-      label: `Then on ${to}`,
-      value: stepFeeText({ gasPrice: ctx.gasPrice ?? 1n }),
-    },
+    { key: "fee", label: "Network fee", value: l2Fee === null ? "paid in DUSK" : aboutFee(l2Fee, 18, "DUSK") },
+    { key: "fee-dusk", label: "Prove and claim", value: `up to ${formatMaxFee(withdrawalStepMax({ gasPrice: ctx.gasPrice ?? 1n }))} DUSK each` },
     { key: "receive", label: "You receive", strong: true, value: lux === null ? "—" : `${formatDusk(lux)} on ${to}` },
     ...arrivesRow(route, cfg, ctx),
   );
+  // The fees as one figure: DuskEVM's now, then the most the proof and the claim on Dusk can cost.
+  quote.fees = {
+    key: "fees",
+    label: "Fees",
+    value: `${l2Fee === null ? "paid in DUSK" : aboutFee(l2Fee, 18, "DUSK")}, then up to ${formatMaxFee(2n * withdrawalStepMax({ gasPrice: ctx.gasPrice ?? 1n }))} DUSK on Dusk`,
+  };
   return quote;
 }
 
 /** Gas for a transfer to the EVM chain on Dusk, with an approval first where the route can't take the amount yet. */
 export function hyperlaneDuskFees({ approves = false, gasPrice = 1n } = {}) {
-  const send = duskFee(HYPERLANE_GAS.transfer.limit, HYPERLANE_GAS.transfer.typical, gasPrice);
+  const send = duskFee(HYPERLANE_GAS.transfer.limit, gasPrice);
   if (!approves) return send;
-  const approve = duskFee(HYPERLANE_GAS.approve.limit, HYPERLANE_GAS.approve.typical, gasPrice);
-  return { maxLux: send.maxLux + approve.maxLux, typicalLux: send.typicalLux + approve.typicalLux };
+  return { maxLux: send.maxLux + duskFee(HYPERLANE_GAS.approve.limit, gasPrice).maxLux };
 }
 
 /**
@@ -296,7 +288,7 @@ function hyperlaneQuote(route, amount, ctx) {
   const quote = {
     amountLux: units,
     error: parsed.error || (units === null && parsed.lux !== null ? "That's more than one transfer can carry." : ""),
-    leaves: "",
+    feeOverAmount: false,
     maxLux: null,
     receiveLux: units,
     rows: [],
@@ -319,13 +311,14 @@ function hyperlaneQuote(route, amount, ctx) {
     const gas = hyperlaneDuskFees({ approves, gasPrice: ctx.gasPrice });
     const balance = ctx.balance === null || ctx.balance === undefined ? null : BigInt(ctx.balance);
     Object.assign(quote, { bridgeFeeLux: fee, gasMaxLux: gas.maxLux, steps: unknown ? null : approves ? 2 : 1 });
+    // DUSK's bridge fee is paid in DUSK, on top: where it's more than what's sent, that's said. It blocks nothing.
+    quote.feeOverAmount = native && units !== null && fee !== null && fee > units;
     if (native) {
       if (balance !== null && fee !== null) quote.maxLux = balance > fee + gas.maxLux ? balance - fee - gas.maxLux : 0n;
       if (!quote.error && units !== null && quote.maxLux !== null && units > quote.maxLux) {
         quote.insufficient = true;
         quote.error = `That's more than you have after the fees. You can send up to ${formatDusk(quote.maxLux)}.`;
       }
-      if (units !== null && fee !== null) quote.leaves = `up to ${formatDusk(units + fee + gas.maxLux)}`;
     } else {
       const held = read.tokenBalance ?? null;
       quote.maxLux = held;
@@ -338,21 +331,19 @@ function hyperlaneQuote(route, amount, ctx) {
         quote.short = "DUSK";
         quote.error = `The fees take up to ${formatDusk(fee + gas.maxLux)}, more than the ${formatDusk(balance)} you have.`;
       }
-      if (units !== null && fee !== null) quote.leaves = `${formatToken(units, token)} and up to ${formatDusk(fee + gas.maxLux)}`;
       if (unknown && units !== null && !quote.error) quote.waiting = read.allowanceFailed ? "failed" : "reading";
     }
     quote.rows.push(
       { key: "send", label: "You send", value: sent },
-      {
-        detail: `usually about ${formatTypicalFee(gas.typicalLux)} DUSK${approves ? ", for two wallet steps" : ""}`,
-        key: "fee",
-        label: "Network fee",
-        value: `up to ${formatMaxFee(gas.maxLux)} DUSK`,
-      },
-      { detail: native ? "on top of the amount" : "paid in DUSK", key: "bridge", label: "Bridge fee", value: fee === null ? "—" : formatDusk(fee) },
+      { ...(native ? { detail: "on top of the amount" } : {}), key: "bridge", label: "Bridge fee", value: fee === null ? "—" : formatDusk(fee) },
+      { key: "fee", label: "Network fee", value: `up to ${formatMaxFee(gas.maxLux)} DUSK` },
+      // DUSK goes with its bridge fee in one deposit, which the wallet asks for: the most that leaves.
+      ...(native && units !== null && fee !== null ? [{ key: "total", label: "Total", value: `up to ${formatDusk(units + fee + gas.maxLux)}` }] : []),
       received,
       ...arrives,
     );
+    // The fees as one figure: the bridge's and the network's, both in DUSK.
+    quote.fees = { key: "fees", label: "Fees", value: fee === null ? "—" : `up to ${formatMaxFee(fee + gas.maxLux)} DUSK` };
     return quote;
   }
 
@@ -374,10 +365,16 @@ function hyperlaneQuote(route, amount, ctx) {
   }
   quote.rows.push(
     { key: "send", label: "You send", value: sent },
-    { detail: "one wallet step", key: "fee", label: "Network fee", value: gasWei === null ? `paid in ${coin}` : aboutFee(gasWei, 18, coin) },
-    { detail: `paid in ${coin}, with the transfer`, key: "bridge", label: "Bridge fee", value: fee === null ? "—" : aboutFee(fee, 18, coin) },
+    { key: "bridge", label: "Bridge fee", value: fee === null ? "—" : aboutFee(fee, 18, coin) },
+    { key: "fee", label: "Network fee", value: gasWei === null ? `paid in ${coin}` : aboutFee(gasWei, 18, coin) },
     received,
     ...arrives,
   );
+  // The fees as one figure, both in the chain's coin; the network's once the gas is read.
+  quote.fees = {
+    key: "fees",
+    label: "Fees",
+    value: fee === null ? "—" : gasWei === null ? `${aboutFee(fee, 18, coin)} and the network fee` : aboutFee(fee + gasWei, 18, coin),
+  };
   return quote;
 }

@@ -260,14 +260,15 @@ h1 { font-size: 28px; font-weight: 500; letter-spacing: -0.01em; line-height: 1.
 
 /* A full address or hash: wraps, and keeps its copy and explorer buttons. */
 .fullval { display: inline-flex; align-items: flex-start; gap: 4px; max-width: 100%; text-align: left; }
-.fullval code { padding-top: 5px; overflow-wrap: anywhere; word-break: break-all; color: var(--text); font-size: 12.5px; line-height: 1.55; }
+/* A long ID breaks into even lines, none of a few characters alone. */
+.fullval code { padding-top: 5px; overflow-wrap: anywhere; word-break: break-all; text-wrap: balance; color: var(--text); font-size: 12.5px; line-height: 1.55; }
 .full-actions { display: inline-flex; gap: 0; }
 
 /* Key and value rows, divided by lines, as the web wallet's summaries. */
 .kvs .kv { position: relative; display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 11px 16px; font-size: 14px; }
 .kvs .kv + .kv::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; border-top: 1px solid var(--hair); }
 .kv .k { color: var(--text-2); flex: 0 0 auto; max-width: 45%; }
-.kv .v { margin: 0; text-align: right; min-width: 0; }
+.kv .v { margin: 0; text-align: right; min-width: 0; text-wrap: balance; }
 .kv .v.mono { font-size: 13px; }
 .kv .stack { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
 .kv .small { color: var(--text-2); font-size: 12.5px; }
@@ -351,13 +352,17 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 .recip { margin-top: 8px; color: var(--text-2); font-size: 13px; overflow-wrap: anywhere; }
 .recip b { color: var(--text); font-weight: 500; }
 .route { margin: 6px 2px 0; }
-.route > summary { display: flex; align-items: center; gap: 8px; padding: 10px 8px; color: var(--text-2); font-size: 13.5px; cursor: pointer; list-style: none; border-radius: 10px; }
+.route > summary, .route > .route-head { display: flex; align-items: center; gap: 8px; padding: 10px 8px; color: var(--text-2); font-size: 13.5px; cursor: pointer; list-style: none; border-radius: 10px; }
+/* A route line with nothing behind it doesn't open. */
+.route > .route-head { cursor: default; }
 .route > summary::-webkit-details-marker { display: none; }
 .route > summary:hover { color: var(--text); }
-.route > summary svg { width: 15px; height: 15px; flex: 0 0 auto; }
+.route > summary svg, .route > .route-head svg { width: 15px; height: 15px; flex: 0 0 auto; }
 /* Under the route, how it's doing: amber where it could make someone wait. */
 .route-sum { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .route-status.warn { color: var(--amber); }
+/* On the review, a line that warns without blocking, as the card's route line does: amber. */
+.note.warn { color: var(--amber); }
 .route > summary .chev { margin-left: auto; transition: transform var(--motion-fast) var(--motion-ease-exit); }
 .route[open] > summary .chev { transform: rotate(180deg); transition-duration: var(--motion-base); transition-timing-function: var(--motion-ease); }
 .route .kvs .kv { padding: 8px 8px; font-size: 13.5px; }
@@ -425,6 +430,8 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 .sheet-foot { padding: 14px 22px 18px; border-top: 1px solid var(--hair); display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
 .sheet-foot .hint { margin: 0 auto 0 0; }
 .btn-pair { display: flex; gap: 10px; }
+/* Which step a review's button takes, where there's more than one: small, beside its label. */
+.btn .of { margin-left: 2px; font-size: 12.5px; font-weight: 400; opacity: .7; font-variant-numeric: tabular-nums; }
 .btn-pair .btn { min-width: 160px; }
 .sheet-foot .message { flex: 1 0 100%; margin: 0; }
 
@@ -433,6 +440,11 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 .flow .v { font-size: 26px; line-height: 1.2; }
 .flow .v .u { margin-left: 6px; color: var(--text-2); font-size: 15px; }
 .flow .w { display: flex; align-items: center; gap: 7px; margin-top: 4px; color: var(--text-2); font-size: 13px; }
+/* Whom it pays, in full: it wraps within its side. */
+/* An account in full, and a wallet line's long value, break into even lines. */
+.flow .w > span { min-width: 0; text-wrap: balance; }
+.flow .w .acct { display: block; margin-top: 1px; }
+.wls .mono.wrap { text-wrap: balance; }
 .flow.lead { grid-template-columns: 1fr; }
 .flow .dn { color: var(--text-3); }
 .flow .dn svg { transform: rotate(180deg); }
@@ -466,6 +478,20 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 .req .note.wl-visible { margin: 0 0 10px; font-size: 13px; }
 .wl-note { color: var(--text-2); font-size: 12.5px; }
 .wl-more { margin-top: 6px; border-top: 1px solid var(--hair); }
+/* A review on a wide screen: what to decide on the left; beside it, muted, its reference, open. */
+.sheet.cols { width: min(980px, calc(100% - 48px)); }
+.sheet-body.cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 21rem); gap: 24px; align-items: start; }
+/* The decision stays in view while a taller reference beside it scrolls with the sheet; the shorter of the two never sticks out. */
+.rv-main { position: sticky; top: 0; min-width: 0; }
+.rv-side { min-width: 0; padding: 4px 16px 10px; border-radius: 16px; background: var(--surface); color: var(--text-2); font-size: 13px; }
+.rv-side .group { border-radius: 0; background: none; }
+.rv-side .kvs .kv { padding: 9px 0; font-size: 13px; }
+.rv-side .kvs .kv + .kv::before { left: 0; }
+.rv-side .kvs .kv:has(.mono) { flex-direction: column; gap: 4px; }
+.rv-side .kvs .kv:has(.mono) .v { max-width: 100%; text-align: left; }
+.rv-side .wls .wl { grid-template-columns: 1fr; gap: 2px; }
+.rv-side .wlh { margin: 12px 0 2px; }
+.rv-side > .wlh:first-child { margin-top: 10px; }
 .wl-more > summary { padding: 8px 0; color: var(--text-2); font-size: 13px; cursor: pointer; }
 .wl-more > summary:hover { color: var(--text); }
 .sheet .kvs { margin-top: 12px; }
@@ -492,9 +518,12 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 /* ------------------------------------------------------------------ */
 
 .rc { display: grid; grid-template-columns: minmax(0, 1fr) 24rem; gap: 40px; align-items: start; }
-.rc-main { min-width: 0; display: flex; flex-direction: column; gap: 20px; }
-.rc-side { position: sticky; top: calc(var(--bar) + 24px); padding: 20px 22px 8px; border-radius: 16px; background: var(--surface); }
+/* The transfer stays in view, under the header, while taller details beside it scroll with the page; the details take their own height. */
+.rc-main { position: sticky; top: calc(var(--bar) + 24px); min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+.rc-side { padding: 20px 22px 8px; border-radius: 16px; background: var(--surface); }
 .rc-side .gh { margin: 0 0 6px; color: var(--text); font-size: 17px; font-weight: 500; }
+.rc-side summary.gh { margin: 0; cursor: pointer; }
+.rc-side details[open] > summary.gh { margin-bottom: 6px; }
 .rc-side .kvs .kv { padding: 11px 0; }
 .rc-side .kvs .kv::before, .rc-side .kvs .kv + .kv::before { content: ""; position: absolute; top: 0; left: 0; right: 0; border-top: 1px solid var(--hair); }
 .rc-side .kvs .v { max-width: 72%; }
@@ -511,7 +540,10 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 .okc .pair .cm svg.glyph, .okc .pair .cm .mk-svg { width: 14px; height: 14px; }
 .okc .pair .evm-tag, .okc .pair svg.pa { display: none; }
 .hero .t { font-size: 26px; font-weight: 500; letter-spacing: -0.01em; }
-.hero .l { color: var(--text-2); }
+/* The sender, then the arrow with the account it points to: together on the next line where they don't fit. */
+.hero .l { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 2px 6px; color: var(--text-2); }
+.hero .l .to { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.hero .l .to .fullval code { padding-top: 0; }
 .hero .l code { color: var(--text); }
 .hero .pl { margin-top: 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
 .hero .cap { color: var(--text-2); font-size: 13.5px; }
@@ -608,7 +640,7 @@ form.group .l1 { display: block; color: var(--text); font-size: 14px; font-weigh
   .page, .col { padding: 28px 24px 20px; }
   .foot { padding-left: 24px; padding-right: 24px; }
   .rc { grid-template-columns: minmax(0, 1fr); }
-  .rc-side { position: static; }
+  .rc-main { position: static; }
   .chainchip { display: none; }
 }
 
@@ -640,6 +672,10 @@ form.group .l1 { display: block; color: var(--text); font-size: 14px; font-weigh
   .rc-side .kvs .kv { flex-direction: column; gap: 4px; }
   .rc-side .kvs .v { max-width: 100%; text-align: left; }
   .rc-side .kvs .stack { align-items: flex-start; }
+  /* About: a full ID under its label, the row's width for it, so it breaks into few even lines. */
+  .cgroup .kvs .kv:has(.fullval) { flex-direction: column; gap: 4px; }
+  .cgroup .kvs .kv:has(.fullval) .v { width: 100%; text-align: left; }
+  .cgroup .kvs .fullval { justify-content: space-between; width: 100%; }
   .hero .t { font-size: 22px; }
   .rc .bt { flex-direction: column; }
   .rc .bt .btn { min-width: 0; width: 100%; }
@@ -675,6 +711,13 @@ form.group .l1 { display: block; color: var(--text); font-size: 14px; font-weigh
   .linkish, .lnk, .topbar .bk, .foot a, .about-links a, .entry a, .note a, .strip a { display: inline-flex; align-items: center; min-height: 44px; }
   .route > summary { min-height: 44px; }
   .wl-more > summary { padding: 13px 0; }
+}
+
+/* The narrowest phones: both wallets' accounts keep their 6-character heads. */
+@media (max-width: 389px) {
+  .hdr-r { gap: 4px; }
+  .hdr-r .net { padding: 0 8px; }
+  .hdr-r .wpill { padding-right: 7px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

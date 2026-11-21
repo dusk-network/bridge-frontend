@@ -29,7 +29,7 @@ function walletServiceRoute(chainId, account) {
   return route ? { chain: route.chain.name, feeLux: route.feeLux, network: route.chain.id, running: route.running } : null;
 }
 
-export const OLDER_WALLET_NOTE = "Older Dusk Wallet versions show the call as bytes; check the sha256.";
+export const OLDER_WALLET_NOTE = "Older Dusk Wallets show it as bytes: check the sha256.";
 
 /** "40 bytes · sha256=1f2e3d4c5b6a…01234567", as Dusk Wallet prints call data. */
 export async function argsSummary(bytes) {
@@ -76,7 +76,7 @@ export function approveLines({ amountLux, cfg, fee, network }) {
     { address: chain.migrationContract, label: "Spender", network, value: "Dusk migration contract" },
     {
       label: "Spending cap",
-      note: "Exactly this transfer, no more.",
+      note: "Exactly this transfer.",
       value: `${formatLux(amountLux)} ${tokenName(network)}`,
     },
     evmFeeLine(fee, chain.currency?.symbol ?? "ETH"),
@@ -106,14 +106,14 @@ export function migrateLines({ amountLux, cfg, duskAccount, fee, network }) {
     {
       label: "amount",
       mono: true,
-      note: `= ${formatLux(amountLux)} DUSK. Wallets show it with 18 decimals, so 18 more digits than you typed. That is normal.`,
+      note: `= ${formatLux(amountLux)} DUSK, in 18 decimals: 18 more digits than you typed.`,
       value: wei.toString(),
     },
     {
       address: duskAccount,
       label: "targetAddress",
       network: "dusk",
-      note: "Your Dusk account that receives the DUSK.",
+      note: "Receives the DUSK.",
     },
     { label: "Estimated change", value: `−${formatLux(amountLux)} ${tokenName(network)}` },
     evmFeeLine(fee, chain.currency?.symbol ?? "ETH"),
@@ -131,7 +131,7 @@ export function withdrawLines({ amountLux, cfg, duskAccount, fee }) {
       address: duskAccount,
       label: "Recipient on Dusk",
       network: "dusk",
-      note: "Inside the call's data, so the wallet shows it as bytes.",
+      note: "In the call data: the wallet shows it as bytes.",
     },
     evmFeeLine(fee, "DUSK"),
   ];
@@ -150,16 +150,16 @@ export function transferRemoteLines({ amount, cfg, fee, recipient, recipientHash
     chainLine(cfg, network),
     { address: token.evm.token, label: "Interacting with", network, value: `${token.symbol} on ${networkName(cfg, network)}` },
     { label: "Method", mono: true, value: "transferRemote" },
-    { label: "destination", mono: true, note: "Dusk, as Hyperlane numbers it.", value: String(cfg.hyperlane.dusk.domain) },
-    { label: "recipient", mono: true, note: "The Dusk account below, as the hash of its key.", value: recipientHash },
+    { label: "destination", mono: true, note: "Dusk's Hyperlane domain.", value: String(cfg.hyperlane.dusk.domain) },
+    { label: "recipient", mono: true, note: "The hash of the Dusk account it pays.", value: recipientHash },
     { address: recipient, label: "Pays on Dusk", network: "dusk" },
     {
       label: "amount",
       mono: true,
-      note: `= ${formatToken(amount, token)}. Wallets show the token's smallest unit.`,
+      note: `= ${formatToken(amount, token)}, in the token's smallest unit.`,
       value: BigInt(amount).toString(),
     },
-    { label: "Value", note: "The bridge fee, for delivery to Dusk.", value: `${formatUnitsGrouped(value, 18)} ${coin}` },
+    { label: "Value", note: "The bridge fee.", value: `${formatUnitsGrouped(value, 18)} ${coin}` },
     evmFeeLine(fee, coin),
   ];
 }
@@ -181,7 +181,7 @@ const feeLines = (gas, spentLux) => [
 const fromLine = (from, name = "") =>
   name
     ? { full: from, label: "From", suffix: "Public", value: name }
-    : { full: from, label: "From", mono: true, note: "Or your .dusk name, if you have one.", suffix: "Public", value: shortAccount(from) };
+    : { full: from, label: "From", mono: true, note: "Or your .dusk name.", suffix: "Public", value: shortAccount(from) };
 
 // Under Details, folded as the window folds them: the method, the call
 // data's size and hash, and the site's own words.
@@ -208,7 +208,7 @@ async function callRows({ chainId, contractId, depositLux, fnArgs, fnName, from,
       fold: true,
       label: "Call data",
       mono: true,
-      note: read ? OLDER_WALLET_NOTE : "Dusk Wallet shows this call as bytes; check the sha256.",
+      note: read ? OLDER_WALLET_NOTE : "Dusk Wallet shows it as bytes: check the sha256.",
       value: await argsSummary(fnArgs),
     },
   ];

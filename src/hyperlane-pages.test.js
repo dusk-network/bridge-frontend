@@ -5,8 +5,8 @@ import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 import { groupTransfers } from "./discovery.js";
 import { duskRecipientHash } from "./hyperlane.js";
-import { balanceLine, receiptModel, reviewChecks, routeLine, routeSteps, transfersModel } from "./page-models.js";
-import { amountsIn, assertShownInFull, decode, exactly, fieldOf, textOf } from "./pages.fixtures.js";
+import { balanceLine, receiptModel, reviewChecks, routeDetailRows, routeLines, transfersModel } from "./page-models.js";
+import { amountsIn, assertShownInFull, decode, exactly, fieldOf, fieldsOf, paidOf, stepPartsOf, textOf } from "./pages.fixtures.js";
 
 const DUSK_TX = (hash) => `https://explorer.testnet.dusk.network/transactions/transaction?id=${hash}`;
 // That the first transfer to an account waits for its claim: never released by itself.
@@ -15,6 +15,9 @@ const AUTOMATIC = /\bautomatic/iu;
 import { buildQuote } from "./quote.js";
 import { cardPage, cardRegions, receiptPage, transferRow } from "./views.js";
 import { tokenChoices } from "./bridge-card.js";
+
+/** The card's route line as it reads: its lines, one after the other. */
+const routeLine = (route, cfg, options) => routeLines(route, cfg, options).join(" ");
 
 globalThis.__DUSK_BRIDGE_CONFIG__ = { VITE_BRIDGE_PROFILE: "testnet" };
 const cfg = loadConfig();
@@ -67,6 +70,8 @@ const HELD = {
 const receipt = (entry, extra = {}) =>
   receiptModel(entry, { cfg, gasPrice: 1n, locale: GB, now: NOW, own: { account: ACCOUNT, name: "" }, route: routeOf(entry.routeId), timeZone: AMS, url: "https://bridge.test/#/transfer/x", ...extra });
 const steps = (model) => model.view.steps.map(({ key, state }) => [key, state]);
+// A receipt with its Details opened, as a press on Details shows them.
+const opened = (page) => page.replace(/<details(?![^>]*\bopen\b)/gu, "<details open");
 // What each of a receipt's fields says, as amounts.
 const amountsOf = (page, labels) => labels.map((label) => amountsIn(fieldOf(page, label).text));
 // The tokens a card's menu offers: the route a press picks, beside the token it shows and what's said under it.
@@ -78,44 +83,52 @@ const tokenOptions = (page) =>
 test("a transfer to Sepolia shows its message on its way, its fees in DUSK, and Sepolia's transaction once it arrives", () => {
   const model = receipt(OUT);
   assert.deepEqual(amountsIn(model.view.title), ["95.085867 EURd"]);
-  assert.deepEqual(steps(model), [["sent", "done"], ["confirmed", "done"], ["arrived", "now"]]);
-  assert.match(model.view.steps.at(-1).detail, exactly("0xed2c…213b"));
+  // Its own transaction is one step, done once it's in a block.
+  assert.deepEqual(steps(model), [["sent", "done"], ["arrived", "now"]]);
   assert.match(model.caption, exactly("~20 s"));
-  // Field by field: what was sent, the bridge fee and the network fee in DUSK, and what arrives.
-  const page = receiptPage(model);
-  assert.deepEqual(amountsOf(page, ["You sent", "Bridge fee", "Network fee", "You receive"]), [["95.085867 EURd"], ["16.876 DUSK"], ["0.002216155 DUSK"], ["95.085867 EURd"]]);
-  // The message, the recipient and the transaction in full, each copied as it is, and on its explorer.
+  // Field by field, under Details: the bridge fee and the network fee in DUSK, who sent it and the message, nothing else.
+  // What's sent and arrives is the title's, whom it pays the line under it, the transaction its step's.
+  const page = opened(receiptPage(model));
+  assert.deepEqual(fieldsOf(page).map((field) => field.label), ["Bridge fee", "Network fee", "From", "Message ID"]);
+  assert.deepEqual(amountsOf(page, ["Bridge fee", "Network fee"]), [["16.876 DUSK"], ["0.002216155 DUSK"]]);
+  // The message in full; whom it pays in full, under the title; each copied as it is, and on its explorer.
   assertShownInFull(fieldOf(page, "Message ID"), OUT.messageId);
-  assertShownInFull(fieldOf(page, "To, on Sepolia"), EVM, `https://sepolia.etherscan.io/address/${EVM}`);
-  assertShownInFull(fieldOf(page, "Dusk transaction"), OUT.hash, DUSK_TX(OUT.hash));
+  assertShownInFull(paidOf(page), EVM, `https://sepolia.etherscan.io/address/${EVM}`);
+  // The transaction on its step, 6…6, copied in full, on its explorer.
+  const [sent] = stepPartsOf(page);
+  assert.deepEqual([sent.copies, sent.links], [[OUT.hash], [DUSK_TX(OUT.hash)]]);
+  assert.match(sent.text, exactly("861237…9b383f"));
   assert.equal(model.arrives, true);
 
   const done = receipt({ ...OUT, destinationAt: OUT.sourceAt + 19_000, destinationHash: "0xfdd8a84db201bfc08be9983224c7982f8c70ca0691f1b69c11c9930f2a401fd8", status: "completed" });
   assert.equal(done.view.status, "completed");
   assert.deepEqual(amountsIn(done.view.title), ["95.085867 EURd"]);
   assert.deepEqual(done.view.steps.at(-1).href, "https://sepolia.etherscan.io/tx/0xfdd8a84db201bfc08be9983224c7982f8c70ca0691f1b69c11c9930f2a401fd8");
-  assert.deepEqual(amountsOf(receiptPage(done), ["You received"]), [["95.085867 EURd"]]);
+  // What arrived is the title's, so no row says it again.
+  assert.deepEqual(fieldsOf(opened(receiptPage(done))).map((field) => field.label), ["Bridge fee", "Network fee", "From", "Message ID"]);
 });
 
 test("a transfer to Dusk the route holds needs its account's claim, there and in the list", () => {
   const model = receipt(HELD);
   assert.deepEqual(amountsIn(model.view.title), ["32.156353 USDd"]);
-  assert.deepEqual(steps(model), [["confirmed", "done"], ["arrived", "done"], ["claim", "turn"]]);
+  assert.deepEqual(steps(model), [["sent", "done"], ["arrived", "done"], ["claim", "turn"]]);
   const { blocked, command, failure, kind, quiet } = model.view.action;
   assert.deepEqual({ blocked, command, failure, kind, quiet }, { blocked: "", command: "escrow-claim", failure: "", kind: "claim", quiet: false });
   assert.deepEqual(amountsIn(model.actionFee), ["≤0.003 DUSK"]);
   // Nothing comes by itself: it isn't offered to be told when it arrives.
   assert.equal(model.arrives, false);
-  // Field by field: what was sent, the bridge fee and the fee on Sepolia in ETH, and what's held for the claim.
-  const page = receiptPage({ ...model, canAct: true });
-  assert.deepEqual(amountsOf(page, ["You sent", "Bridge fee", "Fee on Sepolia", "You receive"]), [["32.156353 USDd"], ["0.000000132000000001 ETH"], ["0.000000235736 ETH"], ["32.156353 USDd"]]);
+  // Field by field, under Details: the bridge fee and the network fee in ETH. What's sent and held for the claim is the title's.
+  const page = opened(receiptPage({ ...model, canAct: true }));
+  assert.deepEqual(fieldsOf(page).map((field) => field.label), ["Bridge fee", "Network fee", "From", "Message ID"]);
+  assert.deepEqual(amountsOf(page, ["Bridge fee", "Network fee"]), [["0.000000132000000001 ETH"], ["0.000000235736 ETH"]]);
   assert.match(page, /data-action="escrow-claim" data-id="sepolia-to-dusk-usdd:0x1944/u);
 
   // In My transfers it needs you, with Claim on its row.
   const list = transfersModel([HELD], { account: ACCOUNT, accounts: [ACCOUNT], cfg, locale: GB, now: NOW, routeOf, timeZone: AMS });
   assert.equal(list.needs, 1);
   const [row] = list.groups.needs;
-  assert.equal(row.amountText, "32.1563 USDd");
+  // USDd to the cent, rounded down, as a list writes it.
+  assert.equal(row.amountText, "32.15 USDd");
   assert.match(transferRow(row), /data-action="escrow-claim"/u);
 
   // Held for another account: anyone can claim it for it, so it's offered quietly, apart.
@@ -127,28 +140,32 @@ test("a transfer to Dusk the route holds needs its account's claim, there and in
 
 test("a transfer to Dusk waits for a claim as soon as it's known to be the account's first, and once claimed, it arrived", () => {
   const way = { ...HELD, delivered: false, escrow: undefined, firstToAccount: true, heldLux: undefined };
-  assert.deepEqual(steps(receipt(way)), [["confirmed", "done"], ["arrived", "now"], ["claim", "todo"]]);
-  assert.match(receipt(way).view.steps[1].detail, exactly("0x8bfc…6db6"));
+  assert.deepEqual(steps(receipt(way)), [["sent", "done"], ["arrived", "now"], ["claim", "todo"]]);
+  // Its message, in full, under Details.
+  assertShownInFull(fieldOf(opened(receiptPage(receipt(way))), "Message ID"), HELD.messageId);
   const claimAt = Date.parse("2026-11-18T09:25:00Z");
   const claimed = receipt({ ...HELD, claimAt, claimFeeLux: "1908588", claimHash: "cd".repeat(32), destinationAt: claimAt, escrow: "claimed", status: "completed" });
   assert.equal(claimed.view.status, "completed");
   assert.deepEqual(amountsIn(claimed.view.title), ["32.156353 USDd"]);
-  assert.deepEqual(steps(claimed), [["confirmed", "done"], ["arrived", "done"], ["claim", "done"]]);
-  // The claim's own fee, and its transaction in full, copied as it is.
-  const page = receiptPage(claimed);
-  assert.deepEqual(amountsOf(page, ["Claim fee on Dusk"]), [["0.001908588 DUSK"]]);
-  assertShownInFull(fieldOf(page, "Claim on Dusk"), "cd".repeat(32), DUSK_TX("cd".repeat(32)));
+  assert.deepEqual(steps(claimed), [["sent", "done"], ["arrived", "done"], ["claim", "done"]]);
+  // The claim's own fee under Details; its transaction on its step, copied in full, on its explorer.
+  const page = opened(receiptPage(claimed));
+  assert.deepEqual(amountsOf(page, ["Claim fee"]), [["0.001908588 DUSK"]]);
+  const claim = stepPartsOf(page).at(-1);
+  assert.deepEqual([claim.copies, claim.links], [["cd".repeat(32)], [DUSK_TX("cd".repeat(32))]]);
+  assert.match(claim.text, exactly("cdcdcd…cdcdcd"));
   // Paid straight away, no claim at all.
   const direct = receipt({ ...HELD, destinationAt: HELD.deliveredAt, escrow: null, status: "completed" });
-  assert.deepEqual(steps(direct), [["confirmed", "done"], ["arrived", "done"]]);
+  assert.deepEqual(steps(direct), [["sent", "done"], ["arrived", "done"]]);
   // Looked up by its hash alone, its account is said by its hash, in full.
-  assertShownInFull(fieldOf(receiptPage(receipt({ ...HELD, destination: undefined })), "To, on Dusk, by its hash"), "0x2acf0348cca26cf2d0a4ecbddde6e7abd3d54b2e581a73a7741301e1b411b69b");
+  assertShownInFull(fieldOf(opened(receiptPage(receipt({ ...HELD, destination: undefined }))), "To (account hash)"), "0x2acf0348cca26cf2d0a4ecbddde6e7abd3d54b2e581a73a7741301e1b411b69b");
 });
 
 test("a Hyperlane route's row and checks say its time, its fees' coin, and the first transfer's claim", () => {
-  const dusk = routeLine(byId["dusk-to-sepolia"], cfg, { fee: 16_876_000_000n });
+  // Its fees as one figure: the bridge's and the most the network's can be, in DUSK.
+  const dusk = routeLine(byId["dusk-to-sepolia"], cfg, { quote: { bridgeFeeLux: 16_876_000_000n, gasMaxLux: 5_000_000n } });
   assert.match(dusk, exactly("~20 s"));
-  assert.deepEqual(amountsIn(dusk), ["16.876 DUSK"]);
+  assert.deepEqual(amountsIn(dusk), ["≤16.881 DUSK"]);
   // Before its fee is read, the coin it's paid in.
   assert.match(routeLine(byId["dusk-to-sepolia-eurd"], cfg), exactly("DUSK"));
   assert.match(routeLine(byId["sepolia-to-dusk-usdd"], cfg), exactly("~1 min"));
@@ -160,33 +177,31 @@ test("a Hyperlane route's row and checks say its time, its fees' coin, and the f
   const quote = buildQuote(route, "10", { balance: 71_508_029n, cfg, evm });
   const reads = { gasPrice: 1n, hyperlane: { evm: { balance: 71_508_029n, gasCoinWei: evm.gasCoinWei }, registered: false } };
   const checks = reviewChecks(route, { cfg, destination: ACCOUNT, duskAccount: ACCOUNT, evm: { account: EVM }, quote, reads });
-  assert.deepEqual(checks.map((check) => check.ok), [true, true, true, true]);
+  // The token held and the gas coin for the fees, each passing; the account it pays is the review's flow, in full.
+  assert.deepEqual(checks.map((check) => [check.ok, Boolean(check.note)]), [[true, false], [true, false], [true, true]]);
   assert.deepEqual(amountsIn(checks[0].html), ["71.508029 USDd"]);
-  assert.match(textOf(checks[0].html), exactly("0x8A51…B75d"));
-  assert.match(textOf(checks[2].html), exactly("xGX8tZ…zQjkw9"));
-  // The first USDd to the account waits on Dusk for its claim, never released by itself: said for this token, with the claim's fee.
-  assert.match(textOf(checks[3].html), exactly("USDd"));
-  assert.match(textOf(checks[3].html), CLAIMED);
-  assert.doesNotMatch(textOf(checks[3].html), AUTOMATIC);
-  assert.deepEqual(amountsIn(checks[3].html), ["≤0.003 DUSK"]);
+  // The first USDd to the account waits on Dusk for its claim, never released by itself: said for this token, with the claim's fee, always.
+  assert.match(textOf(checks[2].html), exactly("USDd"));
+  assert.match(textOf(checks[2].html), CLAIMED);
+  assert.doesNotMatch(textOf(checks[2].html), AUTOMATIC);
+  assert.deepEqual(amountsIn(checks[2].html), ["≤0.003 DUSK"]);
   // An account the route pays already: no claim to mention.
-  assert.equal(reviewChecks(route, { cfg, destination: ACCOUNT, duskAccount: ACCOUNT, evm: { account: EVM }, quote, reads: { hyperlane: { registered: true } } }).length, 1);
+  const paid = reviewChecks(route, { cfg, destination: ACCOUNT, duskAccount: ACCOUNT, evm: { account: EVM }, quote, reads: { hyperlane: { registered: true } } });
+  assert.equal(paid.some((check) => CLAIMED.test(textOf(check.html))), false);
 
   const out = byId["dusk-to-sepolia-eurd"];
   const ctx = { allowance: 20_000_000n, fee: 16_876_000_000n, tokenBalance: 49_805_396_789n };
   const outQuote = buildQuote(out, "10", { balance: 20_000_000_000n, cfg, gasPrice: 1n, hyperlane: ctx });
   const outChecks = reviewChecks(out, { cfg, destination: EVM, duskAccount: ACCOUNT, evm: { account: EVM, walletName: "MetaMask" }, quote: outQuote, reads: { duskBalance: 20_000_000_000n, hyperlane: ctx } });
-  // The token held, the DUSK for the fees against what they take, the approval that covers it, and the recipient.
+  // The token held, the DUSK for the fees against what they take, and the approval that covers it, said always.
   assert.deepEqual(
-    outChecks.map((check) => [check.ok, amountsIn(check.html)]),
+    outChecks.map((check) => [check.ok, Boolean(check.note), amountsIn(check.html)]),
     [
-      [true, ["49,805.396789 EURd"]],
-      [true, ["20 DUSK", "≤16.881 DUSK"]],
-      [true, ["20 EURd"]],
-      [true, []],
+      [true, false, ["49,805.396789 EURd"]],
+      [true, false, ["≤16.881 DUSK", "20 DUSK"]],
+      [true, true, ["20 EURd"]],
     ],
   );
-  assert.match(textOf(outChecks[3].html), exactly("0x8A51…B75d"));
 });
 
 test("the card offers the pair's tokens, each by the route it picks, and what the routes hold for the account, each to claim for its own account", () => {
@@ -205,13 +220,13 @@ test("the card offers the pair's tokens, each by the route it picks, and what th
     menu: null,
     needsCount: 0,
     notice: null,
-    privacy: "Public on Dusk and Sepolia, and linked: your Dusk account xGX8tZ…zQjkw9, 0x8A51…B75d and the amount.",
+    privacy: "Public and linked: your Dusk account xGX8tZ…zQjkw9, 0x8A51d0…a1B75d and the amount.",
     quote,
     receive: "10",
     receiveUnit: "EURd",
-    routeLine: routeLine(route, cfg, { fee: 16_876_000_000n, steps: quote.steps }),
+    routeLines: routeLines(route, cfg, { quote }),
+    routeRows: routeDetailRows(route, quote),
     routeOpen: false,
-    steps: routeSteps(route, quote),
     tab: "bridge",
     to: { editing: false, error: "", fix: "", input: "", label: "Recipient on Sepolia", line: "to your MetaMask", looking: "", net: { id: "ethereum", name: "Sepolia" }, placeholder: "0x…", resolved: null },
     toChoices: [],
@@ -264,8 +279,9 @@ test("where Sepolia's own DUSK route runs beside Hyperlane's, the token list say
     quote: buildQuote(route, "", { balance: null, cfg: running, gasPrice: 1n, hyperlane: {} }),
     receive: "",
     receiveUnit: "DUSK",
-    routeLine: "",
+    routeLines: [],
     routeOpen: false,
+    routeRows: [],
     steps: [],
     tab: "bridge",
     to: { editing: false, error: "", fix: "", input: "", label: "Recipient on Sepolia", line: "", looking: "", net: { id: "ethereum", name: "Sepolia" }, placeholder: "0x…", resolved: null },

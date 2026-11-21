@@ -1,6 +1,8 @@
 // Reads from the deployment's own Dusk node. The wallet extension is only
 // asked to sign and send; chain state never comes through it.
 
+import { GAS_PRICE_MINIMUM, defaultGasPrice } from "./gas.js";
+
 const RETRYABLE = new Set([429, 502, 503, 504]);
 const TX_FIELDS =
   "blockHeight blockTimestamp err gasSpent id tx { txType memo callData { contractId fnName data } json }";
@@ -29,7 +31,7 @@ export function parseJsonExact(text) {
 function normalizeHash(hash) {
   const value = String(hash ?? "").replace(/^0x/iu, "").toLowerCase();
   if (!/^[0-9a-f]{64}$/u.test(value))
-    throw new Error("Dusk transaction hash is invalid.");
+    throw new Error("Dusk transaction ID is invalid.");
   return value;
 }
 
@@ -63,6 +65,22 @@ function finalizedHeight(pair) {
   } catch {
     return null;
   }
+}
+
+/**
+ * A Dusk transaction this page sent, once it's confirmed, as the step after
+ * it needs: its record from the `node`. One that failed throws, marked
+ * FAILED_ON_DUSK; one not confirmed after `tries` checks `wait` ms apart
+ * throws saying so, and to check the wallet before reviewing again.
+ */
+export async function confirmedOnDusk(node, hash, what, { tries = 30, wait = 3_000 } = {}) {
+  for (let tried = 0; tried < tries; tried += 1) {
+    const tx = await node.transaction(hash).catch(() => null);
+    if (tx?.error) throw Object.assign(new Error(`The ${what} failed on Dusk: ${tx.error}`), { code: "FAILED_ON_DUSK" });
+    if (tx) return tx;
+    await new Promise((resolve) => setTimeout(resolve, wait));
+  }
+  throw new Error(`The ${what} isn't confirmed yet. Check Dusk Wallet's activity, then review again.`);
 }
 
 export function createDuskNode({ url, fetch = globalThis.fetch }) {
@@ -116,17 +134,29 @@ export function createDuskNode({ url, fetch = globalThis.fetch }) {
     return new Uint8Array(await response.arrayBuffer());
   }
 
-  /** The node's median gas price, the price the wallet itself defaults to. */
-  async function gasPrice() {
+  /**
+   * The gas price Dusk Wallet starts a transaction from (`defaultGasPrice`),
+   * from what waits in the node's mempool, as the wallet reads it: what the
+   * bridge asks for, so the wallet's window reads it as the network's price.
+   * Not the node's own median of what waits, which one transaction at a high
+   * price sets. The minimum where the mempool can't be read.
+   */
+  /**
+   * The price Dusk Wallet starts from, as the node's mempool says it now, and
+   * whether the network is busy: what waits asks more than that price pays.
+   * The minimum, not busy, where the node can't say.
+   */
+  async function networkGas() {
     try {
-      const response = await post("/on/blocks/gas-price", {
-        body: "100",
-      });
-      const median = BigInt((await response.json())?.median ?? 0);
-      return median > 0n ? median : 1n;
+      const { busy, price } = defaultGasPrice((await query("mempoolTxs { gasPrice gasLimit }"))?.mempoolTxs);
+      return { busy, price };
     } catch {
-      return 1n;
+      return { busy: false, price: GAS_PRICE_MINIMUM };
     }
+  }
+
+  async function gasPrice() {
+    return (await networkGas()).price;
   }
 
   // Transaction lookups made in the same tick share one aliased query, with
@@ -166,7 +196,7 @@ export function createDuskNode({ url, fetch = globalThis.fetch }) {
     const data = await query("block(height: -1) { header { height timestamp } }");
     const header = data?.block?.header;
     if (header?.timestamp === undefined || header?.timestamp === null || header?.height === undefined || header?.height === null)
-      throw new Error("Latest Dusk block timestamp is unavailable.");
+      throw new Error("Dusk didn't give its latest time.");
     return Object.freeze({ height: BigInt(header.height), timestamp: BigInt(header.timestamp) });
   }
 
@@ -187,6 +217,7 @@ export function createDuskNode({ url, fetch = globalThis.fetch }) {
     accountBalance,
     contractCall,
     gasPrice,
+    networkGas,
     latestBlock,
     query,
     transaction,

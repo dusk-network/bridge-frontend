@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
-import { actionLead, receiptModel, reviewChecks, routeLine, transfersModel } from "./page-models.js";
+import { actionLead, receiptModel, reviewChecks, routeLines, transfersModel } from "./page-models.js";
 import { buildQuote } from "./quote.js";
 import { DURATION, exactly } from "./pages.fixtures.js";
 import { arrivalDue, measuredSeconds, routeTime, routeTimeText } from "./route-times.js";
@@ -120,7 +120,7 @@ test("every page says the same time for the same route", () => {
     const routeOf = (id) => routes(cfg).find((item) => item.id === id);
     return {
       // The card's route row, which its network lists show too.
-      card: routeLine(route, cfg, { timing }),
+      card: routeLines(route, cfg, { timing }).join(" "),
       // The quote's row, in the card's details and the review's fee rows.
       quote: quote.rows.find((row) => row.key === "arrives")?.value ?? "",
       receipt: receiptModel(entry, { cfg, now, route, timing, url }).caption,
@@ -150,7 +150,8 @@ test("every page says the same time for the same route", () => {
   assert.match(when.detail, exactly("30 minutes"));
   const view = transferView({ hash: "0x01", stage: "ready_to_prove", status: "pending" }, { cfg: testnet, route, timing: { chain: CHAIN } });
   assert.match(view.steps[2].detail, exactly("7 days"));
-  assert.match(actionLead("prove", {}, { maturity: view.time.maturity, maxLux: 1n }).line, exactly("7 days"));
+  // The proof's review says it in its When row.
+  assert.match(actionLead("prove", {}, { maturity: view.time.maturity, maxLux: 1n }).rows.find((row) => row.key === "when").value, exactly("7 days"));
   // Unknown on this network: no time anywhere, the review's checks included.
   const unknown = pages(testnet, byId(testnet, "dusk-to-ethereum"), {});
   assert.deepEqual([unknown.quote, unknown.receipt], ["", ""]);

@@ -48,13 +48,13 @@ test("explorer links point at each network's own explorer", () => {
   assert.equal(explorerTxUrl(cfg, "ethereum", L2_HASH), `https://sepolia.etherscan.io/tx/${L2_HASH}`);
 });
 
-test("short forms are the same everywhere: 0x and 4 + 4, or 6 + 6", () => {
-  assert.equal(short(EVM), "0x3E5B…a11d");
+test("short forms are the same everywhere: 6 + 6, after any 0x", () => {
+  assert.equal(short(EVM), "0x3E5B82…C3a11d");
   // An address kept in lower case reads with its checksum's capitals, as wallets write it.
-  assert.equal(short(EVM.toLowerCase()), "0x3E5B…a11d");
+  assert.equal(short(EVM.toLowerCase()), "0x3E5B82…C3a11d");
   assert.equal(short(ACCOUNT), "21n5nc…fMMLNz");
   // An EVM transaction is cut as an EVM address is.
-  assert.equal(short("0x04a8a8977dd251da49bd8997cf4d063ddc385f8d29b437b119bb3c79c11b3213"), "0x04a8…3213");
+  assert.equal(short("0x04a8a8977dd251da49bd8997cf4d063ddc385f8d29b437b119bb3c79c11b3213"), "0x04a8a8…1b3213");
   // Dusk hashes and contract IDs: 6 + 6, in lower case.
   assert.equal(short(DUSK_HASH), "cecece…cecece");
   assert.equal(short("14EEB3d4021aff09af2c515603a01f8d956a7f6411d11a1b1c0b0561a93fb1b9"), "14eeb3…3fb1b9");
@@ -67,13 +67,13 @@ test("a deposit is pending through its steps, then completed with both transacti
   const pending = transferView(sent, { cfg, now, route: deposit, locale: GB, timeZone: AMS });
   assert.deepEqual(amountsIn(pending.title), ["25 DUSK"]);
   assert.equal(pending.status, "pending");
+  // Its own transaction is one step, done once it's in a block.
   assert.deepEqual(pending.steps.map(({ key, state }) => [key, state]), [
     ["sent", "done"],
-    ["confirmed", "done"],
     ["arrived", "now"],
   ]);
   assert.equal(pending.steps[0].href, `https://explorer.testnet.dusk.network/transactions/transaction?id=${DUSK_HASH}`);
-  assert.equal(pending.steps[2].detail, "");
+  assert.equal(pending.steps[1].detail, "");
   assert.equal(pending.late, false);
 
   const done = transferView(
@@ -82,8 +82,8 @@ test("a deposit is pending through its steps, then completed with both transacti
   );
   assert.deepEqual(amountsIn(done.title), ["25 DUSK"]);
   assert.equal(done.status, "completed");
-  assert.equal(done.steps[2].state, "done");
-  assert.equal(done.steps[2].href, `https://explorer.testnet.evm.dusk.network/tx/${L2_HASH}`);
+  assert.equal(done.steps[1].state, "done");
+  assert.equal(done.steps[1].href, `https://explorer.testnet.evm.dusk.network/tx/${L2_HASH}`);
   assert.equal(transferView({ hash: DUSK_HASH, note: "Nope.", status: "failed" }, { cfg, route: deposit }).status, "failed");
 
   // Late past twice its usual time and a quarter of an hour more: 16 minutes here.
@@ -227,16 +227,17 @@ test("a waiting withdrawal counts down to its claim time, across a clock change"
   assert.equal(refused.action.failure, WITHDRAWAL_GAS_REFUSAL);
 });
 
-test("what becomes public names the accounts themselves, not a label", () => {
+test("what becomes public names the accounts themselves, not a label, and not the networks From and To say", () => {
   // By its .dusk name too, as the wallet's window says it.
-  const named = privacyLine(deposit, cfg, { dusk: ACCOUNT, evm: EVM, name: "alice.dusk" });
-  for (const shown of ["alice.dusk", "21n5nc…fMMLNz", "0x3E5B…a11d"]) assert.match(named, exactly(shown));
-  const plain = privacyLine(deposit, cfg, { dusk: ACCOUNT, evm: EVM });
-  for (const shown of ["21n5nc…fMMLNz", "0x3E5B…a11d"]) assert.match(plain, exactly(shown));
-  // From the sending side to the paid one, on both networks.
-  const back = privacyLine(migration, cfg, { dusk: ACCOUNT, evm: EVM });
-  for (const shown of ["0x3E5B…a11d", "21n5nc…fMMLNz"]) assert.match(back, exactly(shown));
-  assert.ok(privacyLine(service, cfg, {}));
+  assert.equal(
+    privacyLine(deposit, { dusk: ACCOUNT, evm: EVM, name: "alice.dusk" }),
+    "Public and linked: your Dusk account alice.dusk (21n5nc…fMMLNz), 0x3E5B82…C3a11d and the amount.",
+  );
+  assert.equal(privacyLine(deposit, { dusk: ACCOUNT, evm: EVM }), "Public and linked: your Dusk account 21n5nc…fMMLNz, 0x3E5B82…C3a11d and the amount.");
+  // From the sending side to the paid one.
+  assert.equal(privacyLine(migration, { dusk: ACCOUNT, evm: EVM }), "Public and linked: 0x3E5B82…C3a11d, the Dusk account 21n5nc…fMMLNz and the amount.");
+  // Before the accounts are known, what they are.
+  assert.equal(privacyLine(service, {}), "Public and linked: your Dusk account, your EVM account and the amount.");
 });
 
 test("wallet errors say what happened, naming the wallet", () => {

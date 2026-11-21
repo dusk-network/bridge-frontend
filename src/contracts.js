@@ -1,13 +1,13 @@
-// The Contracts sheet: every address and contract ID each route uses, in
-// full, from the deployment's own config, with explorer links where the
-// explorer has a page, grouped by the three routes. Nothing here is
-// inferred.
+// About this page: every address and contract ID each route uses, from the
+// deployment's own config, each in full on copy, with explorer links where
+// the explorer has a page, grouped by route; what each does, behind Details.
+// Nothing here is inferred.
 
 import { formatContractId } from "@dusk-network/networks/format";
 
 import { buildRoutes } from "./bridge-routes.js";
 import { evmChains } from "./config.js";
-import { bridgeTasks, networkNames, notRunning, tokenName } from "./names.js";
+import { bridgeTasks, networkNames, tokenName } from "./names.js";
 
 const trim = (url) => String(url ?? "").replace(/\/+$/u, "");
 
@@ -49,7 +49,7 @@ export function contractGroups(cfg) {
   networks.push(
     cfg.duskEvm.enabled
       ? { label: names["dusk-evm"], value: `chain ${cfg.duskEvm.chainId}` }
-      : { label: names["dusk-evm"], muted: true, value: `not on ${names.badge} yet` },
+      : { label: names["dusk-evm"], muted: true, value: "not live yet" },
   );
   for (const id of evmChains(cfg)) networks.push({ label: names[id], value: `chain ${cfg.evmNetworks[id].chainId}` });
   groups.push({ id: "networks", rows: networks, title: "Networks" });
@@ -73,19 +73,18 @@ export function contractGroups(cfg) {
         row(
           cfg,
           "dusk",
-          "Bridge account on Dusk",
+          "Bridge account",
           service.account,
           `Receives the DUSK you send. The memo names where it pays out.${payer === service.account ? ` It also pays out what comes from ${names[id]}.` : ""}`,
         ),
       );
     if (payer && payer !== service?.account)
-      rows.push(row(cfg, "dusk", "Pays out on Dusk", payer, "Only its transfers count as a migration's payout."));
+      rows.push(row(cfg, "dusk", "Payout account", payer, "Only its transfers count as a migration's payout."));
     if (service?.payoutAddress) rows.push(row(cfg, id, "Pays out from", service.payoutAddress));
-    const paused = own.every((route) => route.paused);
     groups.push({
       docs: migrates ? cfg.links?.docs?.migration : cfg.links?.docs?.service,
       id: `route-${id}`,
-      note: paused ? `${notRunning(cfg)}.` : "",
+      paused: own.every((route) => route.paused),
       rows,
       title: task.title,
     });
@@ -96,14 +95,14 @@ export function contractGroups(cfg) {
       docs: cfg.links?.docs?.duskEvm,
       id: "duskevm",
       rows: [
-        contractRow("Bridge contract on Dusk", cfg.duskEvm.l1StandardBridgeContractId, "Takes deposits."),
-        contractRow("Withdrawal portal on Dusk", cfg.duskEvm.optimismPortalContractId, "Checks proofs and releases claims."),
-        contractRow("Dispute game factory on Dusk", cfg.duskEvm.disputeGameFactoryContractId),
+        contractRow("Bridge contract", cfg.duskEvm.l1StandardBridgeContractId, "Takes deposits."),
+        contractRow("Withdrawal portal", cfg.duskEvm.optimismPortalContractId, "Checks proofs and releases claims."),
+        contractRow("Dispute game factory", cfg.duskEvm.disputeGameFactoryContractId),
         ...(cfg.duskEvm.anchorStateRegistryContractId
-          ? [contractRow("Anchor state registry on Dusk", cfg.duskEvm.anchorStateRegistryContractId, "Says which dispute games the portal takes.")]
+          ? [contractRow("Anchor state registry", cfg.duskEvm.anchorStateRegistryContractId, "Says which dispute games the portal takes.")]
           : []),
-        row(cfg, "dusk-evm", "Bridge on DuskEVM", cfg.duskEvm.predeploys.l2StandardBridge),
-        row(cfg, "dusk-evm", "Message passer on DuskEVM", cfg.duskEvm.predeploys.l2ToL1MessagePasser),
+        row(cfg, "dusk-evm", `${names["dusk-evm"]} bridge`, cfg.duskEvm.predeploys.l2StandardBridge),
+        row(cfg, "dusk-evm", "Message passer", cfg.duskEvm.predeploys.l2ToL1MessagePasser),
       ],
       title: `${names.dusk} ↔ ${names["dusk-evm"]}`,
     });
@@ -111,26 +110,28 @@ export function contractGroups(cfg) {
   if (cfg.hyperlane?.enabled) {
     const { dusk, evm, network, tokens } = cfg.hyperlane;
     const chain = names[network];
+    // Each kind of contract does the same for every token: said once, behind Details.
     const rows = tokens.flatMap((token) => [
-      contractRow(`${token.symbol} route on Dusk`, token.dusk.route, `Takes the ${token.symbol} sent to ${chain}, and pays out what comes back.`),
+      contractRow(`${token.symbol} route`, token.dusk.route, `Takes what's sent to ${chain}, and pays out what comes back.`),
       ...(token.native ? [] : [contractRow(`${token.symbol} on Dusk`, token.dusk.token, "The token, issued on Dusk.")]),
       row(cfg, network, `${token.symbol} on ${chain}`, token.evm.token, "Mints what comes from Dusk, and burns what goes back."),
     ]);
-    rows.push(contractRow("Mailbox on Dusk", dusk.mailbox), contractRow("Gas paymaster on Dusk", dusk.igp, "Takes the bridge fee for what's sent from Dusk."), row(cfg, network, `Mailbox on ${chain}`, evm.mailbox));
+    rows.push(contractRow("Mailbox on Dusk", dusk.mailbox), contractRow("Gas paymaster", dusk.igp, "Takes the bridge fee for what's sent from Dusk."), row(cfg, network, `Mailbox on ${chain}`, evm.mailbox));
     const routes = buildRoutes(cfg).filter((route) => route.mode === "hyperlane");
     groups.push({
       id: "hyperlane",
-      note: routes.every((route) => route.paused) ? `${notRunning(cfg)}.` : "",
+      paused: routes.every((route) => route.paused),
       rows,
-      title: `${names.dusk} ↔ ${chain}, through Hyperlane`,
+      title: `${names.dusk} ↔ ${chain} (Hyperlane)`,
     });
   }
 
+  // How this page reads Dusk: no route of its own, so no title.
   if (cfg.multicall?.contractId)
     groups.push({
       id: "reads",
-      rows: [contractRow("Multicall for Dusk", cfg.multicall.contractId, "Batches this page's reads of Dusk contracts.")],
-      title: "Used to read Dusk",
+      rows: [contractRow("Multicall", cfg.multicall.contractId, "Batches this page's reads of Dusk contracts.")],
+      title: "",
     });
 
   return groups;
@@ -144,18 +145,16 @@ const hostOf = (url) => {
   }
 };
 
-/** In one line, the servers this page reads from and what for. */
+/**
+ * In one line, the servers this page reads from: the Dusk node and its
+ * archive, DuskEVM's and each EVM chain's RPC, and Dusk Domains' site, for
+ * .dusk names.
+ */
 export function serversLine(cfg) {
-  const names = networkNames(cfg);
-  const parts = [`${hostOf(cfg.dusk.nodeUrl)} (the Dusk node and its archive)`];
-  if (cfg.duskEvm.enabled) parts.push(`${hostOf(cfg.duskEvm.rpcUrl)} (${names["dusk-evm"]})`);
-  for (const id of evmChains(cfg)) {
-    const host = hostOf(cfg.evmNetworks[id]?.rpcUrl);
-    if (host) parts.push(`${host} (${names[id]})`);
-  }
+  const hosts = [hostOf(cfg.dusk.nodeUrl)];
+  if (cfg.duskEvm.enabled) hosts.push(hostOf(cfg.duskEvm.rpcUrl));
+  for (const id of evmChains(cfg)) hosts.push(hostOf(cfg.evmNetworks[id]?.rpcUrl));
   // Dusk Domains' site, which serves the name reader's lens driver.
-  const nameHost = hostOf(cfg.network.duskDomains?.site);
-  if (nameHost) parts.push(`${nameHost} (for .dusk names)`);
-  const list = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0];
-  return `This page reads from ${list}.`;
+  hosts.push(hostOf(cfg.network.duskDomains?.site));
+  return `Reads from ${hosts.filter(Boolean).join(", ")}`;
 }

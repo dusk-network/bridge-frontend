@@ -59,8 +59,8 @@ export function chainName(cfg, chainId) {
 export const gasCoin = (cfg, id) =>
   id === "dusk-evm" ? "DUSK" : (cfg.evmNetworks[id]?.currency?.symbol ?? "ETH");
 
-/** Why a paused route can't be used: "Not running on testnet right now". */
-export const notRunning = (cfg) => `Not running on ${networkNames(cfg).badge.toLowerCase()} right now`;
+/** Why a paused route can't be used: "Paused on testnet". */
+export const notRunning = (cfg) => `Paused on ${networkNames(cfg).badge.toLowerCase()}`;
 
 /**
  * The bridge's three routes: BNB Smart Chain ↔ Dusk, one route
@@ -118,6 +118,6 @@ export function linkedRoute(name, tasks, routes) {
   );
 }
 
-/** "DuskEVM to Dusk": a route in a list row. */
+/** "DuskEVM → Dusk": a route in a list row. */
 export const routeTitle = (cfg, route) =>
-  `${networkName(cfg, route.from.id)} to ${networkName(cfg, route.to.id)}`;
+  `${networkName(cfg, route.from.id)} → ${networkName(cfg, route.to.id)}`;

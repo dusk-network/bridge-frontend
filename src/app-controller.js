@@ -1,6 +1,6 @@
 // The bridge page: a start page of tasks, one form per task with its quote,
-// a review sheet that lists what each wallet will show, a receipt per
-// transfer at its own link, and My transfers read from the networks.
+// a review sheet with what moves, to whom and what it costs, a receipt per
+// transfer at its own link, and Activity read from the networks.
 // Chain state comes from the deployment's own node and RPCs; the wallets
 // are asked only for accounts, signatures and sends, but for Hyperlane's
 // Sepolia reads, which go through the EVM wallet while it's on Sepolia.
@@ -20,6 +20,7 @@ import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js"
 import { followAfterDiscovery, mergeTransfer, mergeTransfers, partyKey } from "./discovery.js";
 import { createDiscoveryRuns } from "./discovery-runs.js";
 import { depositRequest } from "./dusk-deposit.js";
+import { confirmedOnDusk } from "./dusk-node.js";
 import { createDuskAdded, createDuskOffer } from "./dusk-offer.js";
 import { createDuskConnection, disconnectDusk, ensureDuskConnected, sendDuskContractCall, sendDuskTransfer } from "./dusk-wallet.js";
 import { duskEvmNetwork, submitDuskEvmWithdrawal } from "./duskevm-withdrawal.js";
@@ -29,7 +30,7 @@ import { amountForInput, amountForUnits, formatDusk, formatLux, formatDuskPlain,
 import { HYPERLANE_GAS, U64_MAX, duskRecipientHash } from "./hyperlane.js";
 import { inboundCharge, sendToDusk } from "./hyperlane-evm.js";
 import { approveRequest, claimRequest, feeChanged, transferRemoteRequest } from "./hyperlane-requests.js";
-import { claimKey, escrowOnTheWay, evmReviewParts, heldFor, nowHeld, rebuilding, recheckApproval, recheckClaim, withClaimSent } from "./hyperlane-review.js";
+import { callDetails, claimKey, escrowOnTheWay, evmReviewParts, heldFor, nowHeld, rebuilding, recheckApproval, recheckClaim, withClaimSent } from "./hyperlane-review.js";
 import { deliveryLinkDue } from "./hyperlane-tracking.js";
 import { approveMigration, minedAs, revokeMigration, submitMigration } from "./legacy-migration.js";
 import { bridgeTasks, chainName, gasCoin, linkedRoute, networkName, networkNames, notRunning, routeUnits, tokenName } from "./names.js";
@@ -42,13 +43,16 @@ import {
   recipientLine,
   DUSK_WALLET_URL,
   evmWalletName,
+  busyNotes,
+  feeNotes,
   openApproval,
   receiptModel,
   replacedLine,
   reviewChecks,
   revokeReview,
-  routeLine,
-  routeSteps,
+  routeDetailRows,
+  routeLines,
+  stepOfReview,
   transfersModel,
 } from "./page-models.js";
 import { pageStorage } from "./page-storage.js";
@@ -60,12 +64,13 @@ import { createLookupFlow } from "./lookup-flow.js";
 import { createMigrationFees } from "./migration-fees.js";
 import { createReceiptLookups } from "./receipt-lookups.js";
 import { createRouteStatus, statusLine } from "./route-status.js";
-import { arrivalDue, routeTime } from "./route-times.js";
+import { arrivalDue, routeTime, routeTimeText } from "./route-times.js";
 import { checkDuskRecipient, checkEvmRecipient, evmBridgeContracts, settledEvmRecipient } from "./recipient.js";
 import { readWatched, saveWatched, watchTarget } from "./watched-account.js";
 import { SIGNER_MOVED, createReviewSession, notSent, sameSigner, sentActionPatch } from "./review-session.js";
 import { createScheduler, duskFeePaid, takenByAnother } from "./tracking.js";
-import { CONNECT_CANCELLED, CONTRACT_RECIPIENT, actionErrorOf, friendlyWalletError, walletCancelled, html, privacyLine, proverMismatch, short, switchToProver, transferView } from "./transfer-view.js";
+import { approveLines, duskCallLines, duskTransferLines, migrateLines, withdrawLines } from "./wallet-lines.js";
+import { CONNECT_CANCELLED, CONTRACT_RECIPIENT, PUBLIC_LINE, actionErrorOf, friendlyWalletError, walletCancelled, html, privacyLine, proverMismatch, short, switchToProver, transferView } from "./transfer-view.js";
 import {
   activityPanel,
   cardPage,
@@ -83,13 +88,13 @@ import {
   unavailablePage,
   walletsSheet,
 } from "./views.js";
-import { approveLines, duskCallLines, duskTransferLines, migrateLines, withdrawLines } from "./wallet-lines.js";
+import { NOT_TRANSACTION_ID } from "./resolve.js";
 
 const WEI_PER_LUX = 1_000_000_000n;
 /** How often the card reads what Hyperlane's routes hold while a transfer to its account is on its way. */
 const ESCROW_EVERY_MS = 15_000;
 // Per visit: about two months of a sparse Dusk history, and about 25 days of
-// DuskEVM blocks (100,000 per request); "Look further back" carries on.
+// DuskEVM blocks (100,000 per request); "Older transfers" carries on.
 const DISCOVERY_REQUESTS = { dusk: 6, evm: 12 };
 const DISCOVERY_FRESH_MS = 60_000;
 
@@ -173,6 +178,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   // One gas price for every "up to" fee on the page, and for the requests its
   // reviews send: the node's, as last read.
   const duskGasPrice = () => formReads.reads.gasPrice ?? 1n;
+  // What's signed on Dusk while the network is busy may take longer: said, never blocking.
+  const duskBusy = () => busyNotes(formReads.reads.networkBusy);
+  const busyFor = (route) => (route.signer === "dusk" ? duskBusy() : []);
   /** Reads the gas price again; the page is drawn again where it moved. */
   const refreshPrice = () => formReads.price();
   // Says when a transfer ends to whoever isn't looking. A phone's browser can't notify from a page.
@@ -346,8 +354,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   /** Why a link opens no card: DuskEVM not on this network yet, or no such route here. */
   const unavailableTitle = (id) =>
     ["duskevm", "to-duskevm", "from-duskevm", "dusk-to-dusk-evm", "dusk-evm-to-dusk"].includes(id) && !cfg.duskEvm.enabled
-      ? `${names["dusk-evm"]} isn't on ${names.badge} yet`
-      : `This bridge doesn't offer that on ${names.badge}`;
+      ? `${names["dusk-evm"]} isn't live yet`
+      : `Not on ${names.badge}`;
 
   /**
    * The card's state. A link to a route opens it on that route, with the
@@ -565,7 +573,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
 
   const netOf = (id) => ({ id, name: networkName(cfg, id) });
 
-  /** The card's networks to choose from, with DuskEVM shown as not live yet where it isn't. */
+  /** The card's networks to choose from, each by its route's time, with DuskEVM shown as not live yet where it isn't. */
   function networkChoices(side, route) {
     const nameOf = (id) => networkName(cfg, id);
     const paused = notRunning(cfg);
@@ -573,18 +581,17 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const listed = choices.map((choice) => ({
       ...choice,
       name: nameOf(choice.id),
-      note: choice.route ? routeLine(choice.route, cfg, { gasPrice: duskGasPrice(), timing: timing() }) : "",
+      // Its fees are on the card as soon as it's picked.
+      note: choice.route ? routeTimeText(routeTime(choice.route, cfg, timing())) : "",
     }));
-    if (!cfg.duskEvm.enabled) listed.push({ disabled: `Not on ${names.badge} yet`, id: "dusk-evm", name: names["dusk-evm"] });
+    if (!cfg.duskEvm.enabled) listed.push({ disabled: "Not live yet", id: "dusk-evm", name: names["dusk-evm"] });
     return listed;
   }
 
   function cardVm() {
     const route = formRoute();
     const quote = quoteFor(route);
-    const to = networkName(cfg, route.to.id);
     const reads = formReads.reads;
-    const walletName = evmWalletName(state.evmState);
     const phoneOnly = isPhone() && !duskState().installed;
     // ERC20 or BEP20 DUSK on Ethereum and BNB Smart Chain, DUSK on Dusk and DuskEVM.
     const { receive: receiveUnit, send: unit } = routeUnits(route);
@@ -616,43 +623,50 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       handedOver: Boolean(state.form.handedOver) && state.form.recipientInput === state.form.handedOver,
       own: Boolean(destinationIsOwn),
       resolved,
-      walletName,
     });
     const toVm = {
       canReset: Boolean(state.form.recipientInput) && Boolean(route.to.kind === "dusk" ? duskAccount() : evmAccount()),
       editing: state.form.recipientEditing || (!destination && Boolean(state.form.recipientInput)),
+      // Nothing to change yet: one is added.
+      empty: !destination,
       error: typed?.error ?? "",
       fix: typed?.fix ?? "",
       input: state.form.recipientInput,
       // "alice" for alice.dusk, as the wallets offer it.
       suggest: typed?.suggest ?? "",
-      label: `Recipient on ${to}`,
+      // The To panel above names the network.
+      label: "Recipient",
       line,
       looking: typed?.pending ? typed.name : "",
       net: netOf(route.to.id),
-      placeholder: route.to.kind === "dusk" ? "A Dusk account or .dusk name" : "0x…",
+      placeholder: route.to.kind === "dusk" ? "Account or .dusk name" : "0x…",
       resolved,
       contract: paysContract(route, destination),
     };
+    // A paused route says so on its button.
     let notice = null;
-    if (route.paused) notice = { html: `${html(notRunning(cfg))}.`, icon: "info" };
-    else if (route.signer === "dusk" && phoneOnly)
+    if (route.signer === "dusk" && phoneOnly && !route.paused)
       notice = {
         actions: `<div class="btn-row"><button type="button" class="btn sec sm" data-copy="${html(globalThis.location?.href ?? "")}" aria-label="Copy this page's link">${copyFaces("Copy link", "Copied")}</button>${globalThis.navigator?.share ? '<button type="button" class="btn sec sm" data-action="share">Share link</button>' : ""}</div>`,
-        html: "This needs Dusk Wallet on a computer.",
+        html: "Needs Dusk Wallet on a computer",
         icon: "laptop",
       };
-    else if (route.mode === "duskevm-withdrawal" && phoneOnly)
-      notice = { html: "Step 1 works here. Prove and claim need Dusk Wallet on a computer.", icon: "phone" };
+    else if (route.mode === "duskevm-withdrawal" && phoneOnly && !route.paused)
+      notice = { html: "Prove and claim need Dusk Wallet on a computer", icon: "phone" };
     const button = primaryButton({
       amountError: quote.error,
       amountLux: quote.amountLux,
+      // What Review names: the amount as typed, in what's sent.
+      amountText: quote.amountLux === null ? "" : `${route.mode === "hyperlane" ? formatUnitsGrouped(quote.amountLux, route.amountDecimals) : formatLux(quote.amountLux)} ${unit}`,
       connectsRecipient: route.to.kind === "evm" && !evmAccount() && !state.form.recipientInput,
       destination,
       destinationError: toVm.error,
       duskInstalled: duskState().installed,
+      // Connected before and locked since: it's unlocked, as the header says.
+      duskLocked: Boolean(duskState().authorized) && !duskAccount(),
       insufficient: Boolean(quote.insufficient),
       looking: toVm.looking,
+      paused: notRunning(cfg),
       phoneOnly,
       route,
       signerConnected: signerReady(route),
@@ -687,6 +701,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       error: state.form.error,
       // What Hyperlane's routes hold for the connected Dusk account, to claim.
       escrow: escrowVm(),
+      // A bridge fee more than the amount, said under the route line; it blocks nothing.
+      // Under the route line, blocking nothing: a bridge fee more than the amount, a busy network.
+      warnings: route.paused ? [] : [...feeNotes(quote), ...busyFor(route)],
       from: {
         balance: balance.text,
         balanceExact: balance.exact,
@@ -697,7 +714,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       menu: state.form.menu,
       needsCount: transfersVm().needs,
       notice,
-      privacy: privacyLine(route, cfg, {
+      // What becomes public, behind the route line.
+      privacy: privacyLine(route, {
         dusk: route.to.kind === "dusk" ? destination : duskAccount(),
         evm: route.to.kind === "dusk" ? evmAccount() : destination,
         name: duskPartyName(route.to.kind === "dusk" ? destination : duskAccount(), resolved),
@@ -705,11 +723,11 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       quote,
       receive: quote.receiveLux !== null && quote.receiveLux > 0n ? formatUnitsGrouped(quote.receiveLux, route.amountDecimals) : "",
       receiveUnit,
-      // One wallet step where an approval left open covers the amount, as the quote counts them.
-      routeLine: routeLine(route, cfg, { fee: quote.bridgeFeeLux ?? null, gasPrice: duskGasPrice(), steps: quote.steps, timing: timing() }),
+      // Under the card, its time and fees in a line, and what they sum behind it. None on a paused route.
+      routeLines: route.paused ? [] : routeLines(route, cfg, { gasPrice: duskGasPrice(), quote, timing: timing() }),
       routeOpen: state.form.routeOpen,
+      routeRows: route.paused ? [] : routeDetailRows(route, quote),
       status: statusLine(routeStatus.get(route), { amountLux: quote.amountLux }),
-      steps: routeSteps(route, quote),
       tab: "bridge",
       to: toVm,
       toChoices: state.form.menu === "to" ? networkChoices("to", route) : [],
@@ -738,7 +756,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         account: own ? "" : account,
         amount: formatToken(each.pending, each.token),
         route: each.token.routes.in,
-        sent: claimWatch.pending(claimKey(each.token.routes.in, account)) ? "Claim sent, waiting for Dusk." : "",
+        sent: claimWatch.pending(claimKey(each.token.routes.in, account)) ? "Claim sent, waiting for Dusk" : "",
       })),
       link: noFee ? pageUrl(moveHref(waiting[0].token.routes.in, { to: account })) : "",
       owner: own ? "" : duskPartyName(account, typedRecipient(formRoute())) || short(account),
@@ -872,7 +890,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     for (const entry of ends.ended(before, list)) {
       const route = routeOf(entry.routeId);
       if (route) {
-        const { title } = transferView(entry, { cfg, route });
+        // Its state in a sentence: "1 EURd arrived on Sepolia".
+        const { headline: title } = transferView(entry, { cfg, route });
         announce(`${title}.`);
         arrivals.ended({ href: transferHref(entry.hash), id: entry.id, title });
       }
@@ -982,12 +1001,10 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   function activityHtml() {
     const vm = transfersVm();
     const watching = !duskAccount() && state.watching ? state.watching : null;
+    // Whose transfers these are, as labels: the Dusk account by its .dusk name where it has one.
+    const dusk = duskAccount() ? { account: duskAccount(), name: duskName() } : watching;
     const who = [
-      duskAccount()
-        ? `Dusk account ${duskName() ? html(duskName()) : `<code class="mono">${html(short(duskAccount()))}</code>`}`
-        : watching
-          ? `Dusk account ${watching.name ? `${html(watching.name)} (<code class="mono">${html(short(watching.account))}</code>)` : `<code class="mono">${html(short(watching.account))}</code>`}`
-          : "",
+      dusk ? (dusk.name ? html(dusk.name) : `<code class="mono">${html(short(dusk.account))}</code>`) : "",
       evmAccount() ? `<code class="mono">${html(short(evmAccount()))}</code>` : "",
     ].filter(Boolean);
     const discovery = discoveryRuns.state;
@@ -1003,13 +1020,13 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         ? discovery.running
           ? "Looking for transfers…"
           : "No transfers yet."
-        : "Connect a wallet or follow a Dusk account to see its transfers.";
+        : "Connect a wallet or follow an account";
     return activityPanel({
       canAct: duskState().installed,
       empty,
       emptyActions: who.length ? "" : `<div class="btn-row">${duskState().installed ? '<button type="button" class="btn sec sm" data-action="connect-dusk">Connect Dusk Wallet</button>' : ""}<button type="button" class="btn sec sm" data-action="connect-evm">Connect EVM wallet</button></div>`,
       groups,
-      lede: who.length ? `${who.join(" and ")}.` : "",
+      lede: who.join(" · "),
       more: more && !discovery.running,
       syncing: discovery.running,
       syncText,
@@ -1071,10 +1088,10 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     if (!entry) {
       const lookup = receiptLookups.get(hash);
       if (lookup?.missing) return receiptPage({ hash, missing: lookup.missing });
-      return receiptPage({ loading: "Finding this transfer on the networks…" });
+      return receiptPage({ loading: "Looking up this transfer…" });
     }
     const route = routeOf(entry.routeId);
-    if (!route) return receiptPage({ hash, missing: "This transfer's route isn't on this network's bridge." });
+    if (!route) return receiptPage({ hash, missing: `This transfer's route isn't on ${names.badge}` });
     return receiptPage({
       ...receiptModel(withClaimSent(entry, claimWatch.pending), {
         // Cancelled in the wallet: the migration that spent its approval since, which counts its fee.
@@ -1096,6 +1113,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       }),
       canAct: duskState().installed,
       notice: arrivals.state(),
+      wide: wide(),
     });
   }
 
@@ -1170,8 +1188,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         otherSite: cfg.links.sites[other],
       });
     } else if (state.sheet === "review" && reviews.current) {
-      dialog.className = "sheet wide";
-      dialog.innerHTML = reviewSheet(reviewVm());
+      const vm = reviewVm();
+      dialog.className = vm.wide ? "sheet cols" : "sheet wide";
+      dialog.innerHTML = reviewSheet(vm);
     } else if (state.sheet === "wallets") {
       dialog.className = "sheet narrow";
       dialog.innerHTML = walletsSheet({ wallets: state.dusk?.choices ?? [] });
@@ -1185,6 +1204,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   // Review and send
   // -------------------------------------------------------------------------
 
+  // The explorer pages of the accounts and contracts a wallet's window shows, for its lines under Details.
   const explorerFor = { explorer: (network, address) => explorerAddressUrl(cfg, network, address) };
 
   // A review is for the account it was opened with. When the wallet switches,
@@ -1205,23 +1225,29 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const route = routeOf(review.routeId);
     const walletName = route.signer === "dusk" || !evmStep(review) ? "Dusk Wallet" : evmWalletName(state.evmState);
     const step = review.steps[review.current];
+    // On another chain, it's asked for first, as the card does: no step of the transfer.
+    const switching = !review.busy && evmStep(review) && switchTo(route);
     return {
-      after: review.after ?? "",
-      canConfirm: !review.busy && !review.stale && Boolean(step?.lines) && review.checks.every((check) => check.ok),
       cfgLinks: explorerFor,
+      // Its request built, and nothing it checked failing.
+      canConfirm: !review.busy && !review.stale && Boolean(step?.ready) && review.checks.every((check) => check.ok),
       checks: review.checks,
-      // On another chain, it's asked for first, as the card does.
-      confirmLabel: review.busy ? review.busyLabel || `Waiting for ${walletName}…` : (evmStep(review) && switchTo(route) ? `Switch to ${switchTo(route)}` : step?.confirmLabel) ?? "Confirm",
+      confirmLabel: review.busy ? review.busyLabel || `Waiting for ${walletName}…` : (switching ? `Switch to ${switchTo(route)}` : step?.confirmLabel) ?? "Confirm",
       error: review.error,
       feeRows: review.feeRows,
+      // The fees as one figure, where they're split.
+      fees: review.fees ?? null,
       lead: review.lead ?? null,
       notYours: review.notYours ?? "",
+      notes: review.notes ?? [],
+      warnings: review.warnings ?? [],
       privacy: review.privacy,
       receive: review.receive,
       send: review.send,
+      stepOf: stepOfReview(review, { switching }),
       steps: review.steps.map((item, index) => ({ ...item, current: index === review.current })),
       sub: review.sub,
-      walletCheckName: walletName === "Dusk Wallet" ? "Dusk Wallet" : walletName === "your EVM wallet" ? "your wallet" : walletName,
+      wide: wide(),
     };
   }
 
@@ -1242,42 +1268,45 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     // A Hyperlane route's token in its own decimals; DUSK to the Lux.
     const amountText = route.mode === "hyperlane" ? formatUnitsGrouped(lux, route.amountDecimals) : formatLux(lux);
     const checks = reviewChecks(route, { cfg, destination, duskAccount: duskAccount(), evm: state.evmState, quote, reads: formReads.reads });
+    // The .dusk name of whom it pays, where there's one: the connected account's, or a typed name's. On an EVM chain, the connected wallet where it's that.
+    const payeeName =
+      route.to.kind === "dusk"
+        ? destination === duskAccount() ? duskName() : (typedRecipient(route)?.name ?? "")
+        : evmAccount() && destination === checkEvmRecipient(evmAccount()).address ? "your account" : "";
     const base = {
       checks,
       error: "",
       feeRows: quote.rows.filter((row) => !["send", "receive"].includes(row.key)),
+      // The fees as one figure, their split under Details.
+      fees: quote.fees ?? null,
       kind: "send",
-      // A contract, or DUSK paid to another Dusk account than the connected one: said before the steps.
+      // Said in amber, blocking nothing: a bridge fee more than the amount, a busy network.
+      warnings: [...feeNotes(quote), ...busyFor(route)],
+      // A contract, or DUSK paid to another Dusk account than the connected one: said first.
       paysConnected: route.to.kind === "evm" && evmAccount() && destination === checkEvmRecipient(evmAccount()).address ? destination : "",
       paysTo: destination,
       notYours: paysContract(route, destination)
         ? CONTRACT_RECIPIENT
         : route.to.kind === "dusk" && duskAccount() && destination !== duskAccount()
-          ? `This pays ${typedRecipient(route)?.name ?? short(destination)}${typedRecipient(route)?.name ? ` (${short(destination)})` : ""}, not ${duskName() || "your connected Dusk account"}.`
+          ? `Not your connected account${payeeName ? `: it pays ${payeeName}` : ""}`
           : "",
-      privacy: privacyLine(route, cfg, {
-        dusk: route.to.kind === "dusk" ? destination : duskAccount(),
-        evm: route.to.kind === "dusk" ? evmAccount() : destination,
-        name: duskPartyName(route.to.kind === "dusk" ? destination : duskAccount(), typedRecipient(route)),
-      }),
+      privacy: PUBLIC_LINE,
+      // Whom it pays, in full, where it's checked.
       receive: {
+        account: destination,
         amount: route.mode === "hyperlane" ? formatUnitsGrouped(quote.receiveLux ?? lux, route.amountDecimals) : formatLux(quote.receiveLux ?? lux),
         chain: route.to.id,
+        full: true,
         unit: routeUnits(route).receive,
-        where: `${to} · ${
-          route.to.kind === "dusk" && destination === duskAccount() && duskName()
-            ? duskName()
-            : typedRecipient(route)?.name
-              ? `${typedRecipient(route).name} · ${short(destination)}`
-              : short(destination)
-        }`,
+        where: [to, payeeName].filter(Boolean).join(" · "),
       },
       routeId: route.id,
       send: {
+        account: route.signer === "dusk" ? (duskName() ? "" : short(duskAccount())) : short(evmAccount()),
         amount: amountText,
         chain: route.from.id,
         unit: routeUnits(route).send,
-        where: `${from} · ${route.signer === "dusk" ? duskName() || short(duskAccount()) : short(evmAccount())}`,
+        where: route.signer === "dusk" && duskName() ? `${from} · ${duskName()}` : from,
       },
       signer: { account: signerNow(route.signer), wallet: route.signer },
       amountLux: lux,
@@ -1290,49 +1319,54 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       const needsApproval = (migration.allowanceWei ?? 0n) < lux * WEI_PER_LUX;
       // An approval not used up is replaced by this one, not added to.
       const replaces = needsApproval ? replacedLine(migration.allowanceWei ?? 0n, tokenName(network)) : "";
+      const token = tokenName(network);
       const gasPrice = migration.gasPriceWei ?? null;
       const fee = (gas) => (gasPrice && gas ? gas * gasPrice : null);
+      const chain = cfg.evmNetworks[network];
+      // What else each window will show is for reference; an approval's spender, which the wallet doesn't name, in full.
       const steps = [];
       if (needsApproval)
         steps.push({
-          confirmLabel: `Approve ${amountText} ${tokenName(network)} in ${walletName === "your EVM wallet" ? "your wallet" : walletName}`,
+          confirmLabel: `Approve ${amountText} ${token}`,
           lines: approveLines({ amountLux: lux, cfg, fee: fee(migration.gas?.approve), network }),
-          title: `Approve exactly ${amountText} ${tokenName(network)}`,
+          ready: true,
+          spender: { address: chain.migrationContract, name: "Dusk migration contract", network },
+          title: `Approve exactly ${amountText} ${token}`,
           walletName,
-          what: `Lets the Dusk migration contract take <b>exactly ${html(amountText)} ${html(tokenName(network))}</b> from <code class="mono">${html(short(evmAccount()))}</code>.${replaces ? ` ${html(replaces)}` : ""}`,
         });
       steps.push({
-        confirmLabel: `Migrate ${amountText} DUSK`,
+        confirmLabel: `Migrate ${amountText} ${token}`,
         lines: migrateLines({ amountLux: lux, cfg, duskAccount: destination, fee: fee(migration.gas?.migrate), network }),
+        ready: true,
         title: "Migrate",
         walletName,
-        what: `Locks the ${html(tokenName(network))} in the migration contract. The bridge then pays <b>${html(amountText)} DUSK</b> to <code class="mono">${html(short(destination))}</code> on Dusk.`,
       });
       reviews.start({
         ...base,
-        after: needsApproval ? "Step 2 opens when the approval is confirmed." : "",
         current: 0,
+        notes: replaces ? [replaces] : [],
         steps,
-        sub: `${tokenName(network)} on ${from} to Dusk${steps.length === 2 ? ` · ${walletName === "your EVM wallet" ? "your wallet" : walletName} asks you twice` : ""}`,
+        sub: "",
       });
       openSheet("review", opener);
       return;
     }
     if (route.mode === "duskevm-withdrawal") {
-      const l2 = formReads.reads.l2 ?? {};
       reviews.start({
         ...base,
-        after: "Then prove and claim on Dusk, with Dusk Wallet.",
         current: 0,
         steps: [
           {
-            confirmLabel: `Send ${amountText} DUSK in ${walletName === "your EVM wallet" ? "your wallet" : walletName}`,
-            lines: withdrawLines({ amountLux: lux, cfg, duskAccount: destination, fee: l2.gas && l2.gasPriceWei ? l2.gas * l2.gasPriceWei : null }),
+            confirmLabel: `Send ${amountText} DUSK`,
+            lines: withdrawLines({ amountLux: lux, cfg, duskAccount: destination, fee: quote.evmFeeWei ?? null }),
+            ready: true,
             title: `Send on ${from}`,
             walletName,
           },
         ],
-        sub: `${from} to Dusk · step 1 of 3`,
+        // Of the withdrawal's three steps, the first.
+        stepOf: { at: 1, of: 3 },
+        sub: "Then prove and claim on Dusk",
       });
       openSheet("review", opener);
       return;
@@ -1341,31 +1375,20 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const review = reviews.start({
       ...base,
       current: 0,
-      steps: [
-        {
-          confirmLabel: route.mode === "duskevm-deposit" ? `Send ${amountText} DUSK to ${to}` : `Send ${amountText} DUSK`,
-          lines: null,
-          linesNote: "Preparing the request…",
-          title: "Send from Dusk",
-          walletName: "Dusk Wallet",
-          // A payout goes through the bridge's own account: the wallet shows it as the recipient.
-          what:
-            route.mode === "service-transfer"
-              ? `Sends <b>${html(amountText)} DUSK</b> to the bridge account, with your ${html(to)} address as the memo. The bridge pays it out.`
-              : "",
-        },
-      ],
-      sub: `Dusk to ${to}`,
+      // A payout goes through the bridge's own account, with the address it pays as the memo: the wallet shows both.
+      steps: [{ confirmLabel: `Send ${amountText} DUSK`, ready: false, title: "Send from Dusk", wait: "Preparing…", walletName: "Dusk Wallet" }],
+      sub: "",
     });
     openSheet("review", opener);
     await reviews.fill(
       review,
+      // At the price the page quoted: the review and the request say the same fee.
       async () => {
-        // At the price the page quoted: the review and the request say the same fee.
         const request =
           route.mode === "duskevm-deposit"
             ? await depositRequest({ amountLux: lux, gasPrice: duskGasPrice(), node: services.node, recipient: destination })
             : await serviceTransferRequest({ amountLux: lux, destination, gasPrice: duskGasPrice(), node: services.node });
+        // What Dusk Wallet's window will show, for Details.
         const lines =
           route.mode === "duskevm-deposit"
             ? await duskCallLines({ ...request, chainId: cfg.dusk.chainId, from: duskAccount(), fromName: duskName(), note: "The DuskEVM bridge contract on Dusk." })
@@ -1374,7 +1397,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       },
       ({ lines, request }) => {
         review.request = request;
-        review.steps[0] = { ...review.steps[0], lines };
+        review.steps[0] = { ...review.steps[0], lines, ready: true };
         // The fee rows and the balance check at the request's price, so
         // Confirm waits if the balance no longer covers it.
         Object.assign(
@@ -1416,7 +1439,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       kind: "revoke",
       routeId: route.id,
       signer: { account: evmAccount(), wallet: "evm" },
-      steps: before.steps.map((step) => ({ ...step, lines: null, linesNote: "Preparing the request…" })),
+      steps: before.steps.map((step) => ({ ...step, ready: false, wait: "Preparing…" })),
     });
     openSheet("review", opener);
     await reviews.fill(
@@ -1440,7 +1463,6 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     // Dusk Wallet signs it: first the wallet, where there's one to choose.
     if (state.dusk?.choices.length) return connectDusk(opener);
     const view = transferView(entry, { cfg, route, timing: timing() });
-    const label = kind === "prove" ? "Prove on Dusk" : "Claim on Dusk";
     // The price the page quoted the step at: the review and the request use it too.
     const gasPrice = duskGasPrice();
     // What this step costs at most: an estimate until the request is ready.
@@ -1456,31 +1478,27 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         maxLux,
         name: duskName(),
       });
+    // What its button says: a proof, or a claim of what it pays out.
+    const confirmLabel = (amountLux) => (kind === "prove" ? "Prove" : amountLux === null ? "Claim" : `Claim ${formatLux(amountLux)} DUSK`);
+    const first = lead(stepMax);
     const review = reviews.start({
       amountLux: entry.amountLux,
       checks: [],
       current: 0,
       entryId: id,
       error: "",
-      feeRows: [],
+      feeRows: first.rows,
       kind,
-      lead: lead(stepMax),
-      privacy: actionPrivacy(kind, privacyLine(route, cfg, { dusk: entry.destination, evm: entry.sender, name: duskPartyName(entry.destination) }), { account: duskAccount(), name: duskName() }),
-      receive: { amount: view.amount === null ? "" : formatLux(view.amount), chain: "dusk", unit: "DUSK", where: `Dusk · ${short(entry.destination ?? "")}` },
+      lead: first,
+      // Only the account that proved can claim with that proof.
+      notes: kind === "prove" ? ["Only the account that proves can claim"] : [],
+      // Signed on Dusk: a busy network is said.
+      warnings: duskBusy(),
+      privacy: actionPrivacy(kind),
       routeId: route.id,
-      send: { amount: view.amount === null ? "" : formatLux(view.amount), chain: "dusk-evm", unit: "DUSK", where: `${names["dusk-evm"]} · ${short(entry.sender ?? "")}` },
-      steps: [
-        {
-          confirmLabel: label,
-          // Only the account that proved can claim with that proof.
-          custody: kind === "prove" ? "Only the account that proves can claim with that proof." : "",
-          lines: null,
-          linesNote: "Preparing the request…",
-          title: kind === "prove" ? "Prove the withdrawal" : "Claim the DUSK",
-          walletName: "Dusk Wallet",
-        },
-      ],
-      sub: `${names["dusk-evm"]} to Dusk · ${kind === "prove" ? "step 2 of 3" : "step 3 of 3"}`,
+      steps: [{ confirmLabel: confirmLabel(view.amount), ready: false, title: kind === "prove" ? "Prove the withdrawal" : "Claim the DUSK", wait: "Preparing…", walletName: "Dusk Wallet" }],
+      stepOf: kind === "prove" ? { at: 2, of: 3 } : { at: 3, of: 3 },
+      sub: "",
     });
     openSheet("review", opener);
     await reviews.fill(
@@ -1495,24 +1513,19 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         if (kind === "finalize" && proverMismatch(entry, submitter)) throw new Error(switchToProver(entry));
         // The package's checked call, as it is, at the price the page quoted.
         const { claim, decoded, request } = await services.withdrawals.request(kind, entry.hash, { price: gasPrice, submitter });
-        // What the call carries, as Dusk Wallet reads it from the call.
-        const lines = await duskCallLines({
-          ...request,
-          chainId: cfg.dusk.chainId,
-          from: account,
-          fromName: account === duskAccount() ? duskName() : "",
-          note: "The DuskEVM withdrawal portal on Dusk.",
-        });
+        // What Dusk Wallet's window will show, as it reads the call, for Details.
+        const lines = await duskCallLines({ ...request, chainId: cfg.dusk.chainId, from: account, fromName: account === duskAccount() ? duskName() : "", note: "The DuskEVM withdrawal portal on Dusk." });
         return { account, claim, decoded, lines, request };
       },
       ({ account, claim, decoded, lines, request }) => {
         // Prepared for the account Dusk Wallet had then: only it can confirm,
         // and it's the one the proof or claim makes public.
         review.signer = { account, wallet: "dusk" };
-        review.privacy = actionPrivacy(kind, privacyLine(route, cfg, { dusk: entry.destination, evm: entry.sender, name: duskPartyName(entry.destination) }), { account, name: duskName() });
         review.request = request;
+        // What it pays and to whom, as the call carries them, as Dusk Wallet reads them.
         review.lead = lead(BigInt(request.gas.limit) * BigInt(request.gas.price), claim, decoded);
-        review.steps[0] = { ...review.steps[0], lines };
+        review.feeRows = review.lead.rows;
+        review.steps[0] = { ...review.steps[0], confirmLabel: confirmLabel(decoded ? decoded.amountWei / WEI_PER_LUX : view.amount), lines, ready: true };
       },
       (error) => {
         review.error = friendlyWalletError(error, "dusk");
@@ -1541,13 +1554,17 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     return {
       checks: reviewChecks(route, { cfg, destination: review.destination, duskAccount: duskAccount(), evm: state.evmState, quote, reads: { ...formReads.reads, hyperlane: read } }),
       feeRows: quote.rows.filter((row) => !["send", "receive"].includes(row.key)),
+      // The fees as one figure, their split under Details.
+      fees: quote.fees ?? null,
+      // At the request's own fee: one that moved past the amount, or back under it, says so.
+      warnings: [...feeNotes(quote), ...busyFor(route)],
     };
   }
 
   /**
    * A transfer back to Dusk's review at delivery fee `fee`: its fee rows,
-   * checks, step and wallet lines (`evmReviewParts`), with what the route
-   * said of its account when the review was read.
+   * its checks, and whether its step can be sent (`evmReviewParts`), with
+   * what the route said of its account when the review was read.
    */
   function showEvmReview(review, route, fee) {
     const parts = evmReviewParts(route, {
@@ -1564,13 +1581,14 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     review.checks = parts.checks;
     review.deliveryFee = parts.deliveryFee;
     review.feeRows = parts.feeRows;
+    review.fees = parts.fees;
     review.firstToAccount = parts.firstToAccount;
-    review.steps[0] = { ...review.steps[0], lines: parts.lines, what: parts.what };
+    review.steps[0] = { ...review.steps[0], lines: parts.lines, ready: parts.ready };
   }
 
   /**
    * The review of a Hyperlane transfer. Back to Dusk: one step in the EVM
-   * wallet, its lines once the delivery fee, and whether the route pays the
+   * wallet, ready once the delivery fee, and whether the route pays the
    * reviewed account yet, are read for it; the fee is read again as it's
    * sent. To the EVM chain: one step in Dusk Wallet, with an approval first
    * where a token's route can't take the amount yet. Each Dusk step's
@@ -1584,7 +1602,6 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const from = networkName(cfg, route.from.id);
     const to = networkName(cfg, route.to.id);
     if (route.signer === "evm") {
-      const wallet = walletName === "your EVM wallet" ? "your wallet" : walletName;
       // Whether its account waits for a claim is said once read for it, not as the form read another.
       const unread = evmReviewParts(route, {
         amountLux: base.amountLux,
@@ -1604,17 +1621,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         feeRows: unread.feeRows,
         firstToAccount: false,
         registered: null,
-        steps: [
-          {
-            confirmLabel: `Send ${amountText} ${unit} in ${wallet}`,
-            lines: null,
-            linesNote: "Reading the bridge fee…",
-            title: `Send on ${from}`,
-            walletName,
-            what: unread.what,
-          },
-        ],
-        sub: `${unit} on ${from} to Dusk`,
+        steps: [{ confirmLabel: `Send ${amountText} ${unit}`, ready: false, title: `Send on ${from}`, wait: "Reading the fee…", walletName }],
+        sub: "",
       });
       openSheet("review", opener);
       await reviews.fill(
@@ -1639,38 +1647,30 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     // Whether an approval comes first isn't known until the route's allowance is read: no review before.
     if (quote.steps === null) return;
     const approves = quote.steps === 2;
+    // The route that an approval lets take the amount, in full: the security check of an approval.
     const steps = [];
     if (approves)
       steps.push({
         confirmLabel: `Approve ${amountText} ${unit}`,
         kind: "approve",
-        lines: null,
-        linesNote: "Preparing the request…",
+        ready: false,
+        spender: { address: token.dusk.route, name: `the bridge's ${unit} route` },
         title: `Approve exactly ${amountText} ${unit}`,
+        wait: "Preparing…",
         walletName: "Dusk Wallet",
-        what: `Lets the bridge's ${html(unit)} route take <b>exactly ${html(amountText)} ${html(unit)}</b> from your account.`,
       });
-    steps.push({
-      confirmLabel: `Send ${amountText} ${unit} to ${to}`,
-      kind: "send",
-      lines: null,
-      linesNote: approves ? "Ready once the approval is in a block on Dusk." : "Preparing the request…",
-      title: "Send from Dusk",
-      walletName: "Dusk Wallet",
-      what: `Sends <b>${html(amountText)} ${html(unit)}</b> to <code class="mono">${html(short(base.destination))}</code> on ${html(to)}. Its deposit pays the bridge fee${token.native ? ", with the DUSK" : ""}.`,
-    });
+    steps.push({ confirmLabel: `Send ${amountText} ${unit}`, kind: "send", ready: false, title: "Send from Dusk", wait: "Preparing…", walletName: "Dusk Wallet" });
     const review = reviews.start({
       ...rest,
-      after: approves ? "Step 2 opens when the approval is in a block on Dusk." : "",
       current: 0,
       steps,
-      sub: `${unit} from Dusk to ${to}${approves ? " · Dusk Wallet asks you twice" : ""}`,
+      sub: "",
     });
     openSheet("review", opener);
     await prepareHyperlaneStep(review, route);
   }
 
-  /** Builds the request of a Hyperlane review's current Dusk step, after its checks, and the lines Dusk Wallet will show. */
+  /** Builds the request of a Hyperlane review's current Dusk step, after its checks: what's sent. */
   async function prepareHyperlaneStep(review, route) {
     const token = route.hyperlane;
     const step = review.steps[review.current];
@@ -1681,18 +1681,16 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         const sender = review.signer.account;
         const deps = { amount: review.amountLux, cfg, gasPrice, node: services.node, reads: services.hyperlane, recipient: review.destination, sender, token };
         const request = step.kind === "approve" ? await approveRequest(deps) : await transferRemoteRequest(deps);
-        const lines = await duskCallLines({
-          ...request,
-          chainId: cfg.dusk.chainId,
-          from: sender,
-          fromName: sender === duskAccount() ? duskName() : "",
-          note: step.kind === "approve" ? `The ${route.token.symbol} token on Dusk.` : `The bridge's ${route.token.symbol} route on Dusk.`,
-        });
-        return { lines, request };
+        // What Dusk Wallet can't read, and says to check on the site, has its own fold; what it reads, its window's lines under Details.
+        const call = await callDetails(request, { cfg, reads: services.hyperlane, token });
+        const lines = call
+          ? null
+          : await duskCallLines({ ...request, chainId: cfg.dusk.chainId, from: sender, fromName: sender === duskAccount() ? duskName() : "", note: `The ${route.token.symbol} token on Dusk.` });
+        return { call, lines, request };
       },
-      ({ lines, request }) => {
+      ({ call, lines, request }) => {
         review.request = request;
-        review.steps[review.current] = { ...review.steps[review.current], lines };
+        review.steps[review.current] = { ...review.steps[review.current], call, lines, ready: true };
         // The fee rows and the checks at the request's own fee and price, the approval's too.
         Object.assign(review, hyperlaneReviewAt(route, review, request));
       },
@@ -1703,21 +1701,11 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     if (state.sheet === "review" && reviews.current === review) renderSheet();
   }
 
-  /** Waits for a Dusk transaction this page sent to be in a block, as the step after it needs. */
-  async function includedOnDusk(hash, what) {
-    for (let tries = 0; tries < 30; tries += 1) {
-      const tx = await services.node.transaction(hash).catch(() => null);
-      if (tx?.error) throw Object.assign(new Error(`The ${what} failed on Dusk: ${tx.error}`), { code: "FAILED_ON_DUSK" });
-      if (tx) return tx;
-      await new Promise((resolve) => setTimeout(resolve, 3_000));
-    }
-    throw new Error(`The ${what} isn't in a block yet. Check Dusk Wallet's activity, then review again.`);
-  }
 
   /**
    * Sends a Hyperlane review's current step. Back to Dusk, from the EVM
    * wallet, with the delivery fee read again as it's sent. To the EVM chain,
-   * an approval first, waited for until it's in a block, then the transfer,
+   * an approval first, waited for until it's confirmed, then the transfer,
    * checked again as it's signed: a fee that moved shows on the review, and
    * nothing goes until it's confirmed again.
    */
@@ -1736,7 +1724,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         });
       } catch (error) {
         if (error?.code !== "FEE_CHANGED") throw error;
-        // The new fee on the review's rows, checks and wallet lines alike; nothing goes until it's confirmed again.
+        // The new fee on the review's rows and checks alike; nothing goes until it's confirmed again.
         showEvmReview(review, route, error.fee);
         review.busy = false;
         review.error = error.message;
@@ -1787,17 +1775,17 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         }
         review.approvalHash = (await sendDuskContractCall(review.request, { account: review.signer?.account })).hash;
       }
-      review.busyLabel = "Waiting for Dusk…";
+      review.busyLabel = "Confirming…";
       renderSheet();
       try {
         // Kept with the transfer: its fee is part of what it cost.
-        review.approvalFeeLux = duskFeePaid(await includedOnDusk(review.approvalHash, "approval"));
+        review.approvalFeeLux = duskFeePaid(await confirmedOnDusk(services.node, review.approvalHash, "approval"));
       } catch (error) {
         if (error?.code === "FAILED_ON_DUSK") review.approvalHash = null;
         throw error;
       }
-      Object.assign(review, { after: "", busy: false, busyLabel: "", current: review.current + 1, request: null, sub: "The first step went through. One step left." });
-      announce("The approval is in a block. Step 2 is ready.");
+      Object.assign(review, { busy: false, busyLabel: "", current: review.current + 1, request: null, sub: "Approved" });
+      announce("Approved. Step 2 is ready.");
       void loadReads();
       renderSheet();
       reviews.stepShown();
@@ -1868,18 +1856,18 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       return;
     }
     const gasPrice = duskGasPrice();
-    const lead = (signer, pending, maxLux) => {
-      const own = signer === account;
-      const who = own && duskName() ? duskName() : short(account);
-      return {
-        amount: pending === null ? "" : formatUnitsGrouped(pending, route.amountDecimals),
-        chain: "dusk",
-        label: "You claim",
-        line: `To ${who} on Dusk · costs up to ${formatMaxFee(maxLux)} DUSK`,
-        notYours: own ? "" : `This pays ${short(account)}, not ${duskName() || "your connected Dusk account"}. You pay only the network fee.`,
-        unit: route.token.symbol,
-      };
-    };
+    const amountOf = (pending) => (pending === null ? "" : formatUnitsGrouped(pending, route.amountDecimals));
+    // What moves and whom it pays, in full; for another account, that you pay only the network fee.
+    const lead = (signer, pending) => ({
+      amount: amountOf(pending),
+      chain: "dusk",
+      label: "You claim",
+      notYours: signer === account ? "" : "Not your account: you pay only the network fee",
+      payee: account,
+      unit: route.token.symbol,
+    });
+    const feeRows = (maxLux) => [{ key: "fee", label: "Network fee", value: `up to ${formatMaxFee(maxLux)} DUSK` }];
+    const confirmLabel = (signer, pending) => (signer === account && pending !== null ? `Claim ${amountOf(pending)} ${route.token.symbol}` : "Claim for it");
     const held = entry?.heldLux ? BigInt(entry.heldLux) : (formReads.reads.escrow?.held.find((each) => each.token.symbol === token.symbol)?.pending ?? null);
     const own = account === duskAccount();
     const review = reviews.start({
@@ -1888,16 +1876,18 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       current: 0,
       entryId: entry?.id ?? null,
       error: "",
-      feeRows: [],
+      feeRows: feeRows((own ? HYPERLANE_GAS.claim : HYPERLANE_GAS.claimFor).limit * gasPrice),
       kind: "claim",
-      lead: lead(duskAccount(), held, (own ? HYPERLANE_GAS.claim : HYPERLANE_GAS.claimFor).limit * gasPrice),
-      privacy: `Public on Dusk: ${own ? "your account" : `your account, ${short(account)}`} and the amount.`,
+      // Signed on Dusk: a busy network is said.
+      warnings: duskBusy(),
+      lead: lead(duskAccount(), held),
+      privacy: own ? "Public: your account and the amount" : PUBLIC_LINE,
       // Whose escrow it claims: what the card says is claimed, once it's sent.
       claimFor: account,
       routeId: route.id,
       signer: { account: duskAccount(), wallet: "dusk" },
-      steps: [{ confirmLabel: "Claim on Dusk", lines: null, linesNote: "Preparing the request…", title: own ? "Claim from the bridge" : "Claim for this account", walletName: "Dusk Wallet" }],
-      sub: `${route.token.symbol} from ${networkName(cfg, route.from.id)} · held on Dusk`,
+      steps: [{ confirmLabel: confirmLabel(duskAccount(), held), ready: false, title: own ? "Claim from the bridge" : "Claim for this account", wait: "Preparing…", walletName: "Dusk Wallet" }],
+      sub: "",
     });
     openSheet("review", target);
     await reviews.fill(
@@ -1906,15 +1896,16 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         const { account: signer } = await ensureDuskConnected(cfg.dusk.chainId);
         review.signer = { account: signer, wallet: "dusk" };
         const request = await claimRequest({ account, cfg, gasPrice, node: services.node, reads: services.hyperlane, signer, token });
-        const lines = await duskCallLines({ ...request, chainId: cfg.dusk.chainId, from: signer, fromName: signer === duskAccount() ? duskName() : "", note: `The bridge's ${route.token.symbol} route on Dusk.` });
-        return { lines, request, signer };
+        return { call: await callDetails(request, { cfg, reads: services.hyperlane, token }), request, signer };
       },
-      ({ lines, request, signer }) => {
+      ({ call, request, signer }) => {
         review.signer = { account: signer, wallet: "dusk" };
         review.request = request;
         review.amountLux = request.pending;
-        review.lead = lead(signer, request.pending, BigInt(request.gas.limit) * BigInt(request.gas.price));
-        review.steps[0] = { ...review.steps[0], lines, title: signer === account ? "Claim from the bridge" : "Claim for this account" };
+        review.lead = lead(signer, request.pending);
+        review.feeRows = feeRows(BigInt(request.gas.limit) * BigInt(request.gas.price));
+        review.privacy = signer === account ? "Public: your account and the amount" : PUBLIC_LINE;
+        review.steps[0] = { ...review.steps[0], call, confirmLabel: confirmLabel(signer, request.pending), ready: true, title: signer === account ? "Claim from the bridge" : "Claim for this account" };
       },
       (error) => {
         review.error = friendlyWalletError(error, "dusk");
@@ -1955,13 +1946,17 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
           token: route.hyperlane,
         });
         if (again.changed) {
-          const lines = await duskCallLines({ ...again.request, chainId: cfg.dusk.chainId, from: review.signer.account, fromName: review.signer.account === duskAccount() ? duskName() : "", note: `The bridge's ${route.token.symbol} route on Dusk.` });
+          const amount = formatUnitsGrouped(again.request.pending, route.amountDecimals);
           review.request = again.request;
           review.amountLux = again.request.pending;
-          review.lead = { ...review.lead, amount: formatUnitsGrouped(again.request.pending, route.amountDecimals) };
-          review.steps[0] = { ...review.steps[0], lines };
+          review.lead = { ...review.lead, amount };
+          review.steps[0] = {
+            ...review.steps[0],
+            call: await callDetails(again.request, { cfg, reads: services.hyperlane, token: route.hyperlane }),
+            confirmLabel: review.signer.account === review.claimFor ? `Claim ${amount} ${route.token.symbol}` : review.steps[0].confirmLabel,
+          };
           review.busy = false;
-          review.error = `The bridge now holds ${formatToken(again.request.pending, route.token)} for this account. Check the review again.`;
+          review.error = `The bridge now holds ${formatToken(again.request.pending, route.token)} for this account`;
           announce(review.error);
           renderSheet();
           reviews.stepShown();
@@ -2017,8 +2012,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
           // Kept with the transfer: its gas is part of what it cost.
           review.approvalHash = await approveMigration(network, amount, { account: review.signer?.account });
           review.current += 1;
-          review.sub = "The first step went through. One step left.";
-          review.after = "";
+          review.sub = "Approved";
           review.busy = false;
           announce("Approval confirmed. Step 2 is ready.");
           // The allowance changed: read it again, with the migration's gas.
@@ -2246,7 +2240,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const hash = canonicalHash(query);
     state.lookup = { busy: Boolean(hash), error: "", query };
     if (!hash) {
-      state.lookup.error = "That isn't a transaction hash. It has 64 hex characters, after 0x on EVM chains.";
+      state.lookup.error = NOT_TRANSACTION_ID;
       renderMain();
       root.querySelector("#lookup")?.focus();
       return;
@@ -2268,7 +2262,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       globalThis.location.hash = transferHref(found.hash);
       return;
     }
-    state.lookup.error = found?.message ?? "No bridge transfer with this hash was found. If you just sent it, try again in a minute.";
+    state.lookup.error = found?.message ?? "No bridge transfer with this ID yet";
     renderMain();
     root.querySelector("#lookup")?.focus();
   }
@@ -2586,6 +2580,15 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   // A phone's Back from a review: its step in the history is gone, so it closes.
   globalThis.addEventListener?.("popstate", () => {
     if (state.sheet === "review" && !globalThis.history?.state?.reviewSheet) closeSheet();
+  });
+
+  // Wide enough for two columns, as the stylesheet lays them out: a review's
+  // reference and a receipt's details beside them, open. Narrower, they fold.
+  const twoColumns = globalThis.matchMedia?.("(min-width: 1024px)") ?? null;
+  const wide = () => Boolean(twoColumns?.matches);
+  twoColumns?.addEventListener?.("change", () => {
+    if (state.page.page === "transfer") renderMain();
+    if (state.sheet === "review" && reviews.current) renderSheet();
   });
 
   // On a phone, the card's button stays above the keyboard: the height the
