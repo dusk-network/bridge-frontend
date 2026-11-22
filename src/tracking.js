@@ -428,8 +428,10 @@ export function createTracking(deps) {
     } catch (error) {
       const refused = error instanceof WithdrawalError ? error.code : null;
       if (refused === "not-found") return pending(`Waiting for ${name("dusk-evm")}.`, { stage: "submitted" });
+      // Reverted: nothing left the account.
       if (refused === "failed")
         return failed("The withdrawal failed on DuskEVM. Your DUSK is still there.", {
+          sourceFailed: true,
           stage: "failed",
         });
       // Another message to Dusk, or no message at all: nothing to prove or claim.

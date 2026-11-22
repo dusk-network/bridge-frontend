@@ -14,7 +14,7 @@ import { gasCoin, networkName, routeTitle, routeUnits, tokenName } from "./names
 import { transferHref } from "./permalink.js";
 import { buildQuote, routeDuskFees, withdrawalStepMax } from "./quote.js";
 import { routeTime, routeTimeText } from "./route-times.js";
-import { explorerTxUrl, heldForAnother, heldInEscrow, html, short, transferSubline, transferView } from "./transfer-view.js";
+import { explorerTxUrl, failedAtSource, heldForAnother, heldInEscrow, html, short, transferSubline, transferView } from "./transfer-view.js";
 import { copyButton } from "./views.js";
 import { revokeLines } from "./wallet-lines.js";
 
@@ -432,14 +432,6 @@ export function actionLead(kind, entry, { account = "", amountLux = null, claim 
     rows,
   };
 }
-
-/**
- * Whether a failed transfer failed on its own chain, so that nothing moved. One
- * the bridge didn't pay out left the account all the same. Records kept before
- * this was noted say so in their note.
- */
-const failedAtSource = (entry) =>
-  entry.sourceFailed === true || /^The (transfer failed on|migration failed on|Dusk transaction failed)/u.test(entry.note ?? "");
 
 const known = (value) => value !== undefined && value !== null;
 

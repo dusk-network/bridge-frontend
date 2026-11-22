@@ -221,11 +221,11 @@ function withdrawalSteps(entry, cfg, { account, locale, name, now, time: usual, 
   const stage = entry.stage ?? "submitted";
   const time = (ms) => (ms ? formatDateTime(ms, { locale, now, timeZone, year }) : "");
   // Failed on DuskEVM, or no withdrawal at all: nothing after it waits or is
-  // anyone's turn. Its own step is done where a block took it, else failed,
-  // as every route's is (`sentStep`); why is the receipt's caption.
+  // anyone's turn. Its own step is failed or done as every route's is
+  // (`sentState`); why is the receipt's caption.
   if (entry.status === "failed")
     return [
-      step("sent", `Sent on ${networkName(cfg, "dusk-evm")}`, entry.sourceAt ? "done" : "failed", {
+      step("sent", `Sent on ${networkName(cfg, "dusk-evm")}`, sentState(entry), {
         at: entry.sourceAt ?? null,
         atText: time(entry.sourceAt),
         hash: entry.hash,
@@ -308,13 +308,29 @@ function withdrawalSteps(entry, cfg, { account, locale, name, now, time: usual, 
 const afterTheProof = (time) => (time?.maturity ? `${durationWords(time.maturity)} after the proof at the soonest` : "");
 
 /**
- * The step of a transfer's own transaction: sent, and done once it's in a
- * block on its chain (`sourceAt`), with its time and transaction. One step,
- * not two: it's one transaction. Why one failed is the receipt's caption.
+ * Whether a failed transfer failed on its own chain, so that nothing moved. One
+ * the bridge didn't pay out left the account all the same. Records kept before
+ * this was noted say so in their note.
+ */
+export const failedAtSource = (entry) =>
+  entry.sourceFailed === true || /^The (transfer failed on|migration failed on|withdrawal failed on|Dusk transaction failed)/u.test(entry.note ?? "");
+
+/**
+ * Where a transfer's own transaction is: done once it's in a block on its
+ * chain (`sourceAt`), or failed, where it failed there even in a block.
+ */
+function sentState(entry) {
+  if (entry.status === "failed") return entry.sourceAt && !failedAtSource(entry) ? "done" : "failed";
+  return entry.sourceAt || entry.status === "completed" ? "done" : "now";
+}
+
+/**
+ * The step of a transfer's own transaction (`sentState`), with its time and
+ * transaction. One step, not two: it's one transaction. Why one failed is the
+ * receipt's caption.
  */
 function sentStep(entry, from, network, time) {
-  const confirmed = Boolean(entry.sourceAt) || entry.status === "completed";
-  return step("sent", `Sent from ${from}`, confirmed ? "done" : entry.status === "failed" ? "failed" : "now", {
+  return step("sent", `Sent from ${from}`, sentState(entry), {
     at: entry.sourceAt ?? null,
     atText: time(entry.sourceAt),
     hash: entry.hash,

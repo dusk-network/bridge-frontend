@@ -792,12 +792,14 @@ test("a withdrawal follows its stages, and a sent proof waits for Dusk", async (
 
   error = new WithdrawalError("not-found");
   assert.equal((await tracking.refresh(entry, ROUTES.withdrawal)).status, "pending");
+  // Reverted on DuskEVM: it ends there, and nothing left the account.
   error = new WithdrawalError("failed");
-  assert.equal((await tracking.refresh(entry, ROUTES.withdrawal)).status, "failed");
+  const reverted = await tracking.refresh(entry, ROUTES.withdrawal);
+  assert.deepEqual([reverted.status, reverted.sourceFailed], ["failed", true]);
   // Another message to Dusk isn't a withdrawal of DUSK: it ends here.
   error = new WithdrawalError("not-a-withdrawal");
   const other = await tracking.refresh(entry, ROUTES.withdrawal);
-  assert.deepEqual([other.status, other.note], ["failed", NOT_A_DUSK_WITHDRAWAL]);
+  assert.deepEqual([other.status, other.note, other.sourceFailed], ["failed", NOT_A_DUSK_WITHDRAWAL, undefined]);
   // A read that failed is no answer: the next check asks again.
   error = new Error("not-found");
   await assert.rejects(tracking.refresh(entry, ROUTES.withdrawal), { message: "not-found" });
