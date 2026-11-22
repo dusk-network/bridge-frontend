@@ -25,6 +25,7 @@ import { createDuskAdded, createDuskOffer } from "./dusk-offer.js";
 import { createDuskConnection, disconnectDusk, ensureDuskConnected, sendDuskContractCall, sendDuskTransfer } from "./dusk-wallet.js";
 import { duskEvmNetwork, submitDuskEvmWithdrawal } from "./duskevm-withdrawal.js";
 import { addDusk, canAddDusk, connectEvmWallet, ensureEvmChain, evmMoved, getEvmState, initializeEvmWallet, subscribeEvmWallet } from "./evm-wallet.js";
+import { fitAmounts } from "./fit.js";
 import { createFormReads } from "./form-reads.js";
 import { amountForInput, amountForUnits, formatDusk, formatLux, formatDuskPlain, formatMaxFee, formatToken, formatUnitsGrouped } from "./format.js";
 import { HYPERLANE_GAS, U64_MAX, duskRecipientHash } from "./hyperlane.js";
@@ -316,6 +317,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const keep = active && slot("main").contains(active) && selector ? { selector, start: active.selectionStart, end: active.selectionEnd } : null;
     slot("main").innerHTML = next;
     for (const field of slot("main").querySelectorAll(".wrap-input")) fitHeight(field);
+    fitAmounts(slot("main"));
     if (keep) {
       // Only the same control: another with the same action could do something else.
       const matches = slot("main").querySelectorAll(keep.selector);
@@ -798,6 +800,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       if (vm.to.error) recipient.setAttribute("aria-invalid", "true");
       else recipient.removeAttribute("aria-invalid");
     }
+    fitAmounts(main);
   }
 
   const isCardPage = () => state.page.page === "home" || (state.page.page === "move" && Boolean(linkFor(state.page.task)));
@@ -1142,6 +1145,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       if (dialog.showModal) dialog.showModal();
       else dialog.setAttribute("open", "");
     }
+    // Its amounts fit the width it has once it's open.
+    fitAmounts(dialog);
     dialog.querySelector(".sheet-body")?.scrollTo?.(0, 0);
     const first = dialog.querySelector("[data-autofocus]") ?? dialog.querySelector("h2");
     if (first) {
@@ -1198,6 +1203,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       dialog.className = "sheet narrow";
       dialog.innerHTML = duskSheet({ account: duskAccount(), name: duskName() });
     }
+    fitAmounts(dialog);
   }
 
   // -------------------------------------------------------------------------
@@ -2601,6 +2607,16 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     viewport.addEventListener("scroll", keyboardInset);
     keyboardInset();
   }
+
+  // Amounts fit the room they have (fit.js): again when the window's width
+  // changes, a fold opens or closes beside them, or the page's fonts arrive.
+  const fitAll = () => {
+    fitAmounts(slot("main"));
+    if (dialog.open) fitAmounts(dialog);
+  };
+  globalThis.addEventListener?.("resize", fitAll);
+  root.addEventListener("toggle", fitAll, true);
+  globalThis.document?.fonts?.addEventListener?.("loadingdone", fitAll);
 
   return {
     async start() {

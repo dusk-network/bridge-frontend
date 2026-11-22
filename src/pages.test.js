@@ -13,7 +13,7 @@ import { NETWORK_BUSY, actionLead, actionPrivacy, availableLine, balanceLine, bu
 import { DURATION, ESTIMATE, amountsIn, assertShownInFull, byLabel, copiesOf, decode, exactly, fieldOf, fieldsOf, linksOf, paidOf, partsOf, stepPartsOf, textOf } from "./pages.fixtures.js";
 import { buildQuote, withdrawalStepMax } from "./quote.js";
 import { PUBLIC_LINE } from "./transfer-view.js";
-import { cardPage, cardRegions, contractsSheet, footer, header, receiptPage, reviewSheet, walletLines, walletsSheet } from "./views.js";
+import { cardPage, cardRegions, contractsSheet, footer, header, receiptPage, reviewSheet, walletLines, walletsSheet, wholeNumbers } from "./views.js";
 import { formatDateTime } from "./format.js";
 import { approveLines, duskCallLines, duskTransferLines, migrateLines, walletFee, withdrawalAmount } from "./wallet-lines.js";
 import { driverJson, loadDataDriver } from "./data-driver.js";
@@ -1265,4 +1265,21 @@ test("the card's route line opens on the fees' split, each fee one figure, and t
     ["Network fee", "up to 0.005 DUSK"],
     ["Total", "up to 17.881 DUSK"],
   ]);
+});
+
+test("a label reads exactly as given once its numbers are kept whole, in any language's separators, a typed name escaped", () => {
+  const labels = [
+    "Review 99,999,999.123456789 BEP20 DUSK",
+    "Review 12.345,6789 DUSK",
+    "Review 25\u202f000,1234 DUSK",
+    "Review 12\u2019345.6789 DUSK",
+    "Claim 95.085867 EURd for it",
+    "Looking up <img src=x onerror=alert(1)>.dusk…",
+    "Send  25 DUSK",
+  ];
+  for (const label of labels) {
+    const html = wholeNumbers(label, ".cta");
+    assert.equal(decode(html.replace(/<[^>]*>/gu, "")), label);
+    assert.doesNotMatch(html, /<img/u);
+  }
 });

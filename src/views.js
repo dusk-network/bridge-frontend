@@ -22,6 +22,21 @@ export const copyButton = (value, label) =>
 /** Where a short amount leaves digits out, all of them, on hover. */
 const exactTitle = (exact, text) => (exact && exact !== text ? ` title="${html(exact)}"` : "");
 
+/** A number as a word: digits, with any language's separators and a sign or bound before it. */
+const NUMBER = /^[(<>≤≥~−+-]*\d[^\p{L} ]*$/u;
+
+/**
+ * `text`, its numbers each kept whole on one line ("99,999,999.123456789",
+ * "12 345,6789"), and drawn smaller where one is wider than `box`, the element
+ * whose width it has (fit.js). Words go by plain spaces: a language's own
+ * group separators aren't one. HTML.
+ */
+export const wholeNumbers = (text, box = "") =>
+  String(text ?? "")
+    .split(" ")
+    .map((word) => (NUMBER.test(word) ? `<span class="nb"${box ? ` data-fit="${box}"` : ""}>${html(word)}</span>` : html(word)))
+    .join(" ");
+
 /** A wait's words, with a small ring that turns beside them from the start (still with reduced motion). */
 export const waiting = (text) => `<span class="waiting"><span class="spin" aria-hidden="true"></span><span>${html(text)}</span></span>`;
 
@@ -220,7 +235,7 @@ function escrowBox(escrow) {
         .map((each) =>
           each.sent
             ? `<span class="small t2">${html(each.sent)}</span>`
-            : `<button type="button" class="btn sec sm" data-action="escrow-claim" data-route="${html(each.route)}"${each.account ? ` data-account="${html(each.account)}"` : ""}>Claim ${html(each.amount)}${each.account ? " for it" : ""}</button>`,
+            : `<button type="button" class="btn sec sm" data-action="escrow-claim" data-route="${html(each.route)}"${each.account ? ` data-account="${html(each.account)}"` : ""}><span class="lbl">${wholeNumbers(`Claim ${each.amount}${each.account ? " for it" : ""}`, ".btn-row")}</span></button>`,
         )
         .join("");
   return `<div class="card notice-box" role="note"><div class="note">${icon("info")}<span>${lead} <span class="num">${html(listed)}</span>${why}</span></div><div class="btn-row">${buttons}</div></div>`;
@@ -230,7 +245,7 @@ function escrowBox(escrow) {
 function primaryControl(button) {
   if (button.action === "get-dusk")
     return `<a class="btn pri full" href="${html(button.href)}" target="_blank" rel="noreferrer">${html(button.label)} ${icon("ext")}<span class="sr-only"> (opens in a new tab)</span></a>`;
-  return `<button type="button" class="btn pri full" data-action="${html(button.action ?? "none")}" ${button.enabled ? "" : "disabled"}>${html(button.label)}</button>`;
+  return `<button type="button" class="btn pri full" data-action="${html(button.action ?? "none")}" ${button.enabled ? "" : "disabled"}><span class="lbl">${wholeNumbers(button.label, ".cta")}</span></button>`;
 }
 
 /**
@@ -282,7 +297,7 @@ export function cardRegions(vm) {
     cta: `${vm.error ? messageLine(vm.error) : ""}${primaryControl(vm.button)}`,
     escrow: escrowBox(vm.escrow),
     // The label once there's a balance to label.
-    "from-foot": `<span>${vm.from.balance ? html(vm.from.balanceLabel) : ""}</span><span class="bal">${vm.from.balance ? `<span class="num"${exactTitle(vm.from.balanceExact, vm.from.balance)}>${html(vm.from.balance)}</span>` : ""}${vm.canMax ? '<button type="button" class="mini" data-action="max">Max</button>' : ""}${vm.addDusk ? addDuskButton(vm.addDusk, "mini") : ""}</span>`,
+    "from-foot": `<span>${vm.from.balance ? html(vm.from.balanceLabel) : ""}</span><span class="bal">${vm.from.balance ? `<span class="num"${exactTitle(vm.from.balanceExact, vm.from.balance)}>${wholeNumbers(vm.from.balance)}</span>` : ""}${vm.canMax ? '<button type="button" class="mini" data-action="max">Max</button>' : ""}${vm.addDusk ? addDuskButton(vm.addDusk, "mini") : ""}</span>`,
     receive: html(vm.receive || "0"),
     "recipient-note": recipientNote(vm.to),
     // Behind the route line: the fees' split and the steps, how the route is doing as usual, and what's public.
@@ -316,8 +331,8 @@ export function cardPage(vm) {
   const notice = vm.notice
     ? `<div class="card notice-box" role="note"><div class="note">${icon(vm.notice.icon ?? "info")}<span>${vm.notice.html}</span></div>${vm.notice.actions ?? ""}</div>`
     : "";
-  const from = `<div class="panel"><div class="panel-h"><span class="panel-l">From</span><div class="netsel">${netButton("from", vm.from.net, vm.menu === "from")}${vm.menu === "from" ? netMenu("from", vm.fromChoices) : ""}</div></div>
-      <div class="amt-row"><input id="amount" name="amount" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="0" value="${html(vm.amount)}" aria-label="Amount, in ${html(vm.unit)}" aria-describedby="amount-help amount-error"${vm.amountError ? ' aria-invalid="true"' : ""}>${tokenControl(vm)}</div>
+  const from = `<div class="panel from"><div class="panel-h"><span class="panel-l">From</span><div class="netsel">${netButton("from", vm.from.net, vm.menu === "from")}${vm.menu === "from" ? netMenu("from", vm.fromChoices) : ""}</div></div>
+      <div class="amt-row" data-fit-row><input id="amount" name="amount" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="0" value="${html(vm.amount)}" aria-label="Amount, in ${html(vm.unit)}" aria-describedby="amount-help amount-error"${vm.amountError ? ' aria-invalid="true"' : ""}>${tokenControl(vm)}</div>
       <div class="panel-f" id="amount-help" data-region="from-foot">${regions["from-foot"]}</div>
       <p class="field-error" id="amount-error" role="status">${html(vm.amountError ?? "")}</p>
     </div>`;
@@ -328,7 +343,7 @@ export function cardPage(vm) {
     ? `<div class="recip-edit"><label class="panel-l" for="recipient">${html(vm.to.label)}</label><textarea id="recipient" name="recipient" class="mono-input wrap-input" rows="2" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${html(vm.to.placeholder)}" aria-describedby="recipient-error recipient-note"${vm.to.error ? ' aria-invalid="true"' : ""}>${html(vm.to.input)}</textarea><p class="field-error" id="recipient-error" role="alert">${html(vm.to.error ?? "")}</p>${note}${vm.to.canReset ? '<button type="button" class="linkish" data-action="recipient-reset">Use mine</button>' : ""}</div>`
     : `<p class="recip">${vm.to.line} · <button type="button" class="linkish" data-action="recipient-edit">${vm.to.empty ? "Add" : "Change"}</button></p>${note}`;
   const to = `<div class="panel"><div class="panel-h"><span class="panel-l">To</span><div class="netsel">${netButton("to", vm.to.net, vm.menu === "to")}${vm.menu === "to" ? netMenu("to", vm.toChoices) : ""}</div></div>
-      <div class="amt-row"><span class="out${vm.receive ? "" : " empty"}" data-region="receive">${regions.receive}</span><span class="token">${chainMark(vm.to.net.id)}${html(vm.receiveUnit)}</span></div>
+      <div class="amt-row" data-fit-row><span class="out${vm.receive ? "" : " empty"}" data-region="receive">${regions.receive}</span><span class="token">${chainMark(vm.to.net.id)}${html(vm.receiveUnit)}</span></div>
       <div class="panel-f"><span>You receive</span></div>
       ${recipient}
     </div>`;
@@ -389,8 +404,12 @@ const otherAccount = (text) =>
 function actionLead(lead) {
   const unit = lead.unit ?? "DUSK";
   const line = lead.payee ? `To <code class="mono wrap">${html(lead.payee)}</code> on Dusk${lead.line ? ` · ${html(lead.line)}` : ""}` : html(lead.line);
-  return `<div class="flow group lead"><div><div class="k">${html(lead.label)}</div><div class="v num">${html(lead.amount)}${unit ? `<span class="u">${html(unit)}</span>` : ""}</div><div class="w">${lead.chain ? chainMark(lead.chain, "xs") : ""}<span>${line}</span></div></div></div>`;
+  return `<div class="flow group lead"><div><div class="k">${html(lead.label)}</div>${flowAmount(lead.amount, unit)}<div class="w">${lead.chain ? chainMark(lead.chain, "xs") : ""}<span>${line}</span></div></div></div>`;
 }
+
+/** An amount the review leads with: whole on its line, smaller where it's wider than its side (fit.js), its unit after it or under it. */
+const flowAmount = (amount, unit) =>
+  `<div class="v num"><span class="nb" data-fit=".v">${html(amount)}</span>${unit ? `<span class="u">${html(unit)}</span>` : ""}</div>`;
 
 /**
  * One side of what moves: its network, the .dusk name where there's one, then
@@ -505,9 +524,9 @@ export function reviewSheet(vm) {
   // Another account paid: said first, after what's public.
   const notYours = vm.lead ? vm.lead.notYours : vm.notYours;
   const decision = `${vm.lead ? actionLead(vm.lead) : `<div class="flow group">
-      <div><div class="k">You send</div><div class="v num">${html(vm.send.amount)}<span class="u">${html(vm.send.unit)}</span></div><div class="w">${flowSide(vm.send)}</div></div>
+      <div><div class="k">You send</div>${flowAmount(vm.send.amount, vm.send.unit)}<div class="w">${flowSide(vm.send)}</div></div>
       <div class="dn" aria-hidden="true">${icon("back", "down")}</div>
-      <div><div class="k">You receive</div><div class="v num">${html(vm.receive.amount)}<span class="u">${html(vm.receive.unit)}</span></div><div class="w">${flowSide(vm.receive)}</div></div>
+      <div><div class="k">You receive</div>${flowAmount(vm.receive.amount, vm.receive.unit)}<div class="w">${flowSide(vm.receive)}</div></div>
     </div>`}
     <p class="note">${icon("eye")}<span>${publicLine(vm.privacy)}</span></p>
     ${notYours ? otherAccount(notYours) : ""}
@@ -526,7 +545,7 @@ export function reviewSheet(vm) {
   </div>`;
   return `<div class="sheet-head"><div><h2 id="sheet-title">Review</h2>${vm.sub ? `<p class="sub">${html(vm.sub)}</p>` : ""}</div><button type="button" class="icon-btn round" data-action="close-sheet" aria-label="Close the review">${icon("close")}</button></div>
   ${body}
-  <div class="sheet-foot">${vm.error ? messageLine(vm.error) : ""}<div class="btn-pair"><button type="button" class="btn sec" data-action="close-sheet">Cancel</button><button type="button" class="btn pri" data-action="confirm" ${vm.canConfirm ? "" : "disabled"}>${html(vm.confirmLabel)}${vm.stepOf ? `<span class="of"><span class="sr-only">, step </span>${vm.stepOf.at} of ${vm.stepOf.of}</span>` : ""}</button></div></div>`;
+  <div class="sheet-foot">${vm.error ? messageLine(vm.error) : ""}<div class="btn-pair"><button type="button" class="btn sec" data-action="close-sheet">Cancel</button><button type="button" class="btn pri" data-action="confirm" ${vm.canConfirm ? "" : "disabled"}><span class="lbl">${wholeNumbers(vm.confirmLabel, ".sheet-foot")}</span>${vm.stepOf ? `<span class="of"><span class="sr-only">, step </span>${vm.stepOf.at} of ${vm.stepOf.of}</span>` : ""}</button></div></div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -581,7 +600,7 @@ export function receiptPage(vm) {
       ? `<div class="action-box">${actionNeedsWallet(view.action.kind)}</div>`
       : view.action.blocked
         ? `<div class="action-box"><p class="note">${icon("info")}<span>${html(view.action.blocked)}</span></p></div>`
-        : `<div class="action-box">${view.action.failure ? messageLine(view.action.failure, { live: false }) : ""}<button type="button" class="btn ${view.action.quiet ? "sec" : "pri"}" data-action="${html(view.action.command ?? `withdrawal-${view.action.kind}`)}" data-id="${html(vm.id)}">${html(view.action.label)}</button><span class="small t2">${html(vm.actionFee ?? "")}</span></div>`
+        : `<div class="action-box">${view.action.failure ? messageLine(view.action.failure, { live: false }) : ""}<button type="button" class="btn ${view.action.quiet ? "sec" : "pri"}" data-action="${html(view.action.command ?? `withdrawal-${view.action.kind}`)}" data-id="${html(vm.id)}"><span class="lbl">${wholeNumbers(view.action.label, ".action-box")}</span></button><span class="small t2">${html(vm.actionFee ?? "")}</span></div>`
     : "";
   const value = (row) => `<span class="num"${exactTitle(row.exact, row.value)}>${html(row.value)}</span>`;
   const details = vm.details
@@ -602,7 +621,7 @@ export function receiptPage(vm) {
       <div class="topbar">${backLink}</div>
       <div class="hero">
         <div class="okc ${view.status}" aria-hidden="true">${view.status === "completed" ? icon("check") : view.status === "failed" ? icon("close") : pairMark(view.pair[0], view.pair[1])}</div>
-        <h1 class="t">${html(view.title)}</h1>
+        <h1 class="t">${wholeNumbers(view.title, ".t")}</h1>
         ${vm.fromTo ? `<p class="l">${vm.fromTo}</p>` : ""}
         <div class="pl" role="status">${statusPill(view.status, view.statusWord)}${vm.caption ? `<span class="cap">${html(vm.caption)}</span>` : ""}</div>
       </div>
@@ -646,7 +665,7 @@ export function transferRow(row, { canAct = true } = {}) {
   // Whom it pays and its transaction, so equal transfers are told apart.
   const to = row.to ? `To ${row.to.name ? html(row.to.name) : `<code class="mono">${html(row.to.address)}</code>`}` : "";
   const meta = [to, row.hash ? `<code class="mono">${html(row.hash)}</code>` : ""].filter(Boolean).join(" · ");
-  return `<li class="tr" data-status="${html(row.status)}"><a class="tr-link" href="${html(row.href)}" aria-label="${html(row.title)}, ${html(row.amountText)}, ${html(row.statusWord)}. Open the receipt"${exactTitle(row.amountExact, row.amountText)}></a>${pairMark(row.pair[0], row.pair[1])}<div class="tr-main"><div class="t1">${html(row.title)}</div><div class="t2">${html(row.subline)}</div>${meta ? `<div class="t3">${meta}</div>` : ""}${trackerBars(row.tracker)}</div><div class="rt"><span class="am num">${html(row.amountText)}</span>${right}</div></li>`;
+  return `<li class="tr" data-status="${html(row.status)}"><a class="tr-link" href="${html(row.href)}" aria-label="${html(row.title)}, ${html(row.amountText)}, ${html(row.statusWord)}. Open the receipt"${exactTitle(row.amountExact, row.amountText)}></a>${pairMark(row.pair[0], row.pair[1])}<div class="tr-main"><div class="t1">${html(row.title)}</div><div class="t2">${html(row.subline)}</div>${meta ? `<div class="t3">${meta}</div>` : ""}${trackerBars(row.tracker)}</div><div class="rt"><span class="am num">${wholeNumbers(row.amountText)}</span>${right}</div></li>`;
 }
 
 /**
