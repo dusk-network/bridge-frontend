@@ -102,11 +102,14 @@ function pageRoot() {
   return { root, slots };
 }
 
+/** The wallet's answer when the request is cancelled there. */
+const rejected = () => Object.assign(new Error("User rejected the request."), { code: 4001 });
+
 /** Dusk Wallet, connected to `account` where one is given, that refuses to connect and doesn't let go when asked. */
 function duskWallet(account) {
   return {
     connect: async () => {
-      throw Object.assign(new Error("User rejected the request."), { code: 4001 });
+      throw rejected();
     },
     disconnect: async () => false,
     provider: { name: "Dusk Wallet" },
@@ -135,26 +138,49 @@ const services = {
   },
 };
 
-/** The page at `hash`, its transfers kept in this browser, Dusk Wallet connected to `account`; its timers stand still unless the test moves them. */
-async function openPage(t, hash, activity, { account = ACCOUNT } = {}) {
+/**
+ * The page at `hash`, its transfers kept in this browser, Dusk Wallet
+ * connected to `account` (or `wallet`); its timers stand still unless the
+ * test moves them. `go` follows a link to another page.
+ */
+async function openPage(t, hash, activity, { account = ACCOUNT, network = services, wallet = duskWallet(account) } = {}) {
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   const items = new Map([[`dusk-bridge:activity:v2:${cfg.profile}`, JSON.stringify(activity)]]);
+  const events = {};
   globalThis.localStorage = { getItem: (key) => items.get(key) ?? null, removeItem: (key) => items.delete(key), setItem: (key, value) => items.set(key, String(value)) };
   globalThis.location = { hash, origin: "https://bridge.example", pathname: "/" };
   globalThis.document = { activeElement: null, addEventListener() {}, hasFocus: () => true, visibilityState: "visible" };
+  globalThis.addEventListener = (type, listener) => (events[type] ??= []).push(listener);
   t.after(() => {
     delete globalThis.localStorage;
     delete globalThis.location;
     delete globalThis.document;
+    delete globalThis.addEventListener;
   });
-  useDuskWallet(duskWallet(account));
+  useDuskWallet(wallet);
   const page = pageRoot();
-  await createAppController(page.root, { cfg, routes, services }).start();
+  await createAppController(page.root, { cfg, routes, services: network }).start();
+  page.go = async (next) => {
+    globalThis.location.hash = next;
+    for (const listener of events.hashchange ?? []) listener();
+    await settle();
+  };
   return page;
+}
+
+/** A request the wallet answers when the test says: `refuse` cancels it there. */
+function waiting() {
+  const asked = [];
+  const ask = () =>
+    new Promise((resolve, reject) => {
+      asked.push({ refuse: () => reject(rejected()), resolve });
+    });
+  return { ask, asked };
 }
 
 /** What the page's message says, as shown, and what the live region read out, once what's under way finished. */
 async function said(t, slots) {
+  await settle();
   const shown = partsOf(slots.main.innerHTML, "message").map(textOf);
   t.mock.timers.tick(100);
   await settle();
@@ -204,4 +230,72 @@ test("a review whose request couldn't be prepared says why, and no longer that i
   // Its Confirm stays off: there's no request to send.
   assert.match(review, /data-action="confirm" disabled/u);
   await settle();
+});
+
+test("a wallet's answer to a try made on another page says nothing on the page open now", async (t) => {
+  for (const next of ["#/lookup", `#/transfer/${HELD.hash}`, "#/"]) {
+    // Activity's Connect Dusk Wallet, cancelled in the wallet once another page is open.
+    const connect = waiting();
+    const { go, root, slots } = await openPage(t, "#/transfers", [HELD], { wallet: { ...duskWallet(null), connect: connect.ask } });
+    await root.press({ action: "connect-dusk" });
+    await go(next);
+    connect.asked[0].refuse();
+    const { heard, shown } = await said(t, slots);
+    assert.deepEqual(shown, [], next);
+    assert.doesNotMatch(heard, /\bcancelled\b/iu, next);
+    t.mock.timers.reset();
+  }
+});
+
+test("a try's answer says nothing once the page tried again", async (t) => {
+  const connect = waiting();
+  const { root, slots } = await openPage(t, "#/transfers", [], { wallet: { ...duskWallet(null), connect: connect.ask } });
+  await root.press({ action: "connect-dusk" });
+  await root.press({ action: "connect-dusk" });
+  // The first try, cancelled while the second waits for the wallet.
+  connect.asked[0].refuse();
+  const { heard, shown } = await said(t, slots);
+  assert.deepEqual(shown, []);
+  assert.doesNotMatch(heard, /\bcancelled\b/iu);
+  // The second's answer is the page's.
+  connect.asked[1].refuse();
+  const after = await said(t, slots);
+  assert.deepEqual(after.shown, [after.heard]);
+  assert.match(after.heard, /\bcancelled\b/iu);
+});
+
+test("why a claim for an unknown account didn't go stands while the transfer is held, and goes once it isn't", async (t) => {
+  let claimed = false;
+  const tracking = { ...services.tracking, refresh: async (entry) => (claimed ? { destinationAt: SENT_AT + 600_000, escrow: "claimed", status: "completed" } : { status: entry.status }) };
+  const { root, slots } = await openPage(t, `#/transfer/${HELD.hash}`, [HELD], { network: { ...services, tracking } });
+  await root.press({ action: "escrow-claim", id: HELD.id });
+  assert.match((await said(t, slots)).shown.join(" "), /\bisn't known\b/u);
+  // Checked again, still held: it stands.
+  t.mock.timers.tick(15_000);
+  await settle();
+  assert.match(partsOf(slots.main.innerHTML, "message").map(textOf).join(" "), /\bisn't known\b/u);
+  // Claimed by its account since: the receipt says so, and nothing more about claiming it.
+  claimed = true;
+  t.mock.timers.tick(15_000);
+  await settle();
+  assert.match(textOf(slots.main.innerHTML), /\bClaimed on Dusk\b/u);
+  assert.deepEqual(partsOf(slots.main.innerHTML, "message"), []);
+});
+
+test("a refusal stays through the wallet's news when no account changed, and goes once one connected", async (t) => {
+  let tell;
+  const wallet = { ...duskWallet(null), subscribe: (listener) => ((tell = listener), () => {}) };
+  const { root, slots } = await openPage(t, "#/transfers", [], { wallet });
+  await root.press({ action: "connect-dusk" });
+  assert.match((await said(t, slots)).shown.join(" "), /\bcancelled\b/iu);
+  // Still no profile chosen, with or without one named.
+  for (const news of [{ ...wallet.state }, { ...wallet.state, selectedProfile: undefined }]) {
+    tell(news);
+    await settle();
+    assert.match(partsOf(slots.main.innerHTML, "message").map(textOf).join(" "), /\bcancelled\b/iu);
+  }
+  // Connected after all.
+  tell({ ...wallet.state, authorized: true, selectedProfile: { account: ACCOUNT } });
+  await settle();
+  assert.deepEqual(partsOf(slots.main.innerHTML, "message"), []);
 });
