@@ -534,7 +534,7 @@ export function reviewSheet(vm) {
     ${notes}
     ${checks}
     <dl class="group kvs">${quoteRows({ rows: rows.shown })}</dl>
-    ${step && !step.ready ? `<p class="small t2">${waiting(step.wait ?? "Preparing…")}</p>` : ""}`;
+    ${step && !step.ready && !step.unprepared ? `<p class="small t2">${waiting(step.wait ?? "Preparing…")}</p>` : ""}`;
   // Beside it, at its own height: the decision stays in view while it's read.
   const reference = `${split}${preview}${callRows ? `<div class="wlh">${CALL_TITLE}</div>${callRows}` : ""}`;
   const body = vm.wide
