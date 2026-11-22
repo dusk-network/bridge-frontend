@@ -643,6 +643,8 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 .trk .now span { color: var(--amber); }
 .trk .turn i { background: var(--text); }
 .trk .turn span { color: var(--text); font-weight: 500; }
+.trk .failed i { background: var(--red); }
+.trk .failed span { color: var(--red); }
 .empty p + .btn-row { margin-top: 12px; }
 form.group .btn.full { margin-top: 12px; }
 form.group .l1 { display: block; color: var(--text); font-size: 14px; font-weight: 500; }

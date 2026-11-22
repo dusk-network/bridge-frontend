@@ -369,3 +369,24 @@ test("a finished transfer out lists what arrived, as the receipt says it, not wh
   // What it pays nothing for stays what was sent.
   assert.equal(view({ ...sent, amountLux: "1000000000", destinationAt: 1, status: "completed" }).amountText, "1 DUSK");
 });
+
+test("a withdrawal that failed on DuskEVM draws nothing as on its way or anyone's turn, with or without when it was sent", () => {
+  const note = "The withdrawal failed on DuskEVM. Your DUSK is still there.";
+  const failed = { amountLux: "200000000000", hash: L2_HASH, note, stage: "failed", status: "failed" };
+  const sentAt = Date.UTC(2026, 9, 23, 14, 20);
+  // Its own step as every route's: failed, or done where a block took it; nothing after it waits.
+  for (const [entry, sent] of [
+    [failed, "failed"],
+    [{ ...failed, sourceAt: sentAt }, "done"],
+  ]) {
+    const view = transferView(entry, { cfg, now: Date.UTC(2026, 9, 28), route: withdrawal, locale: GB, timeZone: AMS, timing });
+    assert.equal(view.statusWord, "Failed");
+    assert.deepEqual(states(view.steps), [sent, "todo", "todo"]);
+    assert.deepEqual(view.steps.map(({ detail }) => detail), ["", "", ""]);
+    assert.deepEqual(states(view.tracker), [sent, "todo", "todo"]);
+    assert.equal(view.action, null);
+    assert.equal(view.countdown, null);
+    // Its receipt says why it failed, under the pill.
+    assert.equal(receiptModel(entry, { cfg, route: withdrawal, timing, url: "https://bridge.example/#/transfer/x" }).caption, note);
+  }
+});

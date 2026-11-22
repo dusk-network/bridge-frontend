@@ -220,6 +220,20 @@ const REJECTED_PROOF = "The proof was rejected. Prove again once DuskEVM reports
 function withdrawalSteps(entry, cfg, { account, locale, name, now, time: usual, timeZone, year }) {
   const stage = entry.stage ?? "submitted";
   const time = (ms) => (ms ? formatDateTime(ms, { locale, now, timeZone, year }) : "");
+  // Failed on DuskEVM, or no withdrawal at all: nothing after it waits or is
+  // anyone's turn. Its own step is done where a block took it, else failed,
+  // as every route's is (`sentStep`); why is the receipt's caption.
+  if (entry.status === "failed")
+    return [
+      step("sent", `Sent on ${networkName(cfg, "dusk-evm")}`, entry.sourceAt ? "done" : "failed", {
+        at: entry.sourceAt ?? null,
+        atText: time(entry.sourceAt),
+        hash: entry.hash,
+        network: "dusk-evm",
+      }),
+      step("prove", "Prove on Dusk", "todo"),
+      step("claim", "Claim on Dusk", "todo"),
+    ];
   // The current stage decides: a proof the Portal rejected leaves the
   // withdrawal ready to prove again, whatever proof times are kept.
   const proved = ["proven_waiting", "ready_to_finalize", "finalize_submitted", "finalized"].includes(stage);
