@@ -246,6 +246,8 @@ h1 { font-size: 28px; font-weight: 500; letter-spacing: -0.01em; line-height: 1.
 .group.pad .note, .card .note { margin: 0; }
 .message { margin-top: 12px; padding: 10px 14px; border-radius: 12px; background: var(--surface); font-size: 13.5px; }
 .message.error { color: var(--red); box-shadow: inset 0 0 0 1px var(--red-line); }
+/* What a page other than the card says didn't go, scrolled into view clear of the top bar. */
+#page-error { scroll-margin: calc(var(--bar) + 12px) 0 12px; }
 .field-error { margin: 6px 0 0; color: var(--red); font-size: 13px; }
 .field-error:empty { display: none; }
 

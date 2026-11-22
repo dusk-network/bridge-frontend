@@ -119,6 +119,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     form: null,
     lookup: { busy: false, error: "", query: "" },
     page: parseLocation(globalThis.location?.hash),
+    // Why a wallet's connect or disconnect, or a claim, didn't go, said on a page other than the card.
+    pageError: "",
     sheet: null,
     // A Dusk account followed without a wallet, and its form on My transfers.
     watch: { busy: false, error: "", input: "" },
@@ -340,8 +342,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   function pageHtml() {
     const { page } = state.page;
     if (page === "transfer") return receiptHtml();
-    if (page === "lookup") return lookupPage(state.lookup);
-    if (page === "move" && !linkFor(state.page.task)) return unavailablePage({ title: unavailableTitle(state.page.task) });
+    if (page === "lookup") return lookupPage({ ...state.lookup, pageError: state.pageError });
+    if (page === "move" && !linkFor(state.page.task)) return unavailablePage({ pageError: state.pageError, title: unavailableTitle(state.page.task) });
     // The card: its Bridge tab, or its Activity tab for My transfers.
     return cardHtml(page === "transfers" ? "activity" : "bridge");
   }
@@ -768,7 +770,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   function cardHtml(tab) {
     const form = ensureCard();
     if (tab === "activity") return cardPage({ activity: activityHtml(), needsCount: transfersVm().needs, tab: "activity" });
-    if (!form) return unavailablePage({ title: unavailableTitle("") });
+    if (!form) return unavailablePage({ pageError: state.pageError, title: unavailableTitle("") });
     return cardPage(cardVm());
   }
 
@@ -1031,6 +1033,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       groups,
       lede: who.join(" · "),
       more: more && !discovery.running,
+      pageError: state.pageError,
       syncing: discovery.running,
       syncText,
       // Without a connected Dusk account: follow one by its account or .dusk name.
@@ -1090,11 +1093,11 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const entry = entryForHash(hash);
     if (!entry) {
       const lookup = receiptLookups.get(hash);
-      if (lookup?.missing) return receiptPage({ hash, missing: lookup.missing });
-      return receiptPage({ loading: "Looking up this transfer…" });
+      if (lookup?.missing) return receiptPage({ hash, missing: lookup.missing, pageError: state.pageError });
+      return receiptPage({ loading: "Looking up this transfer…", pageError: state.pageError });
     }
     const route = routeOf(entry.routeId);
-    if (!route) return receiptPage({ hash, missing: `This transfer's route isn't on ${names.badge}` });
+    if (!route) return receiptPage({ hash, missing: `This transfer's route isn't on ${names.badge}`, pageError: state.pageError });
     return receiptPage({
       ...receiptModel(withClaimSent(entry, claimWatch.pending), {
         // Cancelled in the wallet: the migration that spent its approval since, which counts its fee.
@@ -1116,6 +1119,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       }),
       canAct: duskState().installed,
       notice: arrivals.state(),
+      pageError: state.pageError,
       wide: wide(),
     });
   }
@@ -1844,6 +1848,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
    * another can claim it for it, paying only the network fee.
    */
   async function openClaimReview(target) {
+    forgetPageError();
     const entry = target.dataset.id ? state.activity.find((item) => item.id === target.dataset.id) : null;
     const route = routeOf(entry ? entry.routeId : target.dataset.route);
     if (!route || route.mode !== "hyperlane") return;
@@ -1853,7 +1858,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     // The account it's held for: the transfer's, known here or by its hash, or else the card's.
     const account = entry ? entry.destination || (entry.recipientHash === duskRecipientHash(duskAccount()) ? duskAccount() : "") : target.dataset.account || duskAccount();
     if (!account) {
-      announce("This transfer's Dusk account isn't known on this page. Its own account can claim it from the card.");
+      showError("This transfer's Dusk account isn't known on this page. Its own account can claim it from the card.");
       return;
     }
     // A claim sent for the account on this route pays out all it holds: it's waited for, not sent twice.
@@ -2126,6 +2131,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   // -------------------------------------------------------------------------
 
   async function connectDusk(opener) {
+    forgetPageError();
     try {
       if (!state.dusk) return;
       // Several wallets, or not the one chosen before: you choose, Dusk Connect won't.
@@ -2142,6 +2148,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
 
   async function chooseDusk(id) {
     closeSheet();
+    forgetPageError();
     try {
       await state.dusk.connect(id);
     } catch (error) {
@@ -2150,6 +2157,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   }
 
   async function connectEvm() {
+    forgetPageError();
     try {
       state.evmState = await connectEvmWallet();
     } catch (error) {
@@ -2211,7 +2219,20 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     if (state.form && isCardPage()) {
       state.form.error = message;
       renderMain();
-    } else announce(message);
+      return;
+    }
+    // Elsewhere, the page says it, in view, and the live region reads it once.
+    state.pageError = message;
+    renderMain();
+    slot("main").querySelector("#page-error")?.scrollIntoView?.({ block: "nearest" });
+    announce(message);
+  }
+
+  /** What a page said didn't go stops mattering once it's tried again. */
+  function forgetPageError() {
+    if (!state.pageError) return;
+    state.pageError = "";
+    renderMain();
   }
 
   // -------------------------------------------------------------------------
@@ -2222,6 +2243,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const next = parseLocation(globalThis.location?.hash);
     if (state.sheet === "review") closeSheet();
     state.page = next;
+    // What the last page said didn't go stays with it.
+    state.pageError = "";
     if (isCardPage()) {
       ensureCard(next, { follow: true });
       void loadReads();
@@ -2426,6 +2449,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       "open-dusk": () => openSheet("dusk", target),
       "dusk-disconnect": async () => {
         closeSheet();
+        forgetPageError();
         const failed = await disconnectDusk(state.dusk);
         if (failed) return showError(failed);
         announce("Dusk Wallet is disconnected.");
@@ -2433,6 +2457,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       },
       "dusk-other-profile": async () => {
         closeSheet();
+        forgetPageError();
         // The wallet asks which profile again once this page let go of this one, and only then.
         const failed = await disconnectDusk(state.dusk);
         if (failed) return showError(failed);
@@ -2639,6 +2664,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         state.duskState = next;
         lookUpName(duskAccount());
         if (changed) {
+          // Connected, switched or let go since: what a page said of it before stops mattering.
+          state.pageError = "";
           if (signerMoved(reviews.current) && state.sheet === "review") renderSheet();
           formReads.reset(["duskBalance", "escrow", "hyperlane"]);
           discoveryRuns.expire();
@@ -2659,6 +2686,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         const changed = accountChanged || chainChanged || moved.wallet;
         state.evmState = next;
         if (accountChanged) {
+          state.pageError = "";
           if (next.account) forgetConnectRefusal();
           // What's reviewed pays the wallet's account as it was: it's stale once that's another.
           const reviewing = reviews.current;

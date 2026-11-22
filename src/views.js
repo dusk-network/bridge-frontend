@@ -67,6 +67,13 @@ export const messageLine = (text, { live = true } = {}) =>
     ? `<p class="message"${live ? ' role="status"' : ""}>${html(text)}</p>`
     : `<p class="message error"${live ? ' role="alert"' : ""}>${html(text)}</p>`;
 
+/**
+ * On a page other than the card, why a wallet's connect or disconnect, or a
+ * claim, didn't go: the card's own message, which the page's live region
+ * reads once, not again each time the page is drawn.
+ */
+const pageMessage = (text) => (text ? `<div id="page-error">${messageLine(text, { live: false })}</div>` : "");
+
 /** What's public, its networks in bold: "Public on Dusk and DuskEVM, and linked:" then the parties. */
 export function publicLine(text) {
   const at = String(text ?? "").indexOf(": ");
@@ -583,9 +590,9 @@ const backLink = `<a class="bk" href="#/transfers">${icon("back")}Activity</a>`;
 
 export function receiptPage(vm) {
   if (vm.loading)
-    return `<main class="col" id="main" tabindex="-1"><div class="topbar">${backLink}<h1 class="ti">Transfer</h1></div><p class="t2" role="status">${waiting(vm.loading)}</p></main>`;
+    return `<main class="col" id="main" tabindex="-1"><div class="topbar">${backLink}<h1 class="ti">Transfer</h1></div>${pageMessage(vm.pageError)}<p class="t2" role="status">${waiting(vm.loading)}</p></main>`;
   if (vm.missing)
-    return `<main class="col" id="main" tabindex="-1"><div class="topbar">${backLink}<h1 class="ti">Transfer</h1></div><div class="group pad"><p>${html(vm.missing)}</p><p class="small t2"><code class="mono wrap">${html(vm.hash)}</code></p></div><p class="links-row"><a class="lnk" href="#/lookup">Look up another ${icon("search")}</a></p></main>`;
+    return `<main class="col" id="main" tabindex="-1"><div class="topbar">${backLink}<h1 class="ti">Transfer</h1></div>${pageMessage(vm.pageError)}<div class="group pad"><p>${html(vm.missing)}</p><p class="small t2"><code class="mono wrap">${html(vm.hash)}</code></p></div><p class="links-row"><a class="lnk" href="#/lookup">Look up another ${icon("search")}</a></p></main>`;
   const view = vm.view;
   // When it can be claimed: "Claim from …" or "Claim from about …", counted
   // down. Late, the date is only the soonest and moves on each check: the
@@ -626,7 +633,7 @@ export function receiptPage(vm) {
         <div class="pl" role="status">${statusPill(view.status, view.statusWord)}${vm.caption ? `<span class="cap">${html(vm.caption)}</span>` : ""}</div>
       </div>
       ${countdown}
-      <section aria-labelledby="progress-h"><h2 class="sr-only" id="progress-h">Progress</h2><div class="group pad">${stepList(view.steps)}</div>${action}${vm.addDusk ? `<div class="action-box">${addDuskButton(vm.addDusk, "btn sec sm")}</div>` : ""}${vm.arrives && vm.notice ? arrivalNotice(vm.notice) : ""}</section>
+      <section aria-labelledby="progress-h"><h2 class="sr-only" id="progress-h">Progress</h2><div class="group pad">${stepList(view.steps)}</div>${pageMessage(vm.pageError)}${action}${vm.addDusk ? `<div class="action-box">${addDuskButton(vm.addDusk, "btn sec sm")}</div>` : ""}${vm.arrives && vm.notice ? arrivalNotice(vm.notice) : ""}</section>
       ${fees}
       ${notes}
       <div class="lk"><span>${icon("link")}Receipt link</span>${copyButton(vm.url, "receipt link")}</div>
@@ -696,6 +703,7 @@ export function activityPanel(vm) {
   return `<div class="act">
     <div class="act-h"><p class="lede">${vm.lede}</p><a class="btn sec sm" href="#/lookup">${icon("search")}Look up</a></div>
     <p class="small t2 sync" role="status" aria-live="polite">${vm.syncing ? waiting(vm.syncText) : html(vm.syncText)}</p>
+    ${pageMessage(vm.pageError)}
     ${vm.watch ? watchBlock(vm.watch) : ""}
     ${body}
     ${vm.more ? `<p class="links-row"><button type="button" class="btn sec sm" data-action="discover-more">Older transfers</button></p>` : ""}
@@ -708,12 +716,13 @@ export function activityPanel(vm) {
 
 /** A link to a task this network's bridge doesn't have: that, and the way back. */
 export function unavailablePage(vm) {
-  return `<main class="col" id="main" tabindex="-1"><h1>${html(vm.title)}</h1><p class="links-row"><a class="lnk" href="#/">Back to the bridge</a></p></main>`;
+  return `<main class="col" id="main" tabindex="-1"><h1>${html(vm.title)}</h1>${pageMessage(vm.pageError)}<p class="links-row"><a class="lnk" href="#/">Back to the bridge</a></p></main>`;
 }
 
 export function lookupPage(vm) {
   return `<main class="col" id="main" tabindex="-1">
     <div class="topbar">${backLink}<h1 class="ti">Look up a transfer</h1></div>
+    ${pageMessage(vm.pageError)}
     <form class="group pad" data-form="lookup">
       <label for="lookup" class="l1">Transaction ID</label>
       <input id="lookup" name="lookup" class="mono-input" autocomplete="off" spellcheck="false" value="${html(vm.query)}" aria-describedby="lookup-error">

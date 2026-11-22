@@ -6,6 +6,7 @@ import { createAppController } from "./app-controller.js";
 import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 import { useDuskWallet } from "./dusk-wallet.js";
+import { duskRecipientHash } from "./hyperlane.js";
 import { partsOf, textOf } from "./pages.fixtures.js";
 
 // The page as testnet's site runs it, with its settings from deployments.json.
@@ -19,6 +20,21 @@ const OTHER = "213qXNRaEAXrgJTFxXsPMeFasiEtPVJwZ3x2wKgZog2kXtXE7ovGRFfn1spfKBU4A
 const EVM = "0x75685f9D88749B583732B40d56fe007cD404b72D";
 const SENT_AT = Date.parse("2026-11-20T09:00:00Z");
 
+// USDd held on Dusk for an account this page knows only by its hash: anyone can claim it for it.
+const HELD = {
+  amountLux: "32156353",
+  delivered: true,
+  deliveredAt: SENT_AT + 120_000,
+  escrow: "held",
+  hash: `0x${"34".repeat(32)}`,
+  id: `sepolia-to-dusk-usdd:0x${"34".repeat(32)}`,
+  recipientHash: duskRecipientHash(OTHER),
+  routeId: "sepolia-to-dusk-usdd",
+  sender: EVM,
+  sentHere: true,
+  sourceAt: SENT_AT,
+  status: "pending",
+};
 // A withdrawal ready to prove, for the connected account.
 const WITHDRAWAL = {
   amountLux: "1008000000000",
@@ -136,6 +152,46 @@ async function openPage(t, hash, activity, { account = ACCOUNT } = {}) {
   await createAppController(page.root, { cfg, routes, services }).start();
   return page;
 }
+
+/** What the page's message says, as shown, and what the live region read out, once what's under way finished. */
+async function said(t, slots) {
+  const shown = partsOf(slots.main.innerHTML, "message").map(textOf);
+  t.mock.timers.tick(100);
+  await settle();
+  return { heard: slots.live.textContent, shown };
+}
+
+test("away from the card, a disconnect Dusk Wallet refused shows on the page, in the words read out", async (t) => {
+  const { root, slots } = await openPage(t, "#/transfers", [HELD]);
+  assert.deepEqual(partsOf(slots.main.innerHTML, "message"), []);
+  await root.press({ action: "dusk-disconnect" });
+  const { heard, shown } = await said(t, slots);
+  assert.deepEqual(shown, [heard]);
+  assert.match(heard, /\bdidn't disconnect\b/u);
+});
+
+test("away from the card, a connect cancelled in the wallet shows on the page, as cancelled", async (t) => {
+  // Activity without a wallet connected: its Connect Dusk Wallet.
+  const { root, slots } = await openPage(t, "#/transfers", [], { account: null });
+  await root.press({ action: "connect-dusk" });
+  const { heard, shown } = await said(t, slots);
+  assert.deepEqual(shown, [heard]);
+  assert.match(heard, /\bcancelled\b/iu);
+});
+
+test("a claim for an account this page doesn't know says why on the page, in Activity and on the receipt", async (t) => {
+  for (const hash of ["#/transfers", `#/transfer/${HELD.hash}`]) {
+    const { root, slots } = await openPage(t, hash, [HELD]);
+    // The quiet Claim for its account, as Activity's row and the receipt offer it.
+    await root.press({ action: "escrow-claim", id: HELD.id });
+    const { heard, shown } = await said(t, slots);
+    assert.deepEqual(shown, [heard], hash);
+    assert.match(heard, /\bisn't known\b/u, hash);
+    // Nothing was asked of the wallet: no review opened.
+    assert.equal(slots.sheet.open, false, hash);
+    t.mock.timers.reset();
+  }
+});
 
 test("a review whose request couldn't be prepared says why, and no longer that it's preparing; nothing can be confirmed", async (t) => {
   const { root, slots } = await openPage(t, "#/transfers", [WITHDRAWAL]);
