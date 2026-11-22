@@ -21,6 +21,7 @@
     "VITE_DUSK_NODE_URL": "https://testnet.nodes.dusk.network",
     "VITE_ETHEREUM_EXPLORER_URL": "https://sepolia.etherscan.io",
     "VITE_ETHEREUM_RPC_URL": "https://ethereum-sepolia-rpc.publicnode.com",
+    "VITE_MAINNET_BRIDGE_URL": "https://bridge.dusk.network",
     "VITE_PAGE_POLICY": "true",
     "VITE_REOWN_PROJECT_ID": "b5303e1c8374b100fbb7f181884fef28",
     "VITE_TESTNET_BRIDGE_URL": "https://bridge.testnet.dusk.network"
