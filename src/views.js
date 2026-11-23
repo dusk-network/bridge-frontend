@@ -165,7 +165,7 @@ export function quoteRows(quote) {
   return quote.rows
     .map(
       (row) =>
-        `<div class="kv${row.strong ? " total" : ""}"><dt class="k">${html(row.label)}</dt><dd class="v">${row.html ?? `<span class="stack"><span class="num">${html(row.value)}</span>${row.detail ? `<span class="small">${html(row.detail)}</span>` : ""}</span>`}</dd></div>`,
+        `<div class="kv${row.strong ? " total" : ""}"><dt class="k">${html(row.label)}</dt><dd class="v">${row.html ?? `<span class="stack"><span class="num">${wholeNumbers(row.value, ".kv")}</span>${row.detail ? `<span class="small">${html(row.detail)}</span>` : ""}</span>`}</dd></div>`,
     )
     .join("");
 }
@@ -245,7 +245,7 @@ function escrowBox(escrow) {
             : `<button type="button" class="btn sec sm" data-action="escrow-claim" data-route="${html(each.route)}"${each.account ? ` data-account="${html(each.account)}"` : ""}><span class="lbl">${wholeNumbers(`Claim ${each.amount}${each.account ? " for it" : ""}`, ".btn-row")}</span></button>`,
         )
         .join("");
-  return `<div class="card notice-box" role="note"><div class="note">${icon("info")}<span>${lead} <span class="num">${html(listed)}</span>${why}</span></div><div class="btn-row">${buttons}</div></div>`;
+  return `<div class="card notice-box" role="note"><div class="note">${icon("info")}<span>${lead} <span class="num">${wholeNumbers(listed, ".note")}</span>${why}</span></div><div class="btn-row">${buttons}</div></div>`;
 }
 
 /** The card's one button: a link where it leads to Dusk Wallet's page. */
@@ -273,7 +273,7 @@ const addDuskButton = (offer, look) =>
 function approvalBox(open, note = "") {
   if (!open) return note ? `<p class="message" id="approval-note" role="status" tabindex="-1">${html(note)}</p>` : "";
   const finish = open.finishLux > 0n ? '<button type="button" class="btn sec sm" data-action="approval-finish">Finish</button>' : "";
-  return `<div class="card notice-box" role="note"><div class="note">${icon("info")}<span><b>Open approval:</b> the Dusk migration contract may still take <b class="num">${html(open.text)}</b> from <code class="mono">${html(short(open.evm))}</code>.</span></div><div class="btn-row">${finish}<button type="button" class="btn sec sm" data-action="approval-revoke">Revoke</button></div></div>`;
+  return `<div class="card notice-box" role="note"><div class="note">${icon("info")}<span><b>Open approval:</b> the Dusk migration contract may still take <b class="num">${wholeNumbers(open.text, ".note")}</b> from <code class="mono">${html(short(open.evm))}</code>.</span></div><div class="btn-row">${finish}<button type="button" class="btn sec sm" data-action="approval-revoke">Revoke</button></div></div>`;
 }
 
 /**
@@ -304,7 +304,7 @@ export function cardRegions(vm) {
     cta: `${vm.error ? messageLine(vm.error) : ""}${primaryControl(vm.button)}`,
     escrow: escrowBox(vm.escrow),
     // The label once there's a balance to label.
-    "from-foot": `<span>${vm.from.balance ? html(vm.from.balanceLabel) : ""}</span><span class="bal">${vm.from.balance ? `<span class="num"${exactTitle(vm.from.balanceExact, vm.from.balance)}>${wholeNumbers(vm.from.balance)}</span>` : ""}${vm.canMax ? '<button type="button" class="mini" data-action="max">Max</button>' : ""}${vm.addDusk ? addDuskButton(vm.addDusk, "mini") : ""}</span>`,
+    "from-foot": `<span>${vm.from.balance ? html(vm.from.balanceLabel) : ""}</span><span class="bal">${vm.from.balance ? `<span class="num"${exactTitle(vm.from.balanceExact, vm.from.balance)}>${wholeNumbers(vm.from.balance, ".panel-f")}</span>` : ""}${vm.canMax ? '<button type="button" class="mini" data-action="max">Max</button>' : ""}${vm.addDusk ? addDuskButton(vm.addDusk, "mini") : ""}</span>`,
     receive: html(vm.receive || "0"),
     "recipient-note": recipientNote(vm.to),
     // Behind the route line: the fees' split and the steps, how the route is doing as usual, and what's public.
@@ -370,7 +370,7 @@ export function cardPage(vm) {
 // print and its tag. A cost ("Costs up to 0.051 DUSK") takes its own line,
 // then what it's for ("for a 1,008 DUSK withdrawal that pays …").
 function walletHead(head) {
-  const amount = head.amount ? `${head.lead ? `${html(head.lead)} ` : ""}<span class="num">${html(head.amount)}</span>` : "";
+  const amount = head.amount ? `${head.lead ? `${html(head.lead)} ` : ""}<span class="num">${wholeNumbers(head.amount, ".wlhd")}</span>` : "";
   const to = head.to
     ? `${html(head.prefix ?? "to")} <code class="mono" title="${html(head.toFull ?? head.to)}">${html(head.to)}</code>${head.where ? ` ${html(head.where)}` : ""}`
     : "";
@@ -387,7 +387,7 @@ export function walletLines(lines, cfgLinks) {
   // What everyone sees, under the window's head and before its fee, as the window says it.
   const visible = lines.find((line) => line.kind === "visible");
   const row = (line) => {
-    const text = `<span class="${line.mono ? "mono wrap" : "num"}"${line.full ? ` title="${html(line.full)}"` : ""}>${html(line.value)}</span>`;
+    const text = `<span class="${line.mono ? "mono wrap" : "num"}"${line.full ? ` title="${html(line.full)}"` : ""}>${line.mono ? html(line.value) : wholeNumbers(line.value, ".wl dd")}</span>`;
     // A contract by its network's name reads "DuskEVM bridge · 2257e5…a1b31d", the "·" kept with its ID.
     const value = line.address
       ? `${line.value ? `<span class="wl-name">${html(line.value)}</span>` : ""}${fullValue({ explorer: cfgLinks.explorer(line.network, line.address), label: line.label, value: line.address })}`
@@ -433,7 +433,7 @@ const callRow = (row) =>
   `<div class="kv"><dt class="k">${html(row.label)}</dt><dd class="v">${
     row.mono
       ? `<code class="mono${row.wrap ? " wrap" : ""}"${row.full ? ` title="${html(row.full)}"` : ""}>${html(row.value)}</code>`
-      : `<span class="stack"><span class="num">${html(row.value)}</span>${row.detail ? `<span class="small">${html(row.detail)}</span>` : ""}</span>`
+      : `<span class="stack"><span class="num">${wholeNumbers(row.value, ".kv")}</span>${row.detail ? `<span class="small">${html(row.detail)}</span>` : ""}</span>`
   }</dd></div>`;
 
 /** A line the review always says, by itself: what's held, what stays approved, a fee past the amount. HTML. */
@@ -527,7 +527,7 @@ export function reviewSheet(vm) {
     : "";
   // Warnings that block nothing, in amber as the card says them: a bridge fee more than the amount, a busy network.
   const warnings = (vm.warnings ?? []).map((text) => `<p class="note warn">${icon("info")}<span>${html(text)}</span></p>`).join("");
-  const notes = [...vm.checks.filter((check) => check.ok && check.note).map((check) => check.html), ...(vm.notes ?? []).map(html)].map(noteLine).join("");
+  const notes = [...vm.checks.filter((check) => check.ok && check.note).map((check) => check.html), ...(vm.notes ?? []).map((note) => wholeNumbers(note, ".note"))].map(noteLine).join("");
   // Another account paid: said first, after what's public.
   const notYours = vm.lead ? vm.lead.notYours : vm.notYours;
   const decision = `${vm.lead ? actionLead(vm.lead) : `<div class="flow group">
@@ -609,12 +609,12 @@ export function receiptPage(vm) {
         ? `<div class="action-box"><p class="note">${icon("info")}<span>${html(view.action.blocked)}</span></p></div>`
         : `<div class="action-box">${view.action.failure ? messageLine(view.action.failure, { live: false }) : ""}<button type="button" class="btn ${view.action.quiet ? "sec" : "pri"}" data-action="${html(view.action.command ?? `withdrawal-${view.action.kind}`)}" data-id="${html(vm.id)}"><span class="lbl">${wholeNumbers(view.action.label, ".action-box")}</span></button><span class="small t2">${html(vm.actionFee ?? "")}</span></div>`
     : "";
-  const value = (row) => `<span class="num"${exactTitle(row.exact, row.value)}>${html(row.value)}</span>`;
+  const value = (row) => `<span class="num"${exactTitle(row.exact, row.value)}>${wholeNumbers(row.value, ".kv")}</span>`;
   const details = vm.details
     .map((row) => `<div class="kv"><dt class="k">${html(row.label)}</dt><dd class="v">${row.html ?? (row.detail ? `<span class="stack">${value(row)}<span class="small">${html(row.detail)}</span></span>` : value(row))}</dd></div>`)
     .join("");
   const notes = vm.notes.map((note) => `<p class="note">${icon(note.icon ?? "info")}<span>${note.html}</span></p>`).join("");
-  const fees = vm.fees?.text ? `<p class="small t2">Fees <span class="num"${exactTitle(vm.fees.exact, vm.fees.text)}>${html(vm.fees.text)}</span></p>` : "";
+  const fees = vm.fees?.text ? `<p class="small t2">Fees <span class="num"${exactTitle(vm.fees.exact, vm.fees.text)}>${wholeNumbers(vm.fees.text, "p")}</span></p>` : "";
   // The transfer and its steps on the left; its details in a panel beside
   // them, as the web wallet shows a transaction: open on a wide screen
   // (`vm.wide`), folded under the rest on a narrow one.
@@ -672,7 +672,7 @@ export function transferRow(row, { canAct = true } = {}) {
   // Whom it pays and its transaction, so equal transfers are told apart.
   const to = row.to ? `To ${row.to.name ? html(row.to.name) : `<code class="mono">${html(row.to.address)}</code>`}` : "";
   const meta = [to, row.hash ? `<code class="mono">${html(row.hash)}</code>` : ""].filter(Boolean).join(" · ");
-  return `<li class="tr" data-status="${html(row.status)}"><a class="tr-link" href="${html(row.href)}" aria-label="${html(row.title)}, ${html(row.amountText)}, ${html(row.statusWord)}. Open the receipt"${exactTitle(row.amountExact, row.amountText)}></a>${pairMark(row.pair[0], row.pair[1])}<div class="tr-main"><div class="t1">${html(row.title)}</div><div class="t2">${html(row.subline)}</div>${meta ? `<div class="t3">${meta}</div>` : ""}${trackerBars(row.tracker)}</div><div class="rt"><span class="am num">${wholeNumbers(row.amountText)}</span>${right}</div></li>`;
+  return `<li class="tr" data-status="${html(row.status)}"><a class="tr-link" href="${html(row.href)}" aria-label="${html(row.title)}, ${html(row.amountText)}, ${html(row.statusWord)}. Open the receipt"${exactTitle(row.amountExact, row.amountText)}></a>${pairMark(row.pair[0], row.pair[1])}<div class="tr-main"><div class="t1">${html(row.title)}</div><div class="t2">${html(row.subline)}</div>${meta ? `<div class="t3">${meta}</div>` : ""}${trackerBars(row.tracker)}</div><div class="rt"><span class="am num">${wholeNumbers(row.amountText, ".rt")}</span>${right}</div></li>`;
 }
 
 /**

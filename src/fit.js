@@ -97,6 +97,8 @@ function roomIn(el, box) {
 /** A number in a label or a review's amount (`data-fit`, the box whose width it has): smaller where it's wider than that. */
 function fitNumber(el) {
   el.style.removeProperty("font-size");
+  // None left behind: drawn again, its markup is the same (`refreshForm`).
+  if (el.getAttribute("style") === "") el.removeAttribute("style");
   const box = el.closest(el.dataset.fit);
   const room = box ? roomIn(el, box) : 0;
   if (room > 0) shrink(el, room, () => el.getBoundingClientRect().width);

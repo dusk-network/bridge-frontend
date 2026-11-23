@@ -15,7 +15,7 @@ import { transferHref } from "./permalink.js";
 import { buildQuote, routeDuskFees, withdrawalStepMax } from "./quote.js";
 import { routeTime, routeTimeText } from "./route-times.js";
 import { explorerTxUrl, failedAtSource, heldForAnother, heldInEscrow, html, short, transferSubline, transferView } from "./transfer-view.js";
-import { copyButton } from "./views.js";
+import { copyButton, wholeNumbers } from "./views.js";
 import { revokeLines } from "./wallet-lines.js";
 
 export const DUSK_WALLET_URL = "https://docs.dusk.network/use/wallets/#dusk-wallet";
@@ -30,6 +30,9 @@ export const evmWalletName = (evm) => evm?.walletName || "your EVM wallet";
 // ---------------------------------------------------------------------------
 
 const capital = (line) => `${line.charAt(0).toUpperCase()}${line.slice(1)}`;
+
+/** What a review's check or note fits an amount in, whole (`wholeNumbers`). */
+const CHECKED = ".ck li, .note";
 
 /**
  * A route under the card, time then what it costs: one line, or two for a
@@ -148,8 +151,8 @@ function coveredLine(allowanceWei, amountLux, unit) {
   if (allowanceWei >= NO_LIMIT) return "An earlier approval with no limit covers this. It stays approved.";
   const left = allowanceWei - amountLux * WEI_PER_LUX;
   const stays = left > 0n ? approved(left, unit) : "";
-  return `An earlier approval of <b class="num">${html(approved(allowanceWei, unit))}</b> covers this. ${
-    stays ? `<b class="num">${html(capital(stays))}</b> stays approved.` : "Nothing stays approved."
+  return `An earlier approval of <b class="num">${wholeNumbers(approved(allowanceWei, unit), CHECKED)}</b> covers this. ${
+    stays ? `<b class="num">${wholeNumbers(capital(stays), CHECKED)}</b> stays approved.` : "Nothing stays approved."
   }`;
 }
 
@@ -171,7 +174,7 @@ export function revokeReview(route, { cfg, evm, feeWei = null, reads, walletName
       ? []
       : [
           {
-            html: `Not enough ${html(coin)} for the network fee: you have <b class="num">${html(formatShort(migration.gasCoinWei, 18).text)} ${html(coin)}</b>`,
+            html: `Not enough ${html(coin)} for the network fee: you have <b class="num">${wholeNumbers(`${formatShort(migration.gasCoinWei, 18).text} ${coin}`, CHECKED)}</b>`,
             ok: feeWei ? migration.gasCoinWei >= feeWei : migration.gasCoinWei > 0n,
           },
         ];
@@ -226,7 +229,7 @@ export function reviewChecks(route, { cfg, destination, duskAccount, evm, quote,
   const checks = [];
   const from = networkName(cfg, route.from.id);
   const lux = quote.amountLux ?? 0n;
-  const has = (amount) => `you have <b class="num">${html(amount)}</b>`;
+  const has = (amount) => `you have <b class="num">${wholeNumbers(amount, CHECKED)}</b>`;
   if (route.mode === "duskevm-deposit" || route.mode === "service-transfer") {
     const balance = reads.duskBalance;
     if (balance !== null && balance !== undefined)
@@ -269,7 +272,7 @@ function hyperlaneChecks(route, { cfg, quote, reads }) {
   const { token } = route;
   const units = quote.amountLux ?? 0n;
   const read = reads.hyperlane ?? {};
-  const has = (amount) => `you have <b class="num">${html(amount)}</b>`;
+  const has = (amount) => `you have <b class="num">${wholeNumbers(amount, CHECKED)}</b>`;
   if (route.signer === "dusk") {
     const balance = reads.duskBalance;
     const fees = (quote.bridgeFeeLux ?? 0n) + (quote.gasMaxLux ?? 0n);
@@ -283,7 +286,7 @@ function hyperlaneChecks(route, { cfg, quote, reads }) {
       );
     // An approval left open covers the amount: always said, as there's no approval step.
     if (token.symbol !== "DUSK" && quote.steps === 1 && read.allowance)
-      checks.push({ html: `An earlier approval of <b class="num">${html(formatToken(read.allowance, token))}</b> covers this, so you aren't asked to approve`, note: true, ok: true });
+      checks.push({ html: `An earlier approval of <b class="num">${wholeNumbers(formatToken(read.allowance, token), CHECKED)}</b> covers this, so you aren't asked to approve`, note: true, ok: true });
     return checks;
   }
   const coin = gasCoin(cfg, route.from.id);
