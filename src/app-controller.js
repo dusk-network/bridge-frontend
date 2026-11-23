@@ -327,7 +327,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       const matches = slot("main").querySelectorAll(keep.selector);
       const again = matches.length === 1 ? matches[0] : null;
       if (again) {
-        again.focus();
+        // Where it is: the page stays where it was scrolled to.
+        again.focus({ preventScroll: true });
         try {
           if (keep.start !== null && keep.start !== undefined) again.setSelectionRange(keep.start, keep.end);
         } catch {}
@@ -795,7 +796,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       const selector = region.contains(active) ? controlSelector(active) : "";
       region.innerHTML = markup;
       const again = selector ? region.querySelectorAll(selector) : [];
-      if (again.length === 1) again[0].focus();
+      if (again.length === 1) again[0].focus({ preventScroll: true });
     }
     main.querySelector('[data-region="receive"]')?.classList.toggle("empty", !vm.receive);
     const error = main.querySelector("#amount-error");

@@ -288,7 +288,8 @@ function routeHead(vm, open) {
   // How it's doing, where that bears on a transfer; else it's under the line, with the fees.
   const status = vm.status?.inline ? `<span class="route-status${vm.status.warn ? " warn" : ""}">${html(vm.status.text)}</span>` : "";
   const sum = `${icon("clock")}<span class="route-sum">${lines}${status}</span>`;
-  return open ? `<summary>${sum}${icon("chev-d", "chev")}</summary>` : `<div class="route-head">${sum}</div>`;
+  // Its id finds it again once the card's drawn again, with focus on it (`controlSelector`).
+  return open ? `<summary id="route-summary">${sum}${icon("chev-d", "chev")}</summary>` : `<div class="route-head">${sum}</div>`;
 }
 
 /**
@@ -672,7 +673,8 @@ export function transferRow(row, { canAct = true } = {}) {
   // Whom it pays and its transaction, so equal transfers are told apart.
   const to = row.to ? `To ${row.to.name ? html(row.to.name) : `<code class="mono">${html(row.to.address)}</code>`}` : "";
   const meta = [to, row.hash ? `<code class="mono">${html(row.hash)}</code>` : ""].filter(Boolean).join(" · ");
-  return `<li class="tr" data-status="${html(row.status)}"><a class="tr-link" href="${html(row.href)}" aria-label="${html(row.title)}, ${html(row.amountText)}, ${html(row.statusWord)}. Open the receipt"${exactTitle(row.amountExact, row.amountText)}></a>${pairMark(row.pair[0], row.pair[1])}<div class="tr-main"><div class="t1">${html(row.title)}</div><div class="t2">${html(row.subline)}</div>${meta ? `<div class="t3">${meta}</div>` : ""}${trackerBars(row.tracker)}</div><div class="rt"><span class="am num">${wholeNumbers(row.amountText, ".rt")}</span>${right}</div></li>`;
+  // Its id finds it again once the list is drawn again, with focus on it (`controlSelector`).
+  return `<li class="tr" data-status="${html(row.status)}"><a class="tr-link" id="tr-${html(row.id)}" href="${html(row.href)}" aria-label="${html(row.title)}, ${html(row.amountText)}, ${html(row.statusWord)}. Open the receipt"${exactTitle(row.amountExact, row.amountText)}></a>${pairMark(row.pair[0], row.pair[1])}<div class="tr-main"><div class="t1">${html(row.title)}</div><div class="t2">${html(row.subline)}</div>${meta ? `<div class="t3">${meta}</div>` : ""}${trackerBars(row.tracker)}</div><div class="rt"><span class="am num">${wholeNumbers(row.amountText, ".rt")}</span>${right}</div></li>`;
 }
 
 /**
