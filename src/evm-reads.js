@@ -138,8 +138,9 @@ export function createEvmReads({ cfg, rpc, rpcBatch }) {
     const word = (data) => (data && data !== "0x" ? BigInt(data) : null);
     const baseFeeWei = big(block?.baseFeePerGas);
     const gasPriceWei = big(price);
-    // A node without the tip's method: what its gas price is above the base fee, none where it's that.
-    const tipWei = big(tip) ?? (gasPriceWei !== null && baseFeeWei !== null && gasPriceWei >= baseFeeWei ? gasPriceWei - baseFeeWei : null);
+    // A node without the tip's method: what its gas price is above the base fee, and none where it's that
+    // or under it, as a gas price read from a block before the latest can be.
+    const tipWei = big(tip) ?? (gasPriceWei !== null && baseFeeWei !== null ? (gasPriceWei > baseFeeWei ? gasPriceWei - baseFeeWei : 0n) : null);
     return {
       balanceWei: big(balance),
       baseFeeWei,

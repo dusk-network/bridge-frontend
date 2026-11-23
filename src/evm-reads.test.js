@@ -76,3 +76,18 @@ test("a withdrawal's state says when its gas isn't the call's own estimate, and 
   // Nothing to estimate yet: no estimate either.
   assert.equal((await createEvmReads({ cfg, rpc, rpcBatch }).withdrawalState(EVM)).estimated, false);
 });
+
+test("a withdrawal's state takes a gas price under the base fee as no tip, not as no quote", async () => {
+  // A node without eth_maxPriorityFeePerGas whose gas price is a wei under the latest block's base fee.
+  const rpc = async () => "0x21cc7";
+  const rpcBatch = async (_network, calls) =>
+    calls.map(({ method }) => {
+      if (method === "eth_getBalance") return "0x10f0cf064dd59200000";
+      if (method === "eth_gasPrice") return "0x2540be3ff";
+      if (method === "eth_getBlockByNumber") return { baseFeePerGas: "0x2540be400" };
+      if (method === "eth_maxPriorityFeePerGas") return undefined;
+      return word(1n);
+    });
+  const state = await createEvmReads({ cfg, rpc, rpcBatch }).withdrawalState(EVM, { amountWei: 10n ** 18n, duskAccount: ACCOUNT });
+  assert.deepEqual([state.baseFeeWei, state.gasPriceWei, state.tipWei], [10_000_000_000n, 9_999_999_999n, 0n]);
+});
