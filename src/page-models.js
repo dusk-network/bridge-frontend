@@ -515,7 +515,8 @@ function ledgerRows(entry, { approvalSpentBy = false, cfg, evm = null, from, loc
     bridgeFee: serviceFee === null ? undefined : entry.note === NO_PAYOUT.elsewhere ? 0n : serviceFee < sentLux ? serviceFee : sentLux,
     evm: migration && !entry.replaced ? evm : null,
     failed: status === "failed" && failedAtSource(entry),
-    gasWei: cancelled ? BigInt(entry.approvalFeeWei) : undefined,
+    // A withdrawal that reverted paid DuskEVM's fees (`feeWei`), on DuskEVM.
+    gasWei: cancelled ? BigInt(entry.approvalFeeWei) : route.mode === "duskevm-withdrawal" && known(entry.feeWei) ? BigInt(entry.feeWei) : undefined,
     locale,
     network: cfg.network,
     networkFee: [entry.feeLux, entry.proveFeeLux, entry.claimFeeLux],

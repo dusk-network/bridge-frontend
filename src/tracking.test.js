@@ -948,3 +948,52 @@ test("the scheduler keeps checking an entry that ended where the page still look
   scheduler.stop();
   assert.deepEqual(seen, ["a", "a", "a"]);
 });
+
+// Testnet's 1,008 DUSK withdrawal 0x04a8a897… as DuskEVM's receipt gives its cost: its gas and
+// price, the L1 data fee, and the operator fee's terms. Its sender's balance fell by the 1,008
+// DUSK and 0.021777138444933323 DUSK more, in that block.
+const DUSK_EVM_RECEIPT = {
+  daFootprintGasScalar: "0x190",
+  effectiveGasPrice: "0x2541b2640",
+  gasUsed: "0x21cc7",
+  l1Fee: "0xdf",
+  operatorFeeConstant: "0x71afd498d0000",
+  operatorFeeScalar: "0x4f306425",
+  status: "0x0",
+};
+
+test("a transfer that failed on its own chain keeps what it cost there, as that chain charged it", async () => {
+  // A Dusk transaction that errored: its gas, at its price.
+  const service = createTracking({ config: payingCfg, node: node({ transaction: async () => duskTx({ error: "Panic", gasSpent: 2_000n, json: { fee: { gas_price: "3" }, receiver: BSC_SERVICE.account, sender: SENDER, value: 2_000_000_000 } }) }), rpc: fakeRpc({}) });
+  const reverted = await service.refresh({ hash: DUSK_HASH, routeId: ROUTES.service.id }, ROUTES.service);
+  assert.deepEqual([reverted.status, reverted.sourceFailed, reverted.feeLux], ["failed", true, "6000"]);
+
+  // A withdrawal that reverted on DuskEVM: what the receipt its check read says it cost, with the
+  // L1 data and operator fees. Nothing reads another: this RPC answers no receipt.
+  let receipt = DUSK_EVM_RECEIPT;
+  const withdrawal = createTracking({
+    config: cfg,
+    node: node(),
+    rpc: fakeRpc({}),
+    withdrawals: {
+      receiptOf: () => receipt,
+      status: async () => {
+        throw new WithdrawalError("failed");
+      },
+    },
+  });
+  const entry = { hash: EVM_HASH, routeId: ROUTES.withdrawal.id };
+  const failed = await withdrawal.refresh(entry, ROUTES.withdrawal);
+  assert.deepEqual([failed.status, failed.sourceFailed, failed.feeWei], ["failed", true, "21777138444933323"]);
+  // A receipt from before the operator fee: its gas and the L1 data fee. One from Isthmus, before Jovian scaled it up.
+  receipt = { effectiveGasPrice: "0x2541b2640", gasUsed: "0x21cc7", l1Fee: "0xdf", status: "0x0" };
+  assert.equal((await withdrawal.refresh(entry, ROUTES.withdrawal)).feeWei, "1384528439000223");
+  receipt = { ...DUSK_EVM_RECEIPT, daFootprintGasScalar: undefined };
+  assert.equal((await withdrawal.refresh(entry, ROUTES.withdrawal)).feeWei, "3384528622926323");
+  // No receipt kept, or one that doesn't show the revert (another block's, after a reorg): it failed all the same, its cost unsaid.
+  for (const kept of [null, { ...DUSK_EVM_RECEIPT, status: "0x1" }]) {
+    receipt = kept;
+    const unsaid = await withdrawal.refresh(entry, ROUTES.withdrawal);
+    assert.deepEqual([unsaid.status, "feeWei" in unsaid], ["failed", false]);
+  }
+});

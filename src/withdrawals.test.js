@@ -173,3 +173,19 @@ test("a proof or claim the package refuses says why in the page's words", async 
   const other = new Error("The node is busy");
   assert.equal(inWords(other), other);
 });
+
+test("a check keeps the receipt it read, as it was: what a reverted withdrawal paid comes from the one that showed it", async () => {
+  const reverted = { ...receiptOf(messagePassedLog), effectiveGasPrice: "0x2541b2640", gasUsed: "0x21cc7", status: "0x0" };
+  const fake = chain();
+  let reads = 0;
+  const rpc = async (network, method, params) => {
+    if (method !== "eth_getTransactionReceipt") return fake.rpc(network, method, params);
+    reads += 1;
+    return reverted;
+  };
+  const withdrawals = createPageWithdrawals(cfg, { ...fake, rpc });
+  assert.equal(withdrawals.receiptOf(TX), null);
+  await assert.rejects(withdrawals.status(TX), { code: "failed" });
+  assert.equal(withdrawals.receiptOf(TX.toUpperCase().replace("0X", "0x")), reverted);
+  assert.equal(reads, 1);
+});
