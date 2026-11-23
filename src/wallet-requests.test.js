@@ -30,7 +30,9 @@ const { sendDuskContractCall, sendDuskTransfer, useDuskWallet } = await import("
 const { serviceTransferRequest } = await import("./service-transfer.js");
 const { decodeBridgeCall } = await import("@dusk-network/networks/duskevm");
 const { depositRequest } = await import("./dusk-deposit.js");
-const { submitDuskEvmWithdrawal } = await import("./duskevm-withdrawal.js");
+const { NO_FEE, submitDuskEvmWithdrawal } = await import("./duskevm-withdrawal.js");
+// What a withdrawal's review asks the wallet for: DuskEVM testnet's limit and price caps for one.
+const WITHDRAW_FEES = { gas: 166_127n, maxFeePerGas: 20_001_000_000n, maxPriorityFeePerGas: 1_000_000n };
 const { connectEvmWallet, getEvmState, heldAccount, initializeEvmWallet } = await import("./evm-wallet.js");
 const { APPROVAL_CANCELLED, NOT_REVOKED, REVOKE_CANCELLED, approveMigration, minedAs, revokeMigration, submitMigration } = await import("./legacy-migration.js");
 const { sendToDusk } = await import("./hyperlane-evm.js");
@@ -258,7 +260,7 @@ const sends = {
   approve: (account) => approveMigration(config.evmNetworks.ethereum, "1", { account }),
   migrate: (account) => submitMigration(config.evmNetworks.ethereum, "1", DUSK, { account }),
   revoke: (account) => revokeMigration(config.evmNetworks.ethereum, { account }),
-  withdraw: (account) => submitDuskEvmWithdrawal({ account, amount: "1", duskAccount: DUSK }),
+  withdraw: (account) => submitDuskEvmWithdrawal({ account, amount: "1", duskAccount: DUSK, fees: WITHDRAW_FEES }),
   "transfer back to Dusk": (account) => sendToDusk(config, { account, amount: 1n, reads: sepoliaSide(1n), recipient: DUSK, token: config.hyperlane.tokens[1] }),
 };
 
@@ -607,4 +609,17 @@ test("through Reown, a WalletConnect session sends from the reviewed account whe
     assert.deepEqual(session.sent.map(({ from, signer }) => [from.toLowerCase(), signer.toLowerCase()]), [[REVIEWED.toLowerCase(), REVIEWED.toLowerCase()]], name);
   }
   delete globalThis.reownAppKit;
+});
+
+test("a withdrawal asks the wallet for the gas limit and price caps its fee was quoted at, and sends nothing without them", async () => {
+  const wallet = await useEvmWallet();
+  await submitDuskEvmWithdrawal({ account: REVIEWED, amount: "1", duskAccount: DUSK, fees: WITHDRAW_FEES });
+  assert.deepEqual(
+    wallet.sent.map(({ tx }) => [tx.gas, tx.maxFeePerGas, tx.maxPriorityFeePerGas]),
+    [["0x288ef", "0x4a8270a40", "0xf4240"]],
+  );
+  for (const fees of [undefined, { ...WITHDRAW_FEES, gas: null }, { ...WITHDRAW_FEES, maxFeePerGas: undefined }])
+    await assert.rejects(submitDuskEvmWithdrawal({ account: REVIEWED, amount: "1", duskAccount: DUSK, fees }), { message: NO_FEE });
+  assert.equal(wallet.sent.length, 1);
+  delete globalThis.ethereum;
 });

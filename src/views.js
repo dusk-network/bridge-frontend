@@ -10,6 +10,7 @@ import { formatContractId, formatEvmAddress } from "@dusk-network/networks/forma
 
 import { NOTICE_WORDS } from "./arrival-notice.js";
 import { GLYPH, chainMark, icon, pairMark } from "./icons.js";
+import { REVIEW_CLOSED } from "./review-session.js";
 import { CONNECT_CANCELLED, CONTRACT_RECIPIENT, LATER_STEP_CANCELLED, WALLET_CANCELLED, html, short } from "./transfer-view.js";
 
 /** The faces of a Copy button: its icon or words, then what it shows once it copied (copied.js). */
@@ -63,7 +64,7 @@ const statusPill = (status, word) =>
  * your wallet. `live` announces it as it appears, as the review and the card do.
  */
 export const messageLine = (text, { live = true } = {}) =>
-  [CONNECT_CANCELLED, LATER_STEP_CANCELLED, WALLET_CANCELLED].includes(text)
+  [CONNECT_CANCELLED, LATER_STEP_CANCELLED, WALLET_CANCELLED, ...Object.values(REVIEW_CLOSED)].includes(text)
     ? `<p class="message"${live ? ' role="status"' : ""}>${html(text)}</p>`
     : `<p class="message error"${live ? ' role="alert"' : ""}>${html(text)}</p>`;
 

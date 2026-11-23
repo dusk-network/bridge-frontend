@@ -6,6 +6,9 @@ import { ensureDuskConnected } from "./dusk-wallet.js";
 import { ensureEvmChain, getEvmClients, reviewedEvmAccount } from "./evm-wallet.js";
 import { normalizeDuskAddress } from "./validation.js";
 
+/** Why a withdrawal didn't go out: its fee wasn't worked out for it. */
+export const NO_FEE = "The network fee couldn't be worked out for this withdrawal, so nothing was sent.";
+
 /** DuskEVM counts 18 decimals; Dusk holds whole Lux (9). */
 export const WEI_PER_LUX = 1_000_000_000n;
 
@@ -30,9 +33,13 @@ export const duskEvmNetwork = () => ({
  * Sends the DuskEVM step and returns its hash once the wallet has sent it;
  * the tracker follows it from there. The Dusk recipient is the one given, or
  * the connected Dusk account. It goes out from `account`, the EVM account
- * it was reviewed for, or not at all.
+ * it was reviewed for, or not at all, asking the wallet for `fees`: the gas
+ * limit and price caps its fee was quoted at (`duskEvmFeeMax`), so that the
+ * fee shown is the most it can cost. Without all three, nothing goes out.
  */
-export async function submitDuskEvmWithdrawal({ account: reviewed, amount, duskAccount }) {
+export async function submitDuskEvmWithdrawal({ account: reviewed, amount, duskAccount, fees }) {
+  const { gas, maxFeePerGas, maxPriorityFeePerGas } = fees ?? {};
+  if ([gas, maxFeePerGas, maxPriorityFeePerGas].some((each) => each === null || each === undefined)) throw new Error(NO_FEE);
   const amountWei = withdrawalAmountWei(amount);
   const recipient = duskAccount ? normalizeDuskAddress(duskAccount) : (await ensureDuskConnected()).account;
   const network = duskEvmNetwork();
@@ -41,6 +48,6 @@ export async function submitDuskEvmWithdrawal({ account: reviewed, amount, duskA
   const account = await reviewedEvmAccount(reviewed);
   // DuskEVM's bridge's bridgeETHTo, paying the Dusk account in its extra data.
   const { data, to, value } = withdrawalCall(config.network, { amountWei, sender: account, to: recipient });
-  const hash = await walletClient.sendTransaction({ account, data, to, value });
+  const hash = await walletClient.sendTransaction({ account, data, gas: BigInt(gas), maxFeePerGas: BigInt(maxFeePerGas), maxPriorityFeePerGas: BigInt(maxPriorityFeePerGas), to, value });
   return { amountWei, duskAccount: recipient, hash };
 }

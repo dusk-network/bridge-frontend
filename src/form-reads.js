@@ -27,6 +27,10 @@ export function createFormReads({ services, onChange = () => {}, onPrice = () =>
   let hyperlaneReadsStarted = 0;
   // So with `escrow`, read with the form or again on its own.
   let escrowReadsStarted = 0;
+  // And with `l2`, a withdrawal's state, read for the amount, recipient and
+  // account as they were when it started: an older read never puts its
+  // state back over a newer one's.
+  let l2ReadsStarted = 0;
 
   /**
    * Reads what the form for `route` needs, for the connected accounts.
@@ -37,8 +41,9 @@ export function createFormReads({ services, onChange = () => {}, onPrice = () =>
   async function load({ dusk, escrowFor = dusk, evm, gas = {}, route }) {
     const mine = ++loads;
     estimates += 1;
-    // Its place among the reads of `hyperlane`, taken as it starts: a later load or estimate comes after it.
+    // Its place among the reads of `hyperlane` or `l2`, taken as it starts: a later load or estimate comes after it.
     const started = route.mode === "hyperlane" ? ++hyperlaneReadsStarted : null;
+    const l2Started = route.mode === "duskevm-withdrawal" ? ++l2ReadsStarted : null;
     const fresh = () => mine === loads;
     const set = (patch) => {
       if (!fresh()) return false;
@@ -84,11 +89,8 @@ export function createFormReads({ services, onChange = () => {}, onPrice = () =>
       return;
     }
     if (route.mode === "duskevm-withdrawal" && evm) {
-      let l2 = null;
-      try {
-        l2 = await services.evmReads.withdrawalState(evm, gas);
-      } catch {}
-      if (set({ l2 })) onChange();
+      const l2 = await withdrawalRead(evm, gas);
+      if (l2Started === l2ReadsStarted && set({ l2 })) onChange();
       return;
     }
     if (fresh()) onChange();
@@ -197,13 +199,27 @@ export function createFormReads({ services, onChange = () => {}, onPrice = () =>
           onChange();
         }
       } else if (route.mode === "duskevm-withdrawal") {
-        const l2 = await services.evmReads.withdrawalState(evm, gas);
-        if (fresh()) {
+        const started = ++l2ReadsStarted;
+        const l2 = await withdrawalRead(evm, gas);
+        if (fresh() && started === l2ReadsStarted) {
           reads.l2 = l2;
           onChange();
         }
       }
     } catch {}
+  }
+
+  /**
+   * A withdrawal's state and the call it was read for (`call`: its amount, to
+   * its Dusk account, from `evm`; none without both). Where it couldn't be
+   * read at all, it says only that: no estimate for that call.
+   */
+  async function withdrawalRead(evm, gas) {
+    let state = { estimated: false };
+    try {
+      state = await services.evmReads.withdrawalState(evm, gas);
+    } catch {}
+    return { ...state, call: gas.amountWei && gas.duskAccount ? { amountWei: gas.amountWei, duskAccount: gas.duskAccount, owner: evm } : null };
   }
 
   /**

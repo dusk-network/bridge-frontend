@@ -4,7 +4,7 @@
 
 import { withdrawalCall } from "@dusk-network/app-core/duskevm-withdrawals";
 import { erc20Abi as ERC20 } from "@dusk/evm-sdk";
-import { decodeFunctionResult, encodeFunctionData, toHex } from "viem";
+import { decodeFunctionResult, encodeFunctionData, parseAbi, toHex } from "viem";
 
 import { MIGRATION_ABI } from "./legacy-migration.js";
 
@@ -16,6 +16,23 @@ import { MIGRATION_ABI } from "./legacy-migration.js";
 export const MIGRATE_GAS_FALLBACK = 70_000n;
 /** A DuskEVM withdrawal spends about 138,000 gas (testnet, October). */
 export const WITHDRAW_GAS_FALLBACK = 140_000n;
+
+/**
+ * DuskEVM's GasPriceOracle predeploy, as on every OP Stack chain: what the
+ * chain adds to a transaction's gas, its L1 data fee and its operator fee.
+ */
+export const GAS_PRICE_ORACLE = "0x420000000000000000000000000000000000000F";
+const ORACLE = parseAbi([
+  "function getL1FeeUpperBound(uint256 unsignedTxSize) view returns (uint256)",
+  "function getOperatorFee(uint256 gasUsed) view returns (uint256)",
+]);
+/** At most what a type-2 transaction adds around its call data, unsigned: its type, chain, nonce, fees, gas, to and value. */
+const ENVELOPE_BYTES = 160;
+/** A withdrawal's call data, a bridgeETHTo to a Dusk account, as testnet's went out: 356 bytes, where the call can't be built yet. */
+const WITHDRAW_DATA_BYTES = 356;
+
+/** The gas limit a withdrawal asks the wallet for: the estimate and a fifth more, for what the chain does differently by then. */
+export const duskEvmGasLimit = (gas) => (BigInt(gas) * 6n + 4n) / 5n;
 
 const big = (value) => (value === null || value === undefined ? null : BigInt(value));
 
@@ -85,22 +102,55 @@ export function createEvmReads({ cfg, rpc, rpcBatch }) {
     });
   }
 
-  /** DUSK on DuskEVM, its gas price, and what the withdrawal call would spend. */
+  /**
+   * DUSK on DuskEVM, and what the withdrawal call would spend and cost: its
+   * gas, the limit the wallet is asked for, the base fee and tip it's priced
+   * at, and what DuskEVM adds as its GasPriceOracle says, for a transaction
+   * of this size at that limit: the L1 data fee at most, and the operator fee.
+   * `estimated` says the gas is the call's own estimate, not the fallback a
+   * withdrawal usually needs.
+   */
   async function withdrawalState(owner, { amountWei, duskAccount } = {}) {
-    const [balance, price] = await rpcBatch("dusk-evm", [
+    const [balance, price, block, tip] = await rpcBatch("dusk-evm", [
       { method: "eth_getBalance", params: [owner, "latest"] },
       { method: "eth_gasPrice", params: [] },
+      { method: "eth_getBlockByNumber", params: ["latest", false] },
+      { method: "eth_maxPriorityFeePerGas", params: [] },
     ]);
-    let gas = WITHDRAW_GAS_FALLBACK;
+    let gas = null;
+    let dataBytes = WITHDRAW_DATA_BYTES;
     if (amountWei && duskAccount) {
       try {
         const { data, to, value } = withdrawalCall(cfg.network, { amountWei, sender: owner, to: duskAccount });
-        gas = await estimate("dusk-evm", { data, from: owner, to, value: toHex(value) }, WITHDRAW_GAS_FALLBACK);
+        dataBytes = (data.length - 2) / 2;
+        gas = await estimate("dusk-evm", { data, from: owner, to, value: toHex(value) });
       } catch {
-        gas = WITHDRAW_GAS_FALLBACK;
+        gas = null;
       }
     }
-    return { balanceWei: big(balance), gas, gasPriceWei: big(price) };
+    const estimated = gas !== null;
+    gas ??= WITHDRAW_GAS_FALLBACK;
+    const gasLimit = duskEvmGasLimit(gas);
+    const [l1Fee, operatorFee] = await rpcBatch("dusk-evm", [
+      call(GAS_PRICE_ORACLE, encodeFunctionData({ abi: ORACLE, args: [BigInt(dataBytes + ENVELOPE_BYTES)], functionName: "getL1FeeUpperBound" })),
+      call(GAS_PRICE_ORACLE, encodeFunctionData({ abi: ORACLE, args: [gasLimit], functionName: "getOperatorFee" })),
+    ]);
+    const word = (data) => (data && data !== "0x" ? BigInt(data) : null);
+    const baseFeeWei = big(block?.baseFeePerGas);
+    const gasPriceWei = big(price);
+    // A node without the tip's method: what its gas price is above the base fee, none where it's that.
+    const tipWei = big(tip) ?? (gasPriceWei !== null && baseFeeWei !== null && gasPriceWei >= baseFeeWei ? gasPriceWei - baseFeeWei : null);
+    return {
+      balanceWei: big(balance),
+      baseFeeWei,
+      estimated,
+      gas,
+      gasLimit,
+      gasPriceWei,
+      l1FeeMaxWei: word(l1Fee),
+      operatorFeeWei: word(operatorFee),
+      tipWei,
+    };
   }
 
   /** Whether an address on a chain holds code: a contract, not an ordinary wallet. */

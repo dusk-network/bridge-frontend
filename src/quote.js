@@ -7,7 +7,7 @@ import { normalizeAmount, parseDusk, unclearAmount } from "@dusk-network/app-cor
 import { beforeProofText, claimAfterProving, claimText } from "@dusk-network/networks/duskevm";
 import { DEPOSIT_GAS, TRANSFER_GAS, withdrawalGasLimit as withdrawalStepGas } from "@dusk-network/networks/gas";
 
-import { aboutFee, decimalSeparator, formatDateTime, formatDusk, formatLux, formatMaxFee, formatShort, formatToken, formatUnitsGrouped } from "./format.js";
+import { aboutFee, decimalSeparator, formatDateTime, formatDusk, formatLux, formatMaxFee, formatMaxFeeWei, formatShort, formatToken, formatUnitsGrouped } from "./format.js";
 import { HYPERLANE_GAS, U64_MAX } from "./hyperlane.js";
 import { gasCoin, networkName, routeUnits, tokenName } from "./names.js";
 import { routeTime, routeTimeText } from "./route-times.js";
@@ -129,7 +129,7 @@ function arrivesRow(route, cfg, { locale, timeZone, timing } = {}) {
  * @param {object} ctx.cfg the deployment config
  * @param {bigint} [ctx.gasPrice] Dusk gas price, in Lux
  * @param {bigint | null} [ctx.balance] what the source holds: Lux on Dusk, wei on an EVM chain
- * @param {{ approve?: bigint, migrate?: bigint, withdraw?: bigint, priceWei?: bigint }} [ctx.evmGas]
+ * @param {{ approve?: bigint, migrate?: bigint, withdraw?: bigint, priceWei?: bigint, baseFeeWei?: bigint, tipWei?: bigint, limit?: bigint, l1FeeMaxWei?: bigint, operatorFeeWei?: bigint, exact?: boolean, failed?: boolean }} [ctx.evmGas]
  * @param {bigint} [ctx.allowanceWei] the migration contract's allowance
  * @param {bigint | null} [ctx.gasCoinBalance] ETH, BNB or DuskEVM DUSK for EVM gas, in wei
  * @param {object} [ctx.timing] what `routeTime` reads the route's time from
@@ -217,9 +217,20 @@ export function buildQuote(route, amount, ctx) {
     return quote;
   }
 
-  // DuskEVM to Dusk: one step on DuskEVM, then prove and claim on Dusk.
-  const l2Fee = gas.priceWei && gas.withdraw ? BigInt(gas.withdraw) * BigInt(gas.priceWei) : null;
+  // DuskEVM to Dusk: one step on DuskEVM, then prove and claim on Dusk. Its
+  // fee is the most DuskEVM can charge it, and the limit it's priced at is
+  // the one the wallet is asked for.
+  const l2Fee = duskEvmFeeMax(gas);
   quote.evmFeeWei = l2Fee;
+  // What the wallet is asked for: the limit and price caps the fee is the
+  // most of, only from an estimate of the exact call (`gas.exact`). Until
+  // then there's nothing to review; where it failed, it's said, as where
+  // the call's read came back without a part of the fee.
+  const exact = l2Fee !== null && gas.exact === true;
+  quote.evmGasLimit = exact ? BigInt(gas.limit) : null;
+  quote.evmMaxFeePerGas = exact ? duskEvmMaxFeePerGas(gas) : null;
+  quote.evmMaxPriorityFeePerGas = exact ? BigInt(gas.tipWei) : null;
+  if (lux !== null && !exact) quote.waiting = gas.failed || gas.exact === true ? "fee-failed" : "fee";
   if (ctx.balance !== null && ctx.balance !== undefined) {
     if (l2Fee === null) {
       // No gas price yet: the fee comes from the same balance, so there's no
@@ -229,8 +240,8 @@ export function buildQuote(route, amount, ctx) {
         quote.error = `That's more than you have on ${from}, with its network fee.`;
       }
     } else {
-      // Keep twice the estimated gas aside, so the wallet's own estimate fits.
-      const room = BigInt(ctx.balance) - 2n * l2Fee;
+      // Keep the most it can cost aside: what the chain checks the balance for.
+      const room = BigInt(ctx.balance) - l2Fee;
       quote.maxLux = room > 0n ? room / WEI_PER_LUX : 0n;
       if (!quote.error && lux !== null && lux > quote.maxLux) {
         quote.insufficient = true;
@@ -240,7 +251,7 @@ export function buildQuote(route, amount, ctx) {
   }
   rows.push(
     { key: "send", label: "You send", value: lux === null ? "—" : `${formatDusk(lux)} on ${from}` },
-    { key: "fee", label: "Network fee", value: l2Fee === null ? "paid in DUSK" : aboutFee(l2Fee, 18, "DUSK") },
+    { key: "fee", label: "Network fee", value: l2Fee === null ? "paid in DUSK" : `up to ${formatMaxFeeWei(l2Fee)} DUSK` },
     { key: "fee-dusk", label: "Prove and claim", value: `up to ${formatMaxFee(withdrawalStepMax({ gasPrice: ctx.gasPrice ?? 1n }))} DUSK each` },
     { key: "receive", label: "You receive", strong: true, value: lux === null ? "—" : `${formatDusk(lux)} on ${to}` },
     ...arrivesRow(route, cfg, ctx),
@@ -249,9 +260,30 @@ export function buildQuote(route, amount, ctx) {
   quote.fees = {
     key: "fees",
     label: "Fees",
-    value: `${l2Fee === null ? "paid in DUSK" : aboutFee(l2Fee, 18, "DUSK")}, then up to ${formatMaxFee(2n * withdrawalStepMax({ gasPrice: ctx.gasPrice ?? 1n }))} DUSK on Dusk`,
+    value: `${l2Fee === null ? "paid in DUSK" : `up to ${formatMaxFeeWei(l2Fee)} DUSK`}, then up to ${formatMaxFee(2n * withdrawalStepMax({ gasPrice: ctx.gasPrice ?? 1n }))} DUSK on Dusk`,
   };
   return quote;
+}
+
+/** The most a withdrawal pays DuskEVM for each unit of gas, as the wallet is asked to cap it: twice the base fee, plus the tip. */
+export const duskEvmMaxFeePerGas = ({ baseFeeWei, tipWei }) => 2n * BigInt(baseFeeWei) + BigInt(tipWei);
+
+/**
+ * The most DuskEVM can charge a withdrawal's step, in wei (`withdrawalState`
+ * reads each part), which is what the chain checks the balance for before
+ * it's taken: the gas limit the wallet is asked for at the price cap it's
+ * asked for (`duskEvmMaxFeePerGas`); the operator fee at that limit; and the
+ * L1 data fee with a margin it can't outrun before the transaction is
+ * mined. That fee is a few hundred wei, priced at an L1 base fee of 1 wei,
+ * so each wei that base fee moves multiplies it: 223 wei becomes 892 at 4
+ * wei. Twice the oracle's most, and a whole Lux on top, covers it growing
+ * millions of times; and a Lux, the smallest amount Dusk counts, is nothing
+ * a person sees. Null without all of them.
+ */
+export function duskEvmFeeMax({ baseFeeWei, l1FeeMaxWei, limit, operatorFeeWei, tipWei } = {}) {
+  const parts = [baseFeeWei, l1FeeMaxWei, limit, operatorFeeWei, tipWei];
+  if (parts.some((part) => part === null || part === undefined)) return null;
+  return BigInt(limit) * duskEvmMaxFeePerGas({ baseFeeWei, tipWei }) + BigInt(operatorFeeWei) + 2n * BigInt(l1FeeMaxWei) + WEI_PER_LUX;
 }
 
 /** Gas for a transfer to the EVM chain on Dusk, with an approval first where the route can't take the amount yet. */

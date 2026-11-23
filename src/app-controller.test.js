@@ -2,16 +2,18 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { createAppController } from "./app-controller.js";
-import { buildRoutes } from "./bridge-routes.js";
-import { loadConfig } from "./config.js";
-import { useDuskWallet } from "./dusk-wallet.js";
-import { duskRecipientHash } from "./hyperlane.js";
 import { networks } from "@dusk-network/networks";
-import { partsOf, textOf } from "./pages.fixtures.js";
 
-// The page as testnet's site runs it, with its settings from deployments.json.
+// The page as testnet's site runs it, with its settings from deployments.json:
+// set before the page's own modules load, as they read them then.
 globalThis.__DUSK_BRIDGE_CONFIG__ = JSON.parse(readFileSync(new URL("../deployments.json", import.meta.url), "utf8"))["https://bridge.testnet.dusk.network/"];
+const { createAppController } = await import("./app-controller.js");
+const { buildRoutes } = await import("./bridge-routes.js");
+const { loadConfig } = await import("./config.js");
+const { useDuskWallet } = await import("./dusk-wallet.js");
+const { duskRecipientHash } = await import("./hyperlane.js");
+const { partsOf, textOf } = await import("./pages.fixtures.js");
+const { duskEvmFeeMax } = await import("./quote.js");
 const cfg = loadConfig();
 delete globalThis.__DUSK_BRIDGE_CONFIG__;
 const routes = buildRoutes(cfg);
@@ -144,8 +146,8 @@ const services = {
  * connected to `account` (or `wallet`); its timers stand still unless the
  * test moves them. `go` follows a link to another page.
  */
-async function openPage(t, hash, activity, { account = ACCOUNT, network = services, wallet = duskWallet(account) } = {}) {
-  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+async function openPage(t, hash, activity, { account = ACCOUNT, clock = false, network = services, wallet = duskWallet(account) } = {}) {
+  t.mock.timers.enable({ apis: clock ? ["setTimeout", "setInterval", "Date"] : ["setTimeout", "setInterval"] });
   const items = new Map([[`dusk-bridge:activity:v2:${cfg.profile}`, JSON.stringify(activity)]]);
   const events = {};
   globalThis.localStorage = { getItem: (key) => items.get(key) ?? null, removeItem: (key) => items.delete(key), setItem: (key, value) => items.set(key, String(value)) };
@@ -410,4 +412,210 @@ test("why a claim didn't go goes once its transfer isn't on the page: an EVM swi
   await settle();
   assert.doesNotMatch(slots.main.innerHTML, new RegExp(elsewhere.hash, "u"));
   assert.equal(message(), "");
+});
+
+test("a withdrawal is reviewed only once its fee is worked out for its call, and the wallet is asked for that fee's gas limit and price caps", async (t) => {
+  // An EVM wallet on DuskEVM testnet, which keeps what it's asked to send.
+  const sent = [];
+  globalThis.ethereum = {
+    on() {},
+    removeListener() {},
+    request: async ({ method, params }) => {
+      if (method === "eth_accounts" || method === "eth_requestAccounts") return [EVM];
+      if (method === "eth_chainId") return "0x2e9";
+      if (method === "eth_sendTransaction") {
+        sent.push(params[0]);
+        return `0x${"ab".repeat(32)}`;
+      }
+      return null;
+    },
+  };
+  t.after(() => delete globalThis.ethereum);
+  // DuskEVM as testnet's RPC reads it: the call's own estimate where there's a call, else what a withdrawal usually needs.
+  const evmReads = {
+    withdrawalState: async (_owner, { amountWei, duskAccount } = {}) => {
+      const estimated = Boolean(amountWei && duskAccount);
+      return {
+        balanceWei: 312n * 10n ** 18n,
+        baseFeeWei: 10_000_000_000n,
+        estimated,
+        gas: estimated ? 138_439n : 140_000n,
+        gasLimit: estimated ? 166_127n : 168_000n,
+        gasPriceWei: 10_001_000_000n,
+        l1FeeMaxWei: 379n,
+        operatorFeeWei: estimated ? 24_071_158_578_548_300n : 24_320_000_007_200_000n,
+        tipWei: 1_000_000n,
+      };
+    },
+  };
+  const { root, slots } = await openPage(t, "#/move/dusk-evm-to-dusk", [], { clock: true, network: { ...services, evmReads } });
+  const type = async (value) => {
+    for (const listener of root.listeners.input) listener({ target: { classList: { contains: () => false }, name: "amount", value } });
+    await settle();
+  };
+  // Typed, and Review pressed before the call is estimated: nothing to review yet.
+  await type("1");
+  await root.press({ action: "review" });
+  assert.equal(slots.sheet.open, false);
+  // Estimated for it: the review opens, and Confirm asks the wallet for what the fee was quoted at.
+  t.mock.timers.tick(500);
+  await settle();
+  await root.press({ action: "review" });
+  assert.equal(slots.sheet.open, true);
+  t.mock.timers.tick(600);
+  await root.press({ action: "confirm" });
+  await settle();
+  assert.deepEqual(
+    sent.map(({ gas, maxFeePerGas, maxPriorityFeePerGas, value }) => ({ gas, maxFeePerGas, maxPriorityFeePerGas, value })),
+    [{ gas: "0x288ef", maxFeePerGas: "0x4a8270a40", maxPriorityFeePerGas: "0xf4240", value: "0xde0b6b3a7640000" }],
+  );
+});
+
+test("a withdrawal whose fee couldn't be worked out for its call isn't reviewed, and offers to try again", async (t) => {
+  globalThis.ethereum = {
+    on() {},
+    removeListener() {},
+    request: async ({ method }) => (method === "eth_accounts" ? [EVM] : method === "eth_chainId" ? "0x2e9" : null),
+  };
+  t.after(() => delete globalThis.ethereum);
+  // DuskEVM's RPC refusing the call's estimate, not answering at all, or answering all but a part of
+  // its fee (the oracle's getOperatorFee came back with an error), until it's tried again.
+  for (const fails of ["estimate", "read", "part"]) {
+    let failing = true;
+    const evmReads = {
+      withdrawalState: async () => {
+        if (failing && fails === "read") throw new Error("fetch failed");
+        const estimated = !failing || fails === "part";
+        return {
+          balanceWei: 312n * 10n ** 18n,
+          baseFeeWei: 10_000_000_000n,
+          estimated,
+          gas: estimated ? 138_439n : 140_000n,
+          gasLimit: estimated ? 166_127n : 168_000n,
+          gasPriceWei: 10_001_000_000n,
+          l1FeeMaxWei: 379n,
+          operatorFeeWei: failing && fails === "part" ? null : estimated ? 24_071_158_578_548_300n : 24_320_000_007_200_000n,
+          tipWei: 1_000_000n,
+        };
+      },
+    };
+    const { root, slots } = await openPage(t, "#/move/dusk-evm-to-dusk", [], { clock: true, network: { ...services, evmReads } });
+    for (const listener of root.listeners.input) listener({ target: { classList: { contains: () => false }, name: "amount", value: "1" } });
+    await settle();
+    t.mock.timers.tick(500);
+    await settle();
+    await root.press({ action: "review" });
+    assert.equal(slots.sheet.open, false, fails);
+    assert.match(slots.main.innerHTML, /data-action="read-again"/u, fails);
+    // Tried again, and worked out this time: reviewed.
+    failing = false;
+    await root.press({ action: "read-again" });
+    await root.press({ action: "review" });
+    assert.equal(slots.sheet.open, true, fails);
+    t.mock.timers.reset();
+  }
+});
+
+/** An EVM wallet on DuskEVM testnet at `account`, which keeps what it's asked to send; `switchTo` moves it to another account. */
+function evmWallet(t, account = EVM) {
+  const sent = [];
+  const told = {};
+  let now = account;
+  globalThis.ethereum = {
+    on: (event, listener) => {
+      told[event] = listener;
+    },
+    removeListener() {},
+    request: async ({ method, params }) => {
+      if (method === "eth_accounts" || method === "eth_requestAccounts") return [now];
+      if (method === "eth_chainId") return "0x2e9";
+      if (method === "eth_sendTransaction") {
+        sent.push(params[0]);
+        return `0x${"ab".repeat(32)}`;
+      }
+      return null;
+    },
+  };
+  t.after(() => delete globalThis.ethereum);
+  return {
+    sent,
+    switchTo: (next) => {
+      now = next;
+      told.accountsChanged?.([next]);
+    },
+  };
+}
+
+/**
+ * DuskEVM as testnet's RPC reads a withdrawal for 312 DUSK: its call's own
+ * estimate where there's a call (`exact`), else the gas one usually needs.
+ */
+const withdrawalReads = ({ exact = { gas: 138_439n, gasLimit: 166_127n, operatorFeeWei: 24_071_158_578_548_300n } } = {}) => ({
+  withdrawalState: async (_owner, { amountWei, duskAccount } = {}) => ({
+    balanceWei: 312n * 10n ** 18n,
+    baseFeeWei: 10_000_000_000n,
+    estimated: Boolean(amountWei && duskAccount),
+    gasPriceWei: 10_001_000_000n,
+    l1FeeMaxWei: 379n,
+    tipWei: 1_000_000n,
+    ...(amountWei && duskAccount ? exact : { gas: 140_000n, gasLimit: 168_000n, operatorFeeWei: 24_320_000_007_200_000n }),
+  }),
+});
+
+/** Typed into the card's amount, as its input event comes. */
+async function typeAmount(root, value) {
+  for (const listener of root.listeners.input) listener({ target: { classList: { contains: () => false }, name: "amount", value } });
+  await settle();
+}
+
+test("a review closes once a wallet switch changes what it would send, and nothing is sent: the Dusk account it pays, or the EVM account that signs it", async (t) => {
+  for (const switched of ["dusk", "evm"]) {
+    const evm = evmWallet(t);
+    let listener;
+    const wallet = { ...duskWallet(ACCOUNT), subscribe: (each) => ((listener = each), () => {}) };
+    const { root, slots } = await openPage(t, "#/move/dusk-evm-to-dusk", [], { clock: true, network: { ...services, evmReads: withdrawalReads() }, wallet });
+    await typeAmount(root, "1");
+    t.mock.timers.tick(500);
+    await settle();
+    // Reviewed paying the connected Dusk account, from the connected EVM account.
+    await root.press({ action: "review" });
+    assert.equal(slots.sheet.open, true, switched);
+    // Dusk Wallet on another profile, which it would pay now, or the EVM wallet on another account, which would sign it.
+    if (switched === "dusk") {
+      wallet.state = { ...wallet.state, selectedProfile: { account: OTHER } };
+      listener(wallet.state);
+    } else evm.switchTo("0x00000000000000000000000000000000000000e1");
+    await settle();
+    assert.equal(slots.sheet.open, false, switched);
+    t.mock.timers.tick(600);
+    await root.press({ action: "confirm" });
+    await settle();
+    assert.deepEqual(evm.sent, [], switched);
+    t.mock.timers.reset();
+  }
+});
+
+test("an amount Max filled in is worked out again once its call's estimate changes the fee, keeping that whole fee aside", async (t) => {
+  const evm = evmWallet(t);
+  // Max at the gas a withdrawal usually needs, a limit of 168,000; its call's own estimate asks 170,000.
+  const exact = { gas: 141_667n, gasLimit: 170_000n, operatorFeeWei: 24_585_714_293_000_000n };
+  const { root, slots } = await openPage(t, "#/move/dusk-evm-to-dusk", [], { clock: true, network: { ...services, evmReads: withdrawalReads({ exact }) } });
+  await settle();
+  await root.press({ action: "max" });
+  t.mock.timers.tick(500);
+  await settle();
+  t.mock.timers.tick(500);
+  await settle();
+  // Not more than there is: reviewed, and what's sent leaves the whole fee at that limit.
+  await root.press({ action: "review" });
+  assert.equal(slots.sheet.open, true);
+  t.mock.timers.tick(600);
+  await root.press({ action: "confirm" });
+  await settle();
+  const fee = duskEvmFeeMax({ baseFeeWei: 10_000_000_000n, l1FeeMaxWei: 379n, limit: exact.gasLimit, operatorFeeWei: exact.operatorFeeWei, tipWei: 1_000_000n });
+  const most = ((312n * 10n ** 18n - fee) / 10n ** 9n) * 10n ** 9n;
+  assert.deepEqual(
+    evm.sent.map(({ gas, value }) => [gas, value]),
+    [[`0x${exact.gasLimit.toString(16)}`, `0x${most.toString(16)}`]],
+  );
 });

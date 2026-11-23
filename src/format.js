@@ -107,6 +107,9 @@ const shortFee = (lux, round) => formatShared(lux, { locale: amountLocale(), rou
  */
 export const formatMaxFee = (lux) => (BigInt(lux) > 0n ? shortFee(lux, "up") : "0");
 
+/** The same, for a fee DuskEVM counts in wei: up to the Lux above it, so it never reads lower. */
+export const formatMaxFeeWei = (wei) => formatMaxFee((BigInt(wei) + 999_999_999n) / 1_000_000_000n);
+
 
 /**
  * An estimated fee in a coin with `decimals`: "~0.00021 ETH", or

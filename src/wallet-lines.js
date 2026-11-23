@@ -11,7 +11,7 @@ import { decodeBridgeCall } from "@dusk-network/networks/duskevm";
 import { formatContractId, formatEvmAddress, shortAccount } from "@dusk-network/networks/format";
 
 import { sha256Hex } from "./data-driver.js";
-import { aboutFee, formatDusk, formatLux, formatMaxFee, formatToken, formatUnitsGrouped } from "./format.js";
+import { aboutFee, formatDusk, formatLux, formatMaxFee, formatMaxFeeWei, formatToken, formatUnitsGrouped } from "./format.js";
 import { networkName, tokenName } from "./names.js";
 
 const WEI_PER_LUX = 1_000_000_000n;
@@ -133,7 +133,8 @@ export function withdrawLines({ amountLux, cfg, duskAccount, fee }) {
       network: "dusk",
       note: "In the call data: the wallet shows it as bytes.",
     },
-    evmFeeLine(fee, "DUSK"),
+    // The most DuskEVM can charge it, as the card and the review quote it.
+    { label: "Network fee", value: fee === null || fee === undefined ? "shown by your wallet, paid in DUSK" : `up to ${formatMaxFeeWei(fee)} DUSK` },
   ];
 }
 
