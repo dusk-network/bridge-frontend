@@ -11,6 +11,11 @@ const BESIDE_MIN = 22;
 const CARET = 2;
 /** What a font size is rounded down to, in px. */
 const STEP = 0.25;
+/**
+ * The smallest an amount among words is drawn, in px: the size of the page's
+ * tags and labels. Smaller, it can't be read, so it can't be checked.
+ */
+const READABLE = 12;
 
 let ruler = null;
 
@@ -94,14 +99,54 @@ function roomIn(el, box) {
   return room;
 }
 
-/** A number in a label or a review's amount (`data-fit`, the box whose width it has): smaller where it's wider than that. */
+/**
+ * A number's group separator: one between digits that recurs, or the first of
+ * two kinds. One alone may be its decimal point, and isn't. "" with none.
+ */
+function groupSeparator(text) {
+  const seps = [...text.matchAll(/(?<=\d)\D(?=\d)/gu)].map(([sep]) => sep);
+  return new Set(seps).size > 1 || seps.length > 1 ? seps[0] : "";
+}
+
+/** `el`'s number with a <wbr> after each of its group separators: where its lines may end. */
+function breakAtGroups(el) {
+  const text = el.textContent;
+  const group = groupSeparator(text);
+  if (!group) return;
+  const page = el.ownerDocument;
+  const parts = text.split(group);
+  el.replaceChildren(...parts.flatMap((part, at) => (at < parts.length - 1 ? [page.createTextNode(`${part}${group}`), page.createElement("wbr")] : [page.createTextNode(part)])));
+}
+
+/**
+ * A number in a label or a review's amount (`data-fit`, the box whose width
+ * it has): smaller where it's wider than that, down to READABLE.
+ */
 function fitNumber(el) {
   el.style.removeProperty("font-size");
+  // Drawn as the page wrote it: one line, one text, none of the last fit's breaks.
+  if (el.classList.contains("groups")) {
+    el.classList.remove("groups");
+    el.textContent = el.textContent;
+  }
   // None left behind: drawn again, its markup is the same (`refreshForm`).
   if (el.getAttribute("style") === "") el.removeAttribute("style");
   const box = el.closest(el.dataset.fit);
   const room = box ? roomIn(el, box) : 0;
-  if (room > 0) shrink(el, room, () => el.getBoundingClientRect().width);
+  if (room <= 0) return;
+  const floor = Math.min(READABLE, px(getComputedStyle(el).fontSize));
+  shrink(el, room, () => el.getBoundingClientRect().width);
+  // One with no groups to break at is drawn as small as it needs: it can't wrap.
+  if (px(getComputedStyle(el).fontSize) >= floor || !groupSeparator(el.textContent)) return;
+  // The one place a number is split, and only one that's too long to read
+  // on one line, as an approval past any supply: it stays readable and
+  // takes more lines, breaking only after its group separators. Each line
+  // ends in a separator, so it reads on as the same number, never as
+  // another. The breaks are put in here, only then: a <wbr> breaks a line
+  // even where white-space is nowrap, in Chromium.
+  el.style.fontSize = `${floor}px`;
+  el.classList.add("groups");
+  breakAtGroups(el);
 }
 
 /** Fits every amount in `scope` (`fitRow`, `fitNumber`) to the room it has now. */
