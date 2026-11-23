@@ -7,6 +7,7 @@ import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 import { useDuskWallet } from "./dusk-wallet.js";
 import { duskRecipientHash } from "./hyperlane.js";
+import { networks } from "@dusk-network/networks";
 import { partsOf, textOf } from "./pages.fixtures.js";
 
 // The page as testnet's site runs it, with its settings from deployments.json.
@@ -206,7 +207,8 @@ test("away from the card, a connect cancelled in the wallet shows on the page, a
 });
 
 test("a claim for an account this page doesn't know says why on the page, in Activity and on the receipt", async (t) => {
-  for (const hash of ["#/transfers", `#/transfer/${HELD.hash}`]) {
+  // The receipt by its hash, and by its hash without the 0x, as it can be pasted.
+  for (const hash of ["#/transfers", `#/transfer/${HELD.hash}`, `#/transfer/${HELD.hash.slice(2)}`]) {
     const { root, slots } = await openPage(t, hash, [HELD]);
     // The quiet Claim for its account, as Activity's row and the receipt offer it.
     await root.press({ action: "escrow-claim", id: HELD.id });
@@ -217,6 +219,20 @@ test("a claim for an account this page doesn't know says why on the page, in Act
     assert.equal(slots.sheet.open, false, hash);
     t.mock.timers.reset();
   }
+});
+
+test("a receipt opened by its hash without the 0x is drawn again as its transfer is checked", async (t) => {
+  // Its next check finds it proved.
+  let proved = false;
+  const tracking = { ...services.tracking, refresh: async (entry) => (proved ? { stage: "proven_waiting", status: "pending" } : { status: entry.status }) };
+  const { slots } = await openPage(t, `#/transfer/${WITHDRAWAL.hash.slice(2)}`, [WITHDRAWAL], { network: { ...services, tracking } });
+  t.mock.timers.tick(1);
+  await settle();
+  const before = slots.main.innerHTML;
+  proved = true;
+  t.mock.timers.tick(15_000);
+  await settle();
+  assert.notEqual(slots.main.innerHTML, before);
 });
 
 test("a review whose request couldn't be prepared says why, and no longer that it's preparing; nothing can be confirmed", async (t) => {
@@ -298,4 +314,100 @@ test("a refusal stays through the wallet's news when no account changed, and goe
   tell({ ...wallet.state, authorized: true, selectedProfile: { account: ACCOUNT } });
   await settle();
   assert.deepEqual(partsOf(slots.main.innerHTML, "message"), []);
+});
+
+test("why a claim for an unknown account didn't go stays while that's so, through wallet switches, and goes once its account is known", async (t) => {
+  // An EVM wallet in the page, which tells it when its account changes.
+  const told = {};
+  globalThis.ethereum = {
+    on: (event, listener) => {
+      told[event] = listener;
+    },
+    removeListener() {},
+    request: async ({ method }) => (method === "eth_accounts" ? [EVM] : method === "eth_chainId" ? "0xaa36a7" : null),
+  };
+  t.after(() => delete globalThis.ethereum);
+  let listener;
+  const wallet = { ...duskWallet(ACCOUNT), subscribe: (each) => ((listener = each), () => {}) };
+  // Dusk Wallet on another profile: its state, and its news of it.
+  const switchTo = (account) => {
+    wallet.state = { ...wallet.state, selectedProfile: { account } };
+    listener(wallet.state);
+  };
+  const { root, slots } = await openPage(t, `#/transfer/${HELD.hash}`, [HELD], { wallet });
+  const message = () => partsOf(slots.main.innerHTML, "message").map(textOf).join(" ");
+  await root.press({ action: "escrow-claim", id: HELD.id });
+  assert.match((await said(t, slots)).shown.join(" "), /\bisn't known\b/u);
+  // The EVM wallet on another account: the transfer is held, its account unknown, as before.
+  told.accountsChanged(["0x00000000000000000000000000000000000000e1"]);
+  await settle();
+  assert.match(message(), /\bisn't known\b/u);
+  // Dusk Wallet on another account that isn't the one it pays: still unknown here.
+  switchTo(networks.mainnet.routes.services[0].account);
+  await settle();
+  assert.match(message(), /\bisn't known\b/u);
+  // On the account it pays: known now, and it can claim it, so the message goes.
+  switchTo(OTHER);
+  await settle();
+  assert.equal(message(), "");
+});
+
+test("choosing another profile keeps why a claim didn't go while that's so, and drops it once the account it pays connects", async (t) => {
+  let listener;
+  let letGo;
+  let next = networks.mainnet.routes.services[0].account;
+  const wallet = { ...duskWallet(ACCOUNT), subscribe: (each) => ((listener = each), () => {}) };
+  const switchTo = (account) => {
+    wallet.state = { ...wallet.state, authorized: Boolean(account), selectedProfile: account ? { account } : null };
+    listener(wallet.state);
+  };
+  // Dusk Wallet lets go when the test says, and connects the profile chosen next.
+  wallet.disconnect = () =>
+    new Promise((resolve) => {
+      letGo = () => {
+        switchTo(null);
+        resolve(true);
+      };
+    });
+  wallet.connect = async () => switchTo(next);
+  const { root, slots } = await openPage(t, `#/transfer/${HELD.hash}`, [HELD], { wallet });
+  const message = () => partsOf(slots.main.innerHTML, "message").map(textOf).join(" ");
+  await root.press({ action: "escrow-claim", id: HELD.id });
+  assert.match((await said(t, slots)).shown.join(" "), /\bisn't known\b/u);
+  // Other profile: while Dusk Wallet lets go, and on an account that isn't the one it pays.
+  await root.press({ action: "dusk-other-profile" });
+  assert.match(message(), /\bisn't known\b/u);
+  letGo();
+  await settle();
+  assert.match(message(), /\bisn't known\b/u);
+  // Then on the account it pays: known now, so it goes.
+  next = OTHER;
+  await root.press({ action: "dusk-other-profile" });
+  letGo();
+  await settle();
+  assert.equal(message(), "");
+});
+
+test("why a claim didn't go goes once its transfer isn't on the page: an EVM switch takes its row off Activity's list", async (t) => {
+  const told = {};
+  globalThis.ethereum = {
+    on: (event, listener) => {
+      told[event] = listener;
+    },
+    removeListener() {},
+    request: async ({ method }) => (method === "eth_accounts" ? [EVM] : method === "eth_chainId" ? "0xaa36a7" : null),
+  };
+  t.after(() => delete globalThis.ethereum);
+  // Held for an account this page doesn't know, sent from another device: listed by its EVM sender alone.
+  const elsewhere = { ...HELD, parties: [EVM], sentHere: false };
+  const { root, slots } = await openPage(t, "#/transfers", [elsewhere]);
+  const message = () => partsOf(slots.main.innerHTML, "message").map(textOf).join(" ");
+  await root.press({ action: "escrow-claim", id: elsewhere.id });
+  assert.match((await said(t, slots)).shown.join(" "), /\bisn't known\b/u);
+  assert.match(slots.main.innerHTML, new RegExp(elsewhere.hash, "u"));
+  // The EVM wallet on an unrelated account: the row goes, and its message with it.
+  told.accountsChanged(["0x00000000000000000000000000000000000000e1"]);
+  await settle();
+  assert.doesNotMatch(slots.main.innerHTML, new RegExp(elsewhere.hash, "u"));
+  assert.equal(message(), "");
 });

@@ -17,7 +17,7 @@ import { createClaimWatch } from "./claim-watch.js";
 import { showCopied } from "./copied.js";
 import { config } from "./config.js";
 import { contractGroups, explorerAddressUrl, serversLine } from "./contracts.js";
-import { followAfterDiscovery, mergeTransfer, mergeTransfers, partyKey } from "./discovery.js";
+import { followAfterDiscovery, mergeTransfer, mergeTransfers, partyKey, shownFor } from "./discovery.js";
 import { createDiscoveryRuns } from "./discovery-runs.js";
 import { depositRequest } from "./dusk-deposit.js";
 import { confirmedOnDusk } from "./dusk-node.js";
@@ -935,7 +935,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       setActivity(updateActivity(id, { lastCheckedAt: Date.now(), trackingError: error instanceof Error ? error.message : String(error) }));
     }
     renderChrome();
-    if (state.page.page === "transfers" || (state.page.page === "transfer" && canonicalHash(entry.hash) === state.page.hash)) renderMain();
+    if (state.page.page === "transfers" || receiptOpen(entry.hash)) renderMain();
     return state.activity.find((item) => item.id === id) ?? null;
   }
   const scheduler = createScheduler({
@@ -946,7 +946,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     // seconds, so the receipt says it arrived soon after it did.
     due: (entry) => {
       const route = routeOf(entry.routeId);
-      return state.page.page === "transfer" && canonicalHash(entry.hash) === state.page.hash && Boolean(route) && arrivalDue(route, routeTime(route, cfg, timing()), entry);
+      return receiptOpen(entry.hash) && Boolean(route) && arrivalDue(route, routeTime(route, cfg, timing()), entry);
     },
   });
 
@@ -1058,6 +1058,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   // Dusk hashes go without 0x and EVM ones with it; a pasted or linked hash
   // may carry either, so they're compared without it.
   const bareHash = (hash) => canonicalHash(hash)?.replace(/^0x/u, "") ?? null;
+  /** Whether the page on screen is the receipt of the transfer `hash` names, with or without its 0x. */
+  const receiptOpen = (hash) => state.page.page === "transfer" && bareHash(state.page.hash) === bareHash(hash);
 
   function entryForHash(hash) {
     const value = bareHash(hash);
@@ -1093,7 +1095,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   // it spent: read as the receipt shows it, again as the transfer moves on,
   // and again where the chain couldn't say, while a receipt needs it.
   const migrationFees = createMigrationFees({
-    isOpen: (hash) => state.page.page === "transfer" && bareHash(state.page.hash) === bareHash(hash),
+    isOpen: receiptOpen,
     onChange: () => renderMain(),
     read: (entry, route) => services.tracking.migrationEvm(entry, route),
   });
@@ -1858,7 +1860,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
    * another can claim it for it, paying only the network fee.
    */
   async function openClaimReview(target) {
-    const from = newAttempt();
+    const from = newAttempt({ claim: true });
     const entry = target.dataset.id ? state.activity.find((item) => item.id === target.dataset.id) : null;
     const route = routeOf(entry ? entry.routeId : target.dataset.route);
     if (!route || route.mode !== "hyperlane") return;
@@ -2112,9 +2114,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     ends.moved(entryId(route.id, hash), next.id);
     setActivity(saveActivity(next.items));
     track(next.id);
-    if (state.page.page !== "transfer" || canonicalHash(hash) !== state.page.hash) return;
+    if (!receiptOpen(hash)) return;
     const now = state.activity.find((item) => item.id === next.id);
-    if (now && canonicalHash(now.hash) !== state.page.hash) globalThis.location.replace(transferHref(now.hash));
+    if (now && !receiptOpen(now.hash)) globalThis.location.replace(transferHref(now.hash));
     else renderMain();
   }
 
@@ -2230,9 +2232,13 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
    */
   let attempt = null;
 
-  /** A new try: what the page said of the last stops mattering. */
-  function newAttempt() {
-    forgetPageError();
+  /**
+   * A new try. One with a wallet makes what the page said of the last one
+   * stop mattering, as a wallet's switch does (`walletMoved`); what it said
+   * of a transfer goes with that transfer. A claim replaces whatever it said.
+   */
+  function newAttempt({ claim = false } = {}) {
+    if (claim || !state.pageError?.about) forgetPageError();
     attempt = { page: state.page };
     return attempt;
   }
@@ -2265,16 +2271,30 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
 
   /**
    * What the page says didn't go, while it stands: about a transfer held for
-   * its claim, until it isn't, or a claim of it is on its way.
+   * an account this page doesn't know, until it isn't held, a claim of it is
+   * on its way, the page knows its account (`openClaimReview`), or the page
+   * no longer shows it: its receipt, or its row on Activity's list.
    */
   function pageErrorText() {
     const about = state.pageError?.about;
     if (about) {
       const entry = state.activity.find((item) => item.id === about);
       const shown = entry && withClaimSent(entry, claimWatch.pending);
-      if (!shown || !heldInEscrow(shown, routeOf(shown.routeId)) || shown.pendingAction) state.pageError = null;
+      const account = duskAccount();
+      const known = Boolean(shown?.destination) || (Boolean(account) && shown?.recipientHash === duskRecipientHash(account));
+      const onPage = Boolean(shown) && (state.page.page === "transfer" ? receiptOpen(shown.hash) : shownFor(shown, accounts()));
+      if (!onPage || !heldInEscrow(shown, routeOf(shown.routeId)) || shown.pendingAction || known) state.pageError = null;
     }
     return state.pageError?.text ?? "";
+  }
+
+  /**
+   * A wallet connected, switched or let go: what the page said of a try with
+   * one stops mattering. What it said of a transfer goes with that transfer
+   * (`pageErrorText`), not with a wallet.
+   */
+  function walletMoved() {
+    if (!state.pageError?.about) state.pageError = null;
   }
 
   // -------------------------------------------------------------------------
@@ -2703,9 +2723,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       dusk?.subscribe((next) => {
         const previous = state.duskState.selectedProfile?.account ?? null;
         const changed = next.selectedProfile?.account !== previous;
-        // Connected, switched or let go since: what a page said of it before
-        // stops mattering. No profile before and none now is no change.
-        if ((next.selectedProfile?.account ?? null) !== previous) state.pageError = null;
+        // No profile before and none now is no change.
+        if ((next.selectedProfile?.account ?? null) !== previous) walletMoved();
         state.duskState = next;
         lookUpName(duskAccount());
         if (changed) {
@@ -2729,7 +2748,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         const changed = accountChanged || chainChanged || moved.wallet;
         state.evmState = next;
         if (accountChanged) {
-          state.pageError = null;
+          walletMoved();
           if (next.account) forgetConnectRefusal();
           // What's reviewed pays the wallet's account as it was: it's stale once that's another.
           const reviewing = reviews.current;
