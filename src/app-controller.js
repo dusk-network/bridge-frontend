@@ -785,9 +785,17 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     if (!isCardPage() || !state.form || !slot("main").querySelector(".bcard [data-region]")) return;
     const main = slot("main");
     const vm = cardVm();
+    const active = globalThis.document?.activeElement;
     for (const [name, markup] of Object.entries(cardRegions(vm))) {
       const region = main.querySelector(`[data-region="${name}"]`);
-      if (region && region.innerHTML !== markup) region.innerHTML = markup;
+      if (!region || region.innerHTML === markup) continue;
+      // A control drawn again keeps keyboard focus, as `renderMain` keeps it.
+      // A region can differ with nothing new in it: its icons as the browser
+      // writes them back, or an amount fit.js drew smaller.
+      const selector = region.contains(active) ? controlSelector(active) : "";
+      region.innerHTML = markup;
+      const again = selector ? region.querySelectorAll(selector) : [];
+      if (again.length === 1) again[0].focus();
     }
     main.querySelector('[data-region="receive"]')?.classList.toggle("empty", !vm.receive);
     const error = main.querySelector("#amount-error");
