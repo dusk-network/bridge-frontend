@@ -308,19 +308,22 @@ function withdrawalSteps(entry, cfg, { account, locale, name, now, time: usual, 
 const afterTheProof = (time) => (time?.maturity ? `${durationWords(time.maturity)} after the proof at the soonest` : "");
 
 /**
- * Whether a failed transfer failed on its own chain, so that nothing moved. One
- * the bridge didn't pay out left the account all the same. Records kept before
- * this was noted say so in their note.
+ * Whether a failed transfer failed on its own chain, so that nothing moved:
+ * only on evidence of it, never from what a record lacks. Tracking marks it
+ * (`sourceFailed`); records kept before it did carry the note it wrote then.
+ * One the bridge didn't pay out left the account all the same.
  */
 export const failedAtSource = (entry) =>
   entry.sourceFailed === true || /^The (transfer failed on|migration failed on|withdrawal failed on|Dusk transaction failed)/u.test(entry.note ?? "");
 
 /**
  * Where a transfer's own transaction is: done once it's in a block on its
- * chain (`sourceAt`), or failed, where it failed there even in a block.
+ * chain (`sourceAt`). A failed one is failed there only where it failed on
+ * its chain (`failedAtSource`); otherwise it went through, block time or not,
+ * and what failed came after.
  */
 function sentState(entry) {
-  if (entry.status === "failed") return entry.sourceAt && !failedAtSource(entry) ? "done" : "failed";
+  if (entry.status === "failed") return failedAtSource(entry) ? "failed" : "done";
   return entry.sourceAt || entry.status === "completed" ? "done" : "now";
 }
 

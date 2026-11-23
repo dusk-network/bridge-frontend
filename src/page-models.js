@@ -14,6 +14,7 @@ import { gasCoin, networkName, routeTitle, routeUnits, tokenName } from "./names
 import { transferHref } from "./permalink.js";
 import { buildQuote, routeDuskFees, withdrawalStepMax } from "./quote.js";
 import { routeTime, routeTimeText } from "./route-times.js";
+import { NO_PAYOUT } from "./tracking.js";
 import { explorerTxUrl, failedAtSource, heldForAnother, heldInEscrow, html, short, transferSubline, transferView } from "./transfer-view.js";
 import { copyButton, wholeNumbers } from "./views.js";
 import { revokeLines } from "./wallet-lines.js";
@@ -504,14 +505,21 @@ function ledgerRows(entry, { approvalSpentBy = false, cfg, evm = null, from, loc
   // it cost is the approval this browser sent for it, until a migration
   // spends that approval and counts it (`approvalSpentBy`), once.
   const cancelled = migration && Boolean(entry.replaced) && known(entry.approvalFeeWei) && approvalSpentBy === false;
+  // Went through and then failed: nothing was paid out, whatever older
+  // records kept, and the bridge took no more than it was sent, nothing
+  // where the transfer never reached it.
+  const unpaid = status === "failed" && !failedAtSource(entry) && known(entry.amountLux);
+  const serviceFee = unpaid && route.mode === "service-transfer" && cfg.service ? BigInt(cfg.service.feeLux) : null;
+  const sentLux = known(entry.amountLux) ? BigInt(entry.amountLux) : 0n;
   const ledger = transferLedger({
+    bridgeFee: serviceFee === null ? undefined : entry.note === NO_PAYOUT.elsewhere ? 0n : serviceFee < sentLux ? serviceFee : sentLux,
     evm: migration && !entry.replaced ? evm : null,
     failed: status === "failed" && failedAtSource(entry),
     gasWei: cancelled ? BigInt(entry.approvalFeeWei) : undefined,
     locale,
     network: cfg.network,
     networkFee: [entry.feeLux, entry.proveFeeLux, entry.claimFeeLux],
-    received: entry.receivedLux,
+    received: unpaid ? "0" : entry.receivedLux,
     route: route.id,
     sent: entry.amountLux,
   });
@@ -529,7 +537,8 @@ function ledgerRows(entry, { approvalSpentBy = false, cfg, evm = null, from, loc
   const fee = (line) => (["bridgeFee", "gas", "networkFee"].includes(line.key) ? { fee: paid(line.amount, line.coin, line.decimals) } : {});
   // Which transactions a migration's fee counts.
   const counts = !migration ? "" : cancelled ? "approval" : gasCounts(ledger.gas, evm);
-  return ledger.lines.map((line) =>
+  // A bridge fee of nothing isn't one.
+  return ledger.lines.filter((line) => !(line.key === "bridgeFee" && line.amount === 0n)).map((line) =>
     line.key === "gas"
       ? { ...fee(line), detail: counts, exact: `${line.exact} ${line.coin}`, label: label(line), value: `${line.text} ${line.coin}` }
       : { ...fee(line), label: label(line), value: `${line.exact} ${line.coin}` },
