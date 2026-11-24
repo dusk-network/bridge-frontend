@@ -40,8 +40,8 @@ export async function inboundCharge(reads, token, { amount, recipientHash }) {
  * `reviewedFee`, the ETH charge the review showed, refuses one that changed
  * since. Its hash is the one the wallet sent: until it's mined, the wallet
  * can speed it up under another (`minedAs`). `beforeSend` runs right before
- * the wallet is asked, after every wait on the way, and sends nothing where
- * it throws.
+ * the wallet is asked, after every wait on the way, with the account that
+ * will sign, and sends nothing where it throws.
  */
 export async function sendToDusk(cfg, { account, amount, beforeSend = () => {}, reads, recipient, reviewedFee = null, token }) {
   if (!carries(amount)) throw new Error(NOT_CARRIED);
@@ -63,6 +63,6 @@ export async function sendToDusk(cfg, { account, amount, beforeSend = () => {}, 
     value,
   });
   const from = await reviewedEvmAccount(account);
-  beforeSend();
+  beforeSend({ account: from });
   return walletClient.writeContract({ ...request, account: from });
 }

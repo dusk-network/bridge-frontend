@@ -1286,43 +1286,38 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   }
 
   /**
-   * The wallet ("dusk" or "evm") whose switch means the open review would no
-   * longer send what it shows, or "" while it would: it would be signed by
-   * another account, or pay another one than the connected account it took
-   * for its recipient (and a withdrawal, at another call's gas and caps). One
-   * marked so while it was confirmed stays so.
+   * Why the open review would no longer send what it shows, or "" while it
+   * would, from what it would send now: the account that would sign it
+   * (`signer`, as the wallet has just named it, else the connected one),
+   * and the recipient it would pay. A signer, or a connected account it
+   * pays, switched: that switch. A typed .dusk name that no longer points
+   * where it did: why, as the card says it.
    */
-  function reviewOutdated(review) {
+  function reviewOutdated(review, signer = signerNow(review?.signer?.wallet)) {
     if (!review) return "";
-    if (!sameSigner(review, signerNow(review.signer?.wallet))) return review.signer.wallet;
+    if (!sameSigner(review, signer)) return REVIEW_CLOSED[review.signer.wallet];
     const route = routeOf(review.routeId);
-    if (review.kind === "send" && route && state.form && destinationFor(route) !== review.paysTo) return route.to.kind === "dusk" ? "dusk" : "evm";
-    return review.movedBy ?? "";
+    if (review.kind !== "send" || !route || !state.form || destinationFor(route) === review.paysTo) return "";
+    const typed = typedRecipient(route);
+    if (typed?.name) return typed.error ?? `${typed.name} points to another account now, so the review closed. Review it again.`;
+    return REVIEW_CLOSED[route.to.kind === "dusk" ? "dusk" : "evm"];
   }
 
   /**
    * A wallet switched: an open review that would now send something else
-   * closes, and the page says why. One being confirmed is marked so: nothing
-   * more of it goes to a wallet (`unchanged`), and it closes once the step
-   * under way ends.
+   * closes, and the page says why. One being confirmed is left to its send,
+   * which asks the same right before the wallet is asked (`unchanged`), and
+   * to the end of its step.
    */
-  function closeOutdatedReview(wallet) {
+  function closeOutdatedReview() {
     const review = reviews.current;
-    if (state.sheet !== "review" || !reviewOutdated(review)) return;
-    if (review.busy) {
-      review.stale = true;
-      review.movedBy = wallet;
-      review.error = SIGNER_MOVED[wallet];
-      renderSheet();
-      return;
-    }
-    closeReview(wallet);
+    const why = state.sheet === "review" && !review?.busy ? reviewOutdated(review) : "";
+    if (why) closeReview(why);
   }
 
-  /** Closes the open review, as a switch in `wallet` changed what it would send, saying so. */
-  function closeReview(wallet) {
+  /** Closes the open review, as it would send something else now, saying why. */
+  function closeReview(why) {
     closeByPerson();
-    const why = REVIEW_CLOSED[wallet];
     if (state.form && isCardPage()) state.form.error = why;
     else {
       state.pageError = { about: null, text: why };
@@ -1332,20 +1327,20 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
 
   /**
    * What a review's request runs right before it goes to the wallet, after
-   * every wait on the way since Confirm: once a switch means the review would
-   * send something else than it shows, nothing goes.
+   * every wait on the way since Confirm, with the account that will sign it:
+   * where the review would send something else now, nothing goes.
    */
-  const unchanged = (review) => () => {
-    const moved = reviewOutdated(review);
-    if (moved) throw Object.assign(new Error(REVIEW_CLOSED[moved]), { code: "REVIEW_OUTDATED", wallet: moved });
+  const unchanged = (review) => ({ account } = {}) => {
+    const why = reviewOutdated(review, account);
+    if (why) throw Object.assign(new Error(why), { code: "REVIEW_OUTDATED" });
   };
 
-  /** A step that ended without sending, once a switch outdated its review meanwhile: the review closes, saying why. */
+  /** A step that ended without sending, where its review would send something else now: it closes, saying why. */
   function endIfOutdated(review) {
-    const moved = reviewOutdated(review);
-    if (!moved || reviews.current !== review) return false;
+    const why = reviews.current === review ? reviewOutdated(review) : "";
+    if (!why) return false;
     review.busy = false;
-    closeReview(moved);
+    closeReview(why);
     renderMain();
     return true;
   }
@@ -2203,10 +2198,10 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       if (reviews.current === review) {
         // Stopped before the wallet was asked, or refused as it went, once a
         // switch changed what it would send: it closes, saying why.
-        const moved = error?.code === "REVIEW_OUTDATED" ? error.wallet : reviewOutdated(review);
-        if (moved) {
+        const why = error?.code === "REVIEW_OUTDATED" ? error.message : reviewOutdated(review);
+        if (why) {
           review.busy = false;
-          closeReview(moved);
+          closeReview(why);
           renderMain();
           return;
         }
@@ -2856,7 +2851,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         state.duskState = next;
         lookUpName(duskAccount());
         if (changed) {
-          closeOutdatedReview("dusk");
+          closeOutdatedReview();
           formReads.reset(["duskBalance", "escrow", "hyperlane"]);
           discoveryRuns.expire();
           for (const entry of state.activity)
@@ -2878,7 +2873,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         if (accountChanged) {
           walletMoved();
           if (next.account) forgetConnectRefusal();
-          closeOutdatedReview("evm");
+          closeOutdatedReview();
           formReads.reset(["migration", "l2", "hyperlane"]);
           discoveryRuns.expire();
           void discover();

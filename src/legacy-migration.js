@@ -36,7 +36,8 @@ export const APPROVAL_CANCELLED = "You cancelled the approval in your wallet. No
  * for, or sends nothing. Its hash is the transaction mined: the one the wallet
  * sent, or the one it sent in its place when sped up. `beforeSend`, as each
  * request here takes it, runs right before the wallet is asked, after every
- * wait on the way, and sends nothing where it throws.
+ * wait on the way, with the account that will sign, and sends nothing where
+ * it throws.
  */
 export async function approveMigration(network, amount, { account: reviewed, beforeSend = () => {} } = {}) {
   await ensureEvmChain(network);
@@ -50,7 +51,7 @@ export async function approveMigration(network, amount, { account: reviewed, bef
     args: [network.migrationContract, value],
   });
   const account = await reviewedEvmAccount(reviewed);
-  beforeSend();
+  beforeSend({ account });
   const hash = await walletClient.writeContract({ ...request, account });
   const { receipt, replaced } = await mined(publicClient, hash);
   if (replaced === "cancelled") throw new Error(APPROVAL_CANCELLED);
@@ -109,7 +110,7 @@ export async function revokeMigration(network, { account: reviewed, beforeSend =
     args: [network.migrationContract, 0n],
   });
   const account = await reviewedEvmAccount(reviewed);
-  beforeSend();
+  beforeSend({ account });
   const hash = await walletClient.writeContract({ ...request, account });
   const { receipt, replaced } = await mined(publicClient, hash);
   // As of the block it was mined in, whatever the wallet sent in its place.
@@ -147,6 +148,6 @@ export async function submitMigration(network, amount, duskAccount, { account: r
     args: [value, recipient],
   });
   const account = await reviewedEvmAccount(reviewed);
-  beforeSend();
+  beforeSend({ account });
   return walletClient.writeContract({ ...request, account });
 }

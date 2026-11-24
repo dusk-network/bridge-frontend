@@ -264,20 +264,20 @@ const sends = {
   "transfer back to Dusk": (account, more) => sendToDusk(config, { account, amount: 1n, reads: sepoliaSide(1n), recipient: DUSK, token: config.hyperlane.tokens[1], ...more }),
 };
 
-test("each send runs its last check after every wait on the way, right before the wallet is asked, and sends nothing where it throws", async () => {
+test("each send runs its last check after every wait on the way, right before the wallet is asked, with the account that signs, and sends nothing where it throws", async () => {
   const stop = Object.assign(new Error("It would send something else now."), { code: "REVIEW_OUTDATED" });
   // An EVM wallet: after the chain switch and the account it's sent from.
   for (const [name, send] of Object.entries(sends)) {
     const asked = [];
     const wallet = await useEvmWallet({ onAccounts: () => asked.push("accounts"), onSwitch: () => asked.push("switch") });
-    const check = () => {
-      asked.push("check");
+    const check = ({ account }) => {
+      asked.push(`check ${account.toLowerCase()}`);
       throw stop;
     };
     await assert.rejects(send(REVIEWED, { beforeSend: check }), stop, name);
     assert.deepEqual(wallet.sent, [], name);
-    assert.equal(asked.at(-1), "check", name);
-    assert.ok(asked.indexOf("switch") >= 0 && asked.indexOf("switch") < asked.indexOf("check"), `${name}: ${asked}`);
+    assert.equal(asked.at(-1), `check ${REVIEWED.toLowerCase()}`, name);
+    assert.ok(asked.indexOf("switch") >= 0 && asked.indexOf("switch") < asked.length - 1, `${name}: ${asked}`);
   }
   delete globalThis.ethereum;
   // Dusk Wallet: after its session's check.
@@ -286,12 +286,12 @@ test("each send runs its last check after every wait on the way, right before th
     const wallet = { ...fakeWallet(), refresh: async () => asked.push("refresh") };
     useDuskWallet(wallet);
     const request = send === sendDuskTransfer ? await serviceTransferRequest({ amountLux: 2_000_000_000n, destination: TYPED }) : await depositRequest({ amountLux: 2_000_000_000n, node, recipient: TYPED });
-    const check = () => {
-      asked.push("check");
+    const check = ({ account }) => {
+      asked.push(`check ${account}`);
       throw stop;
     };
     await assert.rejects(send(request, { account: wallet.state.selectedProfile.account, beforeSend: check }), stop, send.name);
-    assert.deepEqual([wallet.sent, asked], [[], ["refresh", "check"]], send.name);
+    assert.deepEqual([wallet.sent, asked], [[], ["refresh", `check ${wallet.state.selectedProfile.account}`]], send.name);
   }
 });
 

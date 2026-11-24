@@ -98,7 +98,8 @@ export const DUSK_ACCOUNT_CHANGED = "Dusk Wallet switched to another account, so
  * the account connected when sending starts. A connect can come back with
  * another profile: the request is only sent as the reviewed account.
  * `beforeSend` runs right before the request goes to the wallet, after every
- * wait on the way, and sends nothing where it throws.
+ * wait on the way, with the account that will sign it, and sends nothing
+ * where it throws.
  */
 async function withDuskSession(operation, reviewed, beforeSend = () => {}) {
   const { account } = await ensureDuskConnected();
@@ -106,7 +107,7 @@ async function withDuskSession(operation, reviewed, beforeSend = () => {}) {
   const moved = () => Object.assign(new Error(DUSK_ACCOUNT_CHANGED), { code: "DUSK_ACCOUNT_CHANGED" });
   if (account !== expected) throw moved();
   try {
-    beforeSend();
+    beforeSend({ account });
     return await operation();
   } catch (error) {
     if (!isRecoverableDuskSessionError(error)) throw error;
@@ -114,7 +115,7 @@ async function withDuskSession(operation, reviewed, beforeSend = () => {}) {
     await current.refresh().catch(() => {});
     await current.connect({ reason: "bridge_transaction" });
     if ((await ensureDuskConnected()).account !== expected) throw moved();
-    beforeSend();
+    beforeSend({ account: expected });
     return operation();
   }
 }

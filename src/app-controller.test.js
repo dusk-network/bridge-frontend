@@ -616,6 +616,11 @@ const withdrawalReads = ({ exact = { gas: 138_439n, gasLimit: 166_127n, operator
   }),
 });
 
+/** Until the open review's request is built, where that's after it opens: Confirm takes no press before. */
+async function prepared(slots) {
+  for (let turn = 0; turn < 20 && /data-action="confirm" disabled/u.test(slots.sheet.innerHTML); turn += 1) await settle();
+}
+
 /** Typed into the card's amount, as its input event comes. */
 async function typeAmount(root, value) {
   for (const listener of root.listeners.input) listener({ target: { classList: { contains: () => false }, name: "amount", value } });
@@ -705,6 +710,7 @@ test("a confirmed send that waits on a wallet stops before the wallet is asked o
     await settle();
     await root.press({ action: "review" });
     assert.equal(slots.sheet.open, true);
+    await prepared(slots);
     t.mock.timers.tick(600);
     dusk.hold();
     await root.press({ action: "confirm" });
@@ -755,4 +761,73 @@ test("an amount Max filled in settles as a withdrawal's base fee moves up and do
   const [tx] = evm.sent;
   const most = BigInt(tx.value) + BigInt(tx.gas) * BigInt(tx.maxFeePerGas) + exact.operatorFeeWei + 2n * 379n + 10n ** 9n;
   assert.ok(most <= 312n * 10n ** 18n, String(most));
+});
+
+test("a send goes ahead when Dusk Wallet's session drops and comes back on the same profile, and not on another", async (t) => {
+  for (const [back, sends] of [[ACCOUNT, 1], [OTHER, 0]]) {
+    // A deposit from profile A, to the connected EVM account; as it's sent, the session reports no profile, then one.
+    evmWallet(t);
+    const dusk = duskSender(ACCOUNT);
+    const { root, slots } = await openPage(t, "#/move/dusk-to-dusk-evm", [], { clock: true, wallet: dusk.wallet });
+    await typeAmount(root, "1");
+    t.mock.timers.tick(500);
+    await settle();
+    await root.press({ action: "review" });
+    await prepared(slots);
+    t.mock.timers.tick(600);
+    dusk.hold();
+    await root.press({ action: "confirm" });
+    dusk.switchTo(null);
+    await settle();
+    dusk.switchTo(back);
+    await settle();
+    dusk.release();
+    await settle();
+    assert.equal(dusk.sent.length, sends, back);
+    assert.equal(slots.sheet.open, false, back);
+    t.mock.timers.reset();
+  }
+});
+
+test("a typed .dusk name whose lookup fails while a withdrawal is confirmed stops it, saying the lookup failed", async (t) => {
+  const evm = evmWallet(t);
+  // alice.dusk points to OTHER; looked up again a minute on, that lookup fails, while the EVM wallet checks its chain.
+  let fail = null;
+  const names = {
+    primaryName: async () => "",
+    resolveName: () =>
+      fail === null
+        ? Promise.resolve({ account: OTHER, address: OTHER })
+        : new Promise((_resolve, reject) => {
+            fail = () => reject(new Error("offline"));
+          }),
+  };
+  const { root, slots } = await openPage(t, "#/move/dusk-evm-to-dusk", [], { clock: true, network: { ...services, evmReads: withdrawalReads(), names } });
+  const recipient = async (value) => {
+    for (const listener of root.listeners.input) listener({ target: { classList: { contains: () => false }, name: "recipient", value } });
+    await settle();
+  };
+  await recipient("alice.dusk");
+  t.mock.timers.tick(300);
+  await settle();
+  await typeAmount(root, "1");
+  t.mock.timers.tick(61_000);
+  await settle();
+  fail = () => {};
+  await recipient("alice.dusk");
+  t.mock.timers.tick(500);
+  await settle();
+  await root.press({ action: "review" });
+  assert.equal(slots.sheet.open, true);
+  assert.match(slots.sheet.innerHTML, new RegExp(OTHER, "u"));
+  t.mock.timers.tick(600);
+  evm.hold("wallet_switchEthereumChain");
+  await root.press({ action: "confirm" });
+  fail();
+  await settle();
+  evm.release();
+  await settle();
+  assert.deepEqual(evm.sent, []);
+  assert.equal(slots.sheet.open, false);
+  assert.match(partsOf(slots.main.innerHTML, "message").map(textOf).join(" "), /\bCouldn't look up alice\.dusk\b/u);
 });
