@@ -521,7 +521,7 @@ test("a withdrawal whose fee couldn't be worked out for its call isn't reviewed,
  * to send; `switchTo` moves it to another account, and `hold` keeps a method
  * waiting until `release`.
  */
-function evmWallet(t, account = EVM) {
+function evmWallet(t, account = EVM, { chainId = "0x2e9" } = {}) {
   const sent = [];
   const told = {};
   const held = [];
@@ -535,7 +535,7 @@ function evmWallet(t, account = EVM) {
     request: async ({ method, params }) => {
       if (method === holding) await new Promise((resolve) => held.push(resolve));
       if (method === "eth_accounts" || method === "eth_requestAccounts") return [now];
-      if (method === "eth_chainId") return "0x2e9";
+      if (method === "eth_chainId") return chainId;
       if (method === "eth_sendTransaction") {
         sent.push(params[0]);
         return `0x${"ab".repeat(32)}`;
@@ -860,4 +860,58 @@ test("Max worked out on one EVM account is worked out afresh for another, with i
     evm.sent.map(({ value }) => value),
     [`0x${(((312n * 10n ** 18n - fee) / 10n ** 9n) * 10n ** 9n).toString(16)}`],
   );
+});
+
+test("an approval mined after its review closed leaves the card knowing it's approved: the review again asks for the migration alone", async (t) => {
+  // Sepolia's RPC, as this page reads it: a call goes through, and the approval's receipt waits until the test lets it come.
+  let mined = false;
+  let receipt = () => {};
+  const original = globalThis.fetch;
+  globalThis.fetch = async (_url, { body }) => {
+    const answer = async ({ id, method, params }) => {
+      if (method === "eth_getTransactionReceipt") {
+        if (!mined) await new Promise((resolve) => (receipt = resolve));
+        return { id, jsonrpc: "2.0", result: { blockHash: `0x${"cd".repeat(32)}`, blockNumber: "0x10", logs: [], status: "0x1", transactionHash: params[0], transactionIndex: "0x0" } };
+      }
+      const result = { eth_blockNumber: "0x10", eth_call: `0x${"1".padStart(64, "0")}`, eth_chainId: "0xaa36a7" }[method] ?? null;
+      return { id, jsonrpc: "2.0", result };
+    };
+    const calls = JSON.parse(body);
+    return Response.json(Array.isArray(calls) ? await Promise.all(calls.map(answer)) : await answer(calls));
+  };
+  t.after(() => {
+    globalThis.fetch = original;
+  });
+  const evm = evmWallet(t, EVM, { chainId: "0xaa36a7" });
+  const dusk = duskSender(ACCOUNT);
+  // ERC20 DUSK on Sepolia, nothing approved until the approval is mined.
+  const evmReads = {
+    migrationGas: async () => ({ approve: 46_000n, migrate: 70_000n }),
+    migrationState: async () => ({ allowanceWei: mined ? 10n ** 18n : 0n, balanceWei: 10n ** 21n, gasCoinWei: 10n ** 17n, gasPriceWei: 1_000_000_000n }),
+  };
+  const { root, slots } = await openPage(t, "#/move/ethereum-to-dusk", [], { clock: true, network: { ...services, evmReads }, wallet: dusk.wallet });
+  await typeAmount(root, "1");
+  t.mock.timers.tick(500);
+  await settle();
+  await root.press({ action: "review" });
+  t.mock.timers.tick(600);
+  await root.press({ action: "confirm" });
+  // Sent, and waiting to be mined, as Dusk Wallet switches the profile it pays; the card reads again meanwhile.
+  assert.equal(evm.sent.length, 1);
+  dusk.switchTo(OTHER);
+  await settle();
+  mined = true;
+  receipt();
+  for (let turn = 0; turn < 5; turn += 1) {
+    t.mock.timers.tick(4_000);
+    await settle();
+  }
+  assert.equal(slots.sheet.open, false);
+  // Reviewed again and confirmed: what goes to the wallet is the migration, not another approval.
+  await root.press({ action: "review" });
+  t.mock.timers.tick(600);
+  await root.press({ action: "confirm" });
+  await settle();
+  assert.equal(evm.sent.length, 2);
+  assert.notEqual(evm.sent[1].data.slice(0, 10), evm.sent[0].data.slice(0, 10));
 });

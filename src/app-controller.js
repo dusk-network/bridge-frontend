@@ -1924,10 +1924,11 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         if (error?.code === "FAILED_ON_DUSK") review.approvalHash = null;
         throw error;
       }
+      // The allowance changed: read again whether the review goes on or closes.
+      void loadReads();
       if (endIfOutdated(review)) return;
       Object.assign(review, { busy: false, busyLabel: "", current: review.current + 1, request: null, sub: "Approved" });
       announce("Approved. Step 2 is ready.");
-      void loadReads();
       renderSheet();
       reviews.stepShown();
       await prepareHyperlaneStep(review, route);
@@ -2154,13 +2155,17 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         if (step.title.startsWith("Approve")) {
           // Kept with the transfer: its gas is part of what it cost.
           review.approvalHash = await approveMigration(network, amount, { account: review.signer?.account, beforeSend: unchanged(review) });
-          if (endIfOutdated(review)) return;
+          // The allowance changed: read it again, with the migration's gas, whether the review goes on or closes.
+          const reread = loadReads();
+          if (endIfOutdated(review)) {
+            await reread;
+            return;
+          }
           review.current += 1;
           review.sub = "Approved";
           review.busy = false;
           announce("Approval confirmed. Step 2 is ready.");
-          // The allowance changed: read it again, with the migration's gas.
-          await loadReads();
+          await reread;
           renderSheet();
           reviews.stepShown();
           return;
