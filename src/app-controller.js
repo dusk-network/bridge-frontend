@@ -916,19 +916,28 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     loadGasSoon();
   }
 
+  /** What Max was worked out for on a withdrawal: the EVM account sending it, and its balance. */
+  const maxBasis = () => ({ account: evmAccount().toLowerCase(), balance: formReads.reads.l2?.balanceWei ?? null });
+
   /**
    * An amount Max filled in keeps fitting while a withdrawal's fee is worked
-   * out for it: once its call's own estimate gives a fee it no longer fits,
-   * Max is worked out again, keeping that whole fee aside. Only ever down, so
-   * it settles however the base fee moves from one read to the next; a lower
-   * fee leaves it a little under Max. Not while a review shows the amount.
+   * out for it. For the account and balance it was worked out for, once its
+   * call's own estimate gives a fee it no longer fits, Max is worked out
+   * again, keeping that whole fee aside: only ever down, so it settles
+   * however the base fee moves from one read to the next, and a lower fee
+   * leaves it a little under Max. For another account or balance, Max is
+   * worked out afresh. Not while a review shows the amount.
    */
   function followMax() {
     const route = formRoute();
-    if (!state.form?.fromMax || route?.mode !== "duskevm-withdrawal" || state.sheet === "review") return;
+    const from = state.form?.fromMax;
+    if (!from || route?.mode !== "duskevm-withdrawal" || state.sheet === "review") return;
     const quote = quoteFor(route);
-    if (quote.evmGasLimit === null || !(quote.maxLux > 0n) || quote.amountLux <= quote.maxLux) return;
-    fillAmount(amountForInput(quote.maxLux));
+    if (quote.evmGasLimit === null || !(quote.maxLux > 0n)) return;
+    const now = maxBasis();
+    const afresh = now.account !== from.account || now.balance !== from.balance;
+    state.form.fromMax = now;
+    if (afresh ? quote.amountLux !== quote.maxLux : quote.amountLux > quote.maxLux) fillAmount(amountForInput(quote.maxLux));
   }
 
   function refreshFormAndHeader() {
@@ -2673,7 +2682,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         const quote = quoteFor(route);
         if (quote.maxLux === null || quote.maxLux === undefined) return;
         fillAmount(route.mode === "hyperlane" ? amountForUnits(quote.maxLux, route.amountDecimals) : amountForInput(quote.maxLux));
-        state.form.fromMax = true;
+        state.form.fromMax = maxBasis();
         refreshForm();
       },
       "notify-off": () => {

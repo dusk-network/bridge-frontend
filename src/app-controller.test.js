@@ -831,3 +831,33 @@ test("a typed .dusk name whose lookup fails while a withdrawal is confirmed stop
   assert.equal(slots.sheet.open, false);
   assert.match(partsOf(slots.main.innerHTML, "message").map(textOf).join(" "), /\bCouldn't look up alice\.dusk\b/u);
 });
+
+test("Max worked out on one EVM account is worked out afresh for another, with its own balance", async (t) => {
+  const evm = evmWallet(t);
+  // 1 DUSK on the account Max was pressed on, 312 DUSK on the one switched to.
+  const reads = withdrawalReads();
+  const OTHER_EVM = "0x00000000000000000000000000000000000000e1";
+  const evmReads = {
+    withdrawalState: async (owner, gas) => ({ ...(await reads.withdrawalState(owner, gas)), balanceWei: owner.toLowerCase() === OTHER_EVM ? 312n * 10n ** 18n : 10n ** 18n }),
+  };
+  const { root, slots } = await openPage(t, "#/move/dusk-evm-to-dusk", [], { clock: true, network: { ...services, evmReads } });
+  await settle();
+  await root.press({ action: "max" });
+  t.mock.timers.tick(500);
+  await settle();
+  evm.switchTo(OTHER_EVM);
+  await settle();
+  t.mock.timers.tick(500);
+  await settle();
+  await root.press({ action: "review" });
+  assert.equal(slots.sheet.open, true);
+  t.mock.timers.tick(600);
+  await root.press({ action: "confirm" });
+  await settle();
+  // The most the account switched to can send, its whole fee kept aside.
+  const fee = duskEvmFeeMax({ baseFeeWei: 10_000_000_000n, l1FeeMaxWei: 379n, limit: 166_127n, operatorFeeWei: 24_071_158_578_548_300n, tipWei: 1_000_000n });
+  assert.deepEqual(
+    evm.sent.map(({ value }) => value),
+    [`0x${(((312n * 10n ** 18n - fee) / 10n ** 9n) * 10n ** 9n).toString(16)}`],
+  );
+});
