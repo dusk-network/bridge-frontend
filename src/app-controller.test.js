@@ -71,7 +71,15 @@ function pageRoot() {
     querySelectorAll: () => [],
     removeAttribute() {},
     setAttribute() {},
-    style: { removeProperty() {}, setProperty() {} },
+    style: {
+      props: {},
+      removeProperty(name) {
+        delete this.props[name];
+      },
+      setProperty(name, value) {
+        this.props[name] = value;
+      },
+    },
     textContent: "",
     addEventListener(type, listener) {
       (this.listeners[type] ??= []).push(listener);
@@ -150,9 +158,10 @@ async function openPage(t, hash, activity, { account = ACCOUNT, clock = false, n
   t.mock.timers.enable({ apis: clock ? ["setTimeout", "setInterval", "Date"] : ["setTimeout", "setInterval"] });
   const items = new Map([[`dusk-bridge:activity:v2:${cfg.profile}`, JSON.stringify(activity)]]);
   const events = {};
+  const told = {};
   globalThis.localStorage = { getItem: (key) => items.get(key) ?? null, removeItem: (key) => items.delete(key), setItem: (key, value) => items.set(key, String(value)) };
   globalThis.location = { hash, origin: "https://bridge.example", pathname: "/" };
-  globalThis.document = { activeElement: null, addEventListener() {}, hasFocus: () => true, visibilityState: "visible" };
+  globalThis.document = { activeElement: null, addEventListener: (type, listener) => (told[type] ??= []).push(listener), hasFocus: () => true, visibilityState: "visible" };
   globalThis.addEventListener = (type, listener) => (events[type] ??= []).push(listener);
   t.after(() => {
     delete globalThis.localStorage;
@@ -167,6 +176,11 @@ async function openPage(t, hash, activity, { account = ACCOUNT, clock = false, n
     globalThis.location.hash = next;
     for (const listener of events.hashchange ?? []) listener();
     await settle();
+  };
+  /** Focus moved to `element` (or left, with none), as the document says it. */
+  page.focus = (element = null) => {
+    globalThis.document.activeElement = element;
+    for (const listener of told[element ? "focusin" : "focusout"] ?? []) listener({ target: element });
   };
   return page;
 }
@@ -914,4 +928,91 @@ test("an approval mined after its review closed leaves the card knowing it's app
   await settle();
   assert.equal(evm.sent.length, 2);
   assert.notEqual(evm.sent[1].data.slice(0, 10), evm.sent[0].data.slice(0, 10));
+});
+
+test("the card's button rides above a phone's keyboard only while a field takes typing and the page isn't zoomed", async (t) => {
+  // A phone 640 px tall, whose visual viewport the test moves.
+  const viewport = {
+    addEventListener(type, listener) {
+      (this.listeners[type] ??= []).push(listener);
+    },
+    height: 640,
+    listeners: {},
+    offsetTop: 0,
+    scale: 1,
+  };
+  globalThis.visualViewport = viewport;
+  globalThis.innerHeight = 640;
+  t.after(() => {
+    delete globalThis.visualViewport;
+    delete globalThis.innerHeight;
+  });
+  const { focus, root } = await openPage(t, "#/move/dusk-to-dusk-evm", []);
+  const inset = () => root.style.props["--keyboard-inset"];
+  const moves = (patch) => {
+    Object.assign(viewport, patch);
+    for (const listener of viewport.listeners.resize ?? []) listener();
+  };
+  // An in-app browser's own bars take 190 px with nothing focused, and change as the page scrolls: no keyboard.
+  moves({ height: 450 });
+  assert.equal(inset(), "0px");
+  moves({ height: 420 });
+  assert.equal(inset(), "0px");
+  // The amount takes typing: the keyboard's height.
+  focus({ tagName: "INPUT", type: "text" });
+  assert.equal(inset(), "220px");
+  // Pinch-zoomed, the same shorter viewport is the zoom.
+  moves({ scale: 2 });
+  assert.equal(inset(), "0px");
+  moves({ scale: 1 });
+  // A text area, a select or editable content takes typing; a button, checkbox, radio or submit doesn't.
+  for (const [element, takes] of [
+    [{ tagName: "TEXTAREA" }, true],
+    [{ tagName: "SELECT" }, true],
+    [{ isContentEditable: true, tagName: "DIV" }, true],
+    [{ tagName: "BUTTON" }, false],
+    [{ tagName: "INPUT", type: "checkbox" }, false],
+    [{ tagName: "INPUT", type: "radio" }, false],
+    [{ tagName: "INPUT", type: "submit" }, false],
+    [{ tagName: "INPUT", type: "button" }, false],
+  ]) {
+    focus(element);
+    assert.equal(inset(), takes ? "220px" : "0px", JSON.stringify(element));
+  }
+  // Focus leaves: no keyboard.
+  focus();
+  assert.equal(inset(), "0px");
+});
+
+test("focus moving moves the card's button on the next frame, so a tap on it while typing lands where it was", async (t) => {
+  // A phone whose keyboard takes 190 px of a 640 px screen; frames run when the test says.
+  const viewport = { addEventListener() {}, height: 450, offsetTop: 0, scale: 1 };
+  const frames = [];
+  globalThis.visualViewport = viewport;
+  globalThis.innerHeight = 640;
+  globalThis.requestAnimationFrame = (callback) => frames.push(callback);
+  globalThis.cancelAnimationFrame = (id) => {
+    frames[id - 1] = () => {};
+  };
+  t.after(() => {
+    delete globalThis.visualViewport;
+    delete globalThis.innerHeight;
+    delete globalThis.requestAnimationFrame;
+    delete globalThis.cancelAnimationFrame;
+  });
+  const { focus, root } = await openPage(t, "#/move/dusk-to-dusk-evm", []);
+  const inset = () => root.style.props["--keyboard-inset"];
+  const nextFrame = () => {
+    for (const callback of frames.splice(0)) callback();
+  };
+  // Typing: the button rides above the keyboard from the next frame.
+  focus({ tagName: "INPUT", type: "text" });
+  assert.equal(inset(), "0px");
+  nextFrame();
+  assert.equal(inset(), "190px");
+  // A tap on it takes focus from the field: until the next frame, it stays where the tap landed.
+  focus({ tagName: "BUTTON" });
+  assert.equal(inset(), "190px");
+  nextFrame();
+  assert.equal(inset(), "0px");
 });

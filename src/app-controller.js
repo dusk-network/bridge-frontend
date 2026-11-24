@@ -105,6 +105,17 @@ const isPhone = () =>
       /Android|iPhone|iPad|Mobile/u.test(globalThis.navigator?.userAgent ?? ""),
   );
 
+/**
+ * A field a phone's keyboard opens for, as the web wallet counts them: an
+ * input other than a checkbox, radio or button, a text area, a select, or
+ * editable content.
+ */
+function takesTyping(element) {
+  const tag = String(element?.tagName ?? "").toLowerCase();
+  if (tag === "input") return !["button", "checkbox", "radio", "submit"].includes(String(element.type ?? "").toLowerCase());
+  return tag === "textarea" || tag === "select" || element?.isContentEditable === true;
+}
+
 export function createAppController(root, { cfg = config, routes = bridgeRoutes, services = createServices() } = {}) {
   const names = networkNames(cfg);
   const tasks = bridgeTasks(cfg, routes);
@@ -2823,12 +2834,26 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
 
   // On a phone, the card's button stays above the keyboard: the height the
   // keyboard covers, from the visual viewport, as the web wallet keeps it.
+  // That's a keyboard only while a field that takes typing has focus and the
+  // page isn't zoomed: an in-app browser's own bars and sheets, and a pinch
+  // zoom, shrink the visual viewport too, and change it as the page scrolls.
+  // Focus moving counts on the next frame: a tap on the button while typing
+  // takes focus from the field as it lands, and the button doesn't move from
+  // under it before the tap ends.
   const viewport = globalThis.visualViewport;
   if (viewport) {
+    const keyboard = () => takesTyping(globalThis.document?.activeElement) && Math.abs((viewport.scale ?? 1) - 1) <= 0.01;
     const keyboardInset = () =>
-      root.style.setProperty("--keyboard-inset", `${Math.max(0, Math.round(globalThis.innerHeight - viewport.height - viewport.offsetTop))}px`);
+      root.style.setProperty("--keyboard-inset", `${keyboard() ? Math.max(0, Math.round(globalThis.innerHeight - viewport.height - viewport.offsetTop)) : 0}px`);
+    let frame = 0;
+    const nextFrame = () => {
+      globalThis.cancelAnimationFrame?.(frame);
+      frame = globalThis.requestAnimationFrame ? globalThis.requestAnimationFrame(keyboardInset) : (keyboardInset(), 0);
+    };
     viewport.addEventListener("resize", keyboardInset);
     viewport.addEventListener("scroll", keyboardInset);
+    globalThis.document?.addEventListener("focusin", nextFrame);
+    globalThis.document?.addEventListener("focusout", nextFrame);
     keyboardInset();
   }
 
