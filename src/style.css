@@ -726,8 +726,8 @@ form.group .l1 { display: block; color: var(--text); font-size: 14px; font-weigh
   .swap { padding: 12px 12px 0; gap: 10px; }
   .bcard { max-width: none; border-radius: 22px; }
   .amt-row input, .amt-row .out { font-size: 32px; }
-  /* The button stays over the keyboard, in the card's own colour. */
-  .bcard .cta { position: sticky; bottom: var(--keyboard-inset, 0px); z-index: 3; margin: 4px -8px -10px; padding: 10px 8px calc(10px + env(safe-area-inset-bottom)); border-radius: 0 0 22px 22px; background: var(--surface); }
+  /* The button stays over the keyboard, in the card's own colour; a hairline on top, so what scrolls under it reads as under a bar. */
+  .bcard .cta { position: sticky; bottom: var(--keyboard-inset, 0px); z-index: 3; margin: 4px -8px -10px; padding: 10px 8px calc(10px + env(safe-area-inset-bottom)); border-radius: 0 0 22px 22px; background: var(--surface); box-shadow: 0 -1px 0 var(--hair); }
   .netmenu { position: fixed; left: 0; right: 0; top: auto; bottom: 0; z-index: 41; width: auto; padding: 8px 8px calc(14px + env(safe-area-inset-bottom)); border-radius: 22px 22px 0 0; }
   .netscrim { display: block; position: fixed; inset: 0; z-index: 40; background: var(--scrim); }
   .act .trs .tr { grid-template-columns: 76px minmax(0, 1fr); padding: 12px 4px; }
