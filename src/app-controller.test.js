@@ -716,3 +716,43 @@ test("a confirmed send that waits on a wallet stops before the wallet is asked o
     assert.equal(slots.sheet.open, false);
   }
 });
+
+test("an amount Max filled in settles as a withdrawal's base fee moves up and down from read to read, and fits the fee it's reviewed at", async (t) => {
+  const evm = evmWallet(t);
+  // Each read of the call a base fee apart from the last, up and down, at a limit above the one Max started from.
+  const exact = { gas: 141_667n, gasLimit: 170_000n, operatorFeeWei: 24_585_714_293_000_000n };
+  let reads = 0;
+  const evmReads = {
+    withdrawalState: async (_owner, { amountWei, duskAccount } = {}) => {
+      const call = Boolean(amountWei && duskAccount);
+      if (call) reads += 1;
+      return {
+        balanceWei: 312n * 10n ** 18n,
+        baseFeeWei: call && reads % 2 === 1 ? 10_000_100_000n : 10_000_000_000n,
+        estimated: call,
+        gasPriceWei: 10_001_000_000n,
+        l1FeeMaxWei: 379n,
+        tipWei: 1_000_000n,
+        ...(call ? exact : { gas: 140_000n, gasLimit: 168_000n, operatorFeeWei: 24_320_000_007_200_000n }),
+      };
+    },
+  };
+  const { root, slots } = await openPage(t, "#/move/dusk-evm-to-dusk", [], { clock: true, network: { ...services, evmReads } });
+  await settle();
+  await root.press({ action: "max" });
+  for (let round = 0; round < 6; round += 1) {
+    t.mock.timers.tick(500);
+    await settle();
+  }
+  // Settled within a few reads, and reviewable.
+  assert.ok(reads <= 3, `${reads} reads`);
+  await root.press({ action: "review" });
+  assert.equal(slots.sheet.open, true);
+  t.mock.timers.tick(600);
+  await root.press({ action: "confirm" });
+  await settle();
+  // What's sent fits the chain's balance check at the caps it was reviewed at.
+  const [tx] = evm.sent;
+  const most = BigInt(tx.value) + BigInt(tx.gas) * BigInt(tx.maxFeePerGas) + exact.operatorFeeWei + 2n * 379n + 10n ** 9n;
+  assert.ok(most <= 312n * 10n ** 18n, String(most));
+});

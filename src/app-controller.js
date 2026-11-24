@@ -917,16 +917,17 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   }
 
   /**
-   * An amount Max filled in stays Max while a withdrawal's fee is worked out
-   * for it: once its call's own estimate gives another fee than the one Max
-   * was worked out with, Max is worked out again, keeping that whole fee
-   * aside. Not while a review shows the amount.
+   * An amount Max filled in keeps fitting while a withdrawal's fee is worked
+   * out for it: once its call's own estimate gives a fee it no longer fits,
+   * Max is worked out again, keeping that whole fee aside. Only ever down, so
+   * it settles however the base fee moves from one read to the next; a lower
+   * fee leaves it a little under Max. Not while a review shows the amount.
    */
   function followMax() {
     const route = formRoute();
     if (!state.form?.fromMax || route?.mode !== "duskevm-withdrawal" || state.sheet === "review") return;
     const quote = quoteFor(route);
-    if (quote.evmGasLimit === null || !(quote.maxLux > 0n) || quote.maxLux === quote.amountLux) return;
+    if (quote.evmGasLimit === null || !(quote.maxLux > 0n) || quote.amountLux <= quote.maxLux) return;
     fillAmount(amountForInput(quote.maxLux));
   }
 
