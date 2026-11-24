@@ -712,6 +712,17 @@ test("a payout that failed says what happened: nothing received, and no bridge f
   ]);
 });
 
+test("a transfer that failed on its own chain lists what that cost, as its chain charged it, and nothing else", () => {
+  const url = "https://bridge.example.org/#/transfer/c";
+  const rows = (route, entry) => receiptModel({ hash: "9e".repeat(32), id: "c", routeId: route.id, sourceFailed: true, status: "failed", ...entry }, { cfg: testnet, route, url }).details.filter((row) => !row.html).map((row) => [row.label, row.value, row.exact]);
+  // A withdrawal that reverted on DuskEVM: its gas, L1 data and operator fees, in DUSK on DuskEVM.
+  assert.deepEqual(rows(T["duskevm-withdrawal"], { amountLux: "1008000000000", feeWei: "21777138444933323", note: "The withdrawal failed on DuskEVM. Your DUSK is still there.", stage: "failed" }), [
+    ["Network fee", "0.0218 DUSK", "0.021777138444933323 DUSK"],
+  ]);
+  // A transfer to Ethereum whose Dusk transaction errored: its gas at its price.
+  assert.deepEqual(rows(T["service-transfer"], { amountLux: "2053082083", feeLux: "6000", note: "The transfer failed on Dusk." }), [["Network fee", "0.000006 DUSK", undefined]]);
+});
+
 test("a receipt says the transfer's amounts as every Dusk app does, to the Lux", () => {
   const url = "https://bridge.example.org/#/transfer/m";
   const rows = (entry, route) => receiptModel({ hash: `0x${"0d".repeat(32)}`, id: "m", routeId: route.id, ...entry }, { cfg: testnet, route, url }).details.filter((row) => !row.html).map((row) => [row.label, row.value]);

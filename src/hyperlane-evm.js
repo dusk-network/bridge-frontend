@@ -39,9 +39,11 @@ export async function inboundCharge(reads, token, { amount, recipientHash }) {
  * the chain, else the RPC), which the call is simulated through.
  * `reviewedFee`, the ETH charge the review showed, refuses one that changed
  * since. Its hash is the one the wallet sent: until it's mined, the wallet
- * can speed it up under another (`minedAs`).
+ * can speed it up under another (`minedAs`). `beforeSend` runs right before
+ * the wallet is asked, after every wait on the way, with the account that
+ * will sign, and sends nothing where it throws.
  */
-export async function sendToDusk(cfg, { account, amount, reads, recipient, reviewedFee = null, token }) {
+export async function sendToDusk(cfg, { account, amount, beforeSend = () => {}, reads, recipient, reviewedFee = null, token }) {
   if (!carries(amount)) throw new Error(NOT_CARRIED);
   const hash = duskRecipientHash(recipient);
   if (!hash) throw new Error("That isn't a Dusk account.");
@@ -60,5 +62,7 @@ export async function sendToDusk(cfg, { account, amount, reads, recipient, revie
     functionName: "transferRemote",
     value,
   });
-  return walletClient.writeContract({ ...request, account: await reviewedEvmAccount(account) });
+  const from = await reviewedEvmAccount(account);
+  beforeSend({ account: from });
+  return walletClient.writeContract({ ...request, account: from });
 }

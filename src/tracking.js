@@ -48,6 +48,31 @@ const UNSURE_DEPOSIT =
 // "late": its window closed without a credit, as when the sender's history can't be read.
 const LATE_DEPOSIT = `No credit came within ${CREDIT_WINDOW_MS / 60_000} minutes of this deposit, and a later one can't be told apart from another transfer's. Check the address on the DuskEVM explorer.`;
 
+/**
+ * What a DuskEVM transaction cost its sender, from its receipt, as the chain
+ * charges it: its gas at the price paid, the L1 data fee, and the operator
+ * fee. Jovian receipts, which carry `daFootprintGasScalar`, charge that as
+ * gas × scalar × 100 + constant; Isthmus ones as gas × scalar / 10^6 +
+ * constant; older ones none. In wei; undefined where the receipt doesn't say.
+ */
+function duskEvmFeePaid(receipt) {
+  if (!receipt?.gasUsed || !receipt.effectiveGasPrice) return undefined;
+  const says = (key) => receipt[key] !== undefined && receipt[key] !== null;
+  const gas = BigInt(receipt.gasUsed);
+  const scalar = says("operatorFeeScalar") ? BigInt(receipt.operatorFeeScalar) : 0n;
+  const operator = says("operatorFeeScalar") ? (says("daFootprintGasScalar") ? gas * scalar * 100n : (gas * scalar) / 1_000_000n) + (says("operatorFeeConstant") ? BigInt(receipt.operatorFeeConstant) : 0n) : 0n;
+  return (gas * BigInt(receipt.effectiveGasPrice) + (says("l1Fee") ? BigInt(receipt.l1Fee) : 0n) + operator).toString();
+}
+
+/** A receipt's status where its transaction reverted, as the withdrawals package reads one. */
+const REVERTED = new Set(["0x0", 0, "reverted"]);
+
+/** What a reverted DuskEVM transaction paid, as an entry keeps it: none where its receipt doesn't say. */
+function spentOn(receipt) {
+  const feeWei = duskEvmFeePaid(receipt);
+  return feeWei === undefined ? {} : { feeWei };
+}
+
 /** What a Dusk transaction paid: the gas it spent at its price, in Lux. */
 export function duskFeePaid(tx) {
   try {
@@ -248,7 +273,8 @@ export function createTracking(deps) {
     const tx = await node.transaction(entry.hash);
     if (!tx) return pending(`Waiting for ${name("dusk")}.`);
     const sourceAt = tx.blockTimestamp ? Number(tx.blockTimestamp) * 1_000 : null;
-    if (tx.error) return failed(NO_PAYOUT.failed, { sourceAt, sourceFailed: true });
+    // Failed on Dusk all the same paid its gas.
+    if (tx.error) return failed(NO_PAYOUT.failed, { feeLux: duskFeePaid(tx), sourceAt, sourceFailed: true });
     const value = BigInt(tx.json?.value ?? 0);
     const recipient = memoText(tx.memo);
     const patch = {
@@ -429,11 +455,17 @@ export function createTracking(deps) {
       const refused = error instanceof WithdrawalError ? error.code : null;
       if (refused === "not-found") return pending(`Waiting for ${name("dusk-evm")}.`, { stage: "submitted" });
       // Reverted: nothing left the account.
-      if (refused === "failed")
+      // Reverted, it paid DuskEVM what the receipt that showed it says: that
+      // one, as the check read it. Another read could find none, or another
+      // block's after a reorg.
+      if (refused === "failed") {
+        const receipt = deps.withdrawals.receiptOf?.(entry.hash);
         return failed("The withdrawal failed on DuskEVM. Your DUSK is still there.", {
+          ...(entry.feeWei === undefined && REVERTED.has(receipt?.status) ? spentOn(receipt) : {}),
           sourceFailed: true,
           stage: "failed",
         });
+      }
       // Another message to Dusk, or no message at all: nothing to prove or claim.
       if (refused === "not-a-withdrawal") return failed(NOT_A_DUSK_WITHDRAWAL, { stage: "failed" });
       throw error;

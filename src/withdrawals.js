@@ -86,9 +86,18 @@ export function inWords(error) {
  * the withdrawal's recipient's.
  */
 export function createPageWithdrawals(cfg, { connected = () => null, drivers, fetch, maxBatch, node, rpc }) {
+  // The receipt each check read, as DuskEVM gave it: what a withdrawal that
+  // reverted paid is taken from the one that showed it (`receiptOf`).
+  const receipts = new Map();
   const withdrawals = createWithdrawals({
     drivers,
-    duskEvm: { request: ({ method, params }) => rpc("dusk-evm", method, params) },
+    duskEvm: {
+      request: async ({ method, params }) => {
+        const result = await rpc("dusk-evm", method, params);
+        if (method === "eth_getTransactionReceipt" && result) receipts.set(String(params?.[0]).toLowerCase(), result);
+        return result;
+      },
+    },
     fetch,
     gameSearchDepth: cfg.duskEvm.bridgeGameSearchDepth,
     latestBlock: () => node.latestBlock(),
@@ -97,6 +106,9 @@ export function createPageWithdrawals(cfg, { connected = () => null, drivers, fe
     nodeUrl: cfg.dusk.nodeUrl,
   });
   return Object.freeze({
+    /** The receipt the last check of `hash` read, as it was: null where none was. */
+    receiptOf: (hash) => receipts.get(String(hash).toLowerCase()) ?? null,
+
     status: (hash, { proofGame = null, submitter = null } = {}) =>
       withdrawals.status(hash, { proofGame, submitter: submitter ?? connected() }),
 

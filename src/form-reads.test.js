@@ -5,6 +5,7 @@ import { createFormReads } from "./form-reads.js";
 
 const DEPOSIT = { mode: "duskevm-deposit", signer: "dusk" };
 const MIGRATION = { from: { id: "ethereum" }, mode: "migration", signer: "evm" };
+const WITHDRAWAL = { mode: "duskevm-withdrawal", signer: "evm" };
 
 /** Answers each call when the test says so. */
 function deferred() {
@@ -209,6 +210,42 @@ test("an allowance that couldn't be read says so, not that nothing is approved",
   const reads = createFormReads({ services: { hyperlane, node: { accountBalance: async () => 0n, gasPrice: async () => 1n } } });
   await reads.load({ dusk: "account", gas: {}, route: { hyperlane: { native: false, symbol: "EURd" }, mode: "hyperlane", signer: "dusk" } });
   assert.deepEqual(reads.reads.hyperlane, { allowance: null, allowanceFailed: true, fee: 1n, tokenBalance: 5n });
+});
+
+test("a withdrawal's state lands with the call it was read for, and one that couldn't be read says only that", async () => {
+  let down = false;
+  const withdrawalState = async () => {
+    if (down) throw new Error("node down");
+    return { balanceWei: 5n, estimated: true, gas: 138_439n };
+  };
+  const reads = createFormReads({ services: { evmReads: { withdrawalState }, node: { gasPrice: async () => 1n } } });
+  const gas = { amountWei: 10n ** 18n, duskAccount: "dusk-account" };
+  await reads.load({ evm: "0xowner", gas, route: WITHDRAWAL });
+  assert.deepEqual(reads.reads.l2, { balanceWei: 5n, call: { ...gas, owner: "0xowner" }, estimated: true, gas: 138_439n });
+  // Not read, as the amount's estimate or on a load: no estimate for that call, and nothing else.
+  down = true;
+  const more = { amountWei: 2n * 10n ** 18n, duskAccount: "dusk-account" };
+  await reads.estimate({ evm: "0xowner", gas: more, route: WITHDRAWAL });
+  assert.deepEqual(reads.reads.l2, { call: { ...more, owner: "0xowner" }, estimated: false });
+  await reads.load({ evm: "0xowner", gas: {}, route: WITHDRAWAL });
+  assert.deepEqual(reads.reads.l2, { call: null, estimated: false });
+});
+
+test("a withdrawal's read that answers after a newer one started, for an amount since typed, doesn't put back its older state", async () => {
+  const withdrawalState = deferred();
+  const reads = createFormReads({ services: { evmReads: { withdrawalState }, node: { gasPrice: async () => 1n } } });
+  // Read with the amount blank, answering late; meanwhile the amount typed, and its call's estimate.
+  const loading = reads.load({ evm: "0xowner", gas: {}, route: WITHDRAWAL });
+  await settle();
+  const typed = { amountWei: 10n ** 18n, duskAccount: "dusk-account" };
+  const estimating = reads.estimate({ evm: "0xowner", gas: typed, route: WITHDRAWAL });
+  await settle();
+  const [blank, exact] = withdrawalState.pending;
+  exact.resolve({ estimated: true, gas: 138_439n });
+  await estimating;
+  blank.resolve({ estimated: false, gas: 140_000n });
+  await loading;
+  assert.deepEqual(reads.reads.l2, { call: { ...typed, owner: "0xowner" }, estimated: true, gas: 138_439n });
 });
 
 test("an older load whose gas price answers late starts no reads of its own, and never leaves the card without the newer load's", async () => {

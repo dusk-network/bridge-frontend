@@ -160,8 +160,10 @@ export function flipRoute(routes, route) {
  * chain a route sends from, where the wallet that signs it is on another,
  * and `switching` says the wallet was asked. `waiting` is a route's approval
  * not read yet ("reading") or that couldn't be read ("failed"): the steps
- * aren't known. Review names what's sent (`amountText`, "1 DUSK"); a
- * locked Dusk Wallet (`duskLocked`) is unlocked, as the header says.
+ * aren't known; or a withdrawal's fee not worked out yet for its call
+ * ("fee"), or that couldn't be ("fee-failed"). Review names what's sent
+ * (`amountText`, "1 DUSK"); a locked Dusk Wallet (`duskLocked`) is
+ * unlocked, as the header says.
  */
 export function primaryButton({
   amountLux = null,
@@ -204,5 +206,8 @@ export function primaryButton({
     return connectsRecipient
       ? { action: "connect-evm", enabled: true, label: "Connect EVM wallet" }
       : { action: null, enabled: false, label: "Add a recipient" };
+  // A withdrawal's fee, worked out for its amount and recipient: nothing to review until it is.
+  if (waiting === "fee") return { action: null, enabled: false, label: "Working out the network fee…" };
+  if (waiting === "fee-failed") return { action: "read-again", enabled: true, label: "Couldn't work out the network fee. Try again" };
   return { action: "review", enabled: true, label: amountText ? `Review ${amountText}` : "Review" };
 }

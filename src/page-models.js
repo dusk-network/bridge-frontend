@@ -8,7 +8,7 @@ import { aboutTime, durationWords, formatEvmAddress } from "@dusk-network/networ
 
 import { explorerAddressUrl } from "./contracts.js";
 import { groupTransfers, shownFor } from "./discovery.js";
-import { aboutFee, formatDateTime, formatDusk, formatLux, formatMaxFee, formatShort, formatToken, formatTokenShort, formatUnitsGrouped } from "./format.js";
+import { aboutFee, formatDateTime, formatDusk, formatLux, formatMaxFee, formatMaxFeeWei, formatShort, formatToken, formatTokenShort, formatUnitsGrouped } from "./format.js";
 import { HYPERLANE_GAS } from "./hyperlane.js";
 import { gasCoin, networkName, routeTitle, routeUnits, tokenName } from "./names.js";
 import { transferHref } from "./permalink.js";
@@ -54,7 +54,7 @@ export function routeLines(route, cfg, { gasPrice = 1n, quote = null, timing } =
           : "Send, then prove and claim on Dusk";
     const onDusk = `${formatMaxFee(2n * withdrawalStepMax({ gasPrice }))} DUSK on Dusk`;
     const l2 = quote?.evmFeeWei ?? null;
-    return [steps, l2 === null ? `Then up to ${onDusk}` : `Network fee ${aboutFee(l2, 18, "DUSK")}, then up to ${onDusk}`];
+    return [steps, l2 === null ? `Then up to ${onDusk}` : `Network fee up to ${formatMaxFeeWei(l2)} DUSK, then up to ${onDusk}`];
   }
   const coin = gasCoin(cfg, route.from.id);
   let cost;
@@ -515,7 +515,8 @@ function ledgerRows(entry, { approvalSpentBy = false, cfg, evm = null, from, loc
     bridgeFee: serviceFee === null ? undefined : entry.note === NO_PAYOUT.elsewhere ? 0n : serviceFee < sentLux ? serviceFee : sentLux,
     evm: migration && !entry.replaced ? evm : null,
     failed: status === "failed" && failedAtSource(entry),
-    gasWei: cancelled ? BigInt(entry.approvalFeeWei) : undefined,
+    // A withdrawal that reverted paid DuskEVM's fees (`feeWei`), on DuskEVM.
+    gasWei: cancelled ? BigInt(entry.approvalFeeWei) : route.mode === "duskevm-withdrawal" && known(entry.feeWei) ? BigInt(entry.feeWei) : undefined,
     locale,
     network: cfg.network,
     networkFee: [entry.feeLux, entry.proveFeeLux, entry.claimFeeLux],

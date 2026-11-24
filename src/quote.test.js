@@ -5,7 +5,8 @@ import test from "node:test";
 import { buildRoutes } from "./bridge-routes.js";
 import { loadConfig } from "./config.js";
 import { amountForInput, formatDuskPlain, formatLux } from "./format.js";
-import { buildQuote, parseAmount, routeDuskFees } from "./quote.js";
+import { duskEvmGasLimit } from "./evm-reads.js";
+import { buildQuote, duskEvmFeeMax, parseAmount, routeDuskFees } from "./quote.js";
 
 globalThis.__DUSK_BRIDGE_CONFIG__ = {
   VITE_BRIDGE_PROFILE: "testnet",
@@ -95,16 +96,80 @@ test("a migration prices both wallet steps in ETH until the allowance covers it"
   assert.equal(buildQuote(routes.migration, "", { ...ctx, balance: 10n ** 18n + 1n }).maxLux, DUSK);
 });
 
+// DuskEVM testnet as a withdrawal of 138,439 gas finds it (Nov): a 10 gwei base fee and a 0.001 gwei
+// tip; the limit the wallet is asked for, a fifth over; and its GasPriceOracle's getL1FeeUpperBound
+// for 516 bytes and getOperatorFee at that limit.
+const DUSK_EVM_GAS = {
+  baseFeeWei: 10_000_000_000n,
+  // Estimated for the very call quoted.
+  exact: true,
+  l1FeeMaxWei: 379n,
+  limit: 166_127n,
+  operatorFeeWei: 24_071_158_578_548_300n,
+  priceWei: 10_001_000_000n,
+  tipWei: 1_000_000n,
+  withdraw: 138_439n,
+};
+
+test("a withdrawal's DuskEVM fee is the most the chain can charge it, at the gas limit and price caps the wallet is asked for", () => {
+  // The limit at twice the base fee and the tip, the operator fee, and the L1 data fee twice and a Lux.
+  const most = 166_127n * 20_001_000_000n + 24_071_158_578_548_300n + 2n * 379n + 10n ** 9n;
+  assert.equal(most, 27_393_865_705_549_058n);
+  assert.equal(duskEvmFeeMax(DUSK_EVM_GAS), most);
+  assert.equal(duskEvmGasLimit(138_439n), 166_127n);
+  const quote = buildQuote(routes["duskevm-withdrawal"], "200", { balance: 312n * 10n ** 18n, cfg, evmGas: DUSK_EVM_GAS, gasPrice: 1n });
+  // What the wallet is asked for: that limit, and the price caps the fee is the most of.
+  assert.deepEqual([quote.evmFeeWei, quote.evmGasLimit, quote.evmMaxFeePerGas, quote.evmMaxPriorityFeePerGas, quote.waiting ?? ""], [most, 166_127n, 20_001_000_000n, 1_000_000n, ""]);
+  // Max keeps that aside, no more and no less.
+  assert.equal(quote.maxLux, (312n * 10n ** 18n - most) / 10n ** 9n);
+  // At least what testnet's two withdrawals of that gas were charged, and not much more.
+  for (const charged of [21_777_138_444_933_323n, 21_780_567_040_362_924n]) {
+    assert.ok(most >= charged);
+    assert.ok(most * 10n < charged * 13n);
+  }
+  // Without any one part, there's no figure, and no Max.
+  for (const part of Object.keys(DUSK_EVM_GAS).filter((key) => !["exact", "priceWei", "withdraw"].includes(key)))
+    assert.equal(buildQuote(routes["duskevm-withdrawal"], "200", { balance: 312n * 10n ** 18n, cfg, evmGas: { ...DUSK_EVM_GAS, [part]: null }, gasPrice: 1n }).maxLux, null, part);
+});
+
+test("Max on DuskEVM leaves what the chain checks the balance for, even when the L1 data fee moves before it's mined", () => {
+  // A balance of exactly 1 DUSK and the fee: Max sends 1 DUSK and keeps the fee.
+  const fee = duskEvmFeeMax(DUSK_EVM_GAS);
+  const balance = 10n ** 18n + fee;
+  const quote = buildQuote(routes["duskevm-withdrawal"], "", { balance, cfg, evmGas: DUSK_EVM_GAS, gasPrice: 1n });
+  assert.equal(quote.maxLux, 10n ** 9n);
+  // What OP Stack checks before it's taken: the limit at the price cap, the operator fee at the limit,
+  // and the L1 data fee then, here four times the 223 wei a withdrawal paid. Left over: just under a Lux.
+  const left = balance - quote.maxLux * 10n ** 9n;
+  const checked = (l1) => 166_127n * 20_001_000_000n + 24_071_158_578_548_300n + l1;
+  assert.ok(left >= checked(892n));
+  assert.equal(left - checked(892n), 999_999_866n);
+  // Without the Lux, that check came 134 wei short.
+  assert.equal(left - 10n ** 9n - checked(892n), -134n);
+});
+
+test("a withdrawal isn't reviewed until its fee is worked out for the call that goes out, and says when it couldn't be", () => {
+  const quote = (evmGas, amount = "200") => buildQuote(routes["duskevm-withdrawal"], amount, { balance: 312n * 10n ** 18n, cfg, evmGas, gasPrice: 1n });
+  // Read for another amount or account, or with the gas a withdrawal usually needs: shown, with Max, but nothing the wallet is asked for.
+  const other = quote({ ...DUSK_EVM_GAS, exact: false });
+  assert.deepEqual([other.evmFeeWei, other.evmGasLimit, other.evmMaxFeePerGas, other.waiting], [duskEvmFeeMax(DUSK_EVM_GAS), null, null, "fee"]);
+  assert.ok(other.maxLux > 0n);
+  // Its estimate failed, or a part of its fee didn't come back with it: said, to try again.
+  assert.equal(quote({ ...DUSK_EVM_GAS, exact: false, failed: true }).waiting, "fee-failed");
+  for (const part of ["baseFeeWei", "l1FeeMaxWei", "operatorFeeWei", "tipWei"]) assert.equal(quote({ ...DUSK_EVM_GAS, [part]: null }).waiting, "fee-failed", part);
+  // No amount yet: nothing waits.
+  assert.equal(quote({ ...DUSK_EVM_GAS, exact: false }, "").waiting ?? "", "");
+});
+
 test("a withdrawal quotes its DuskEVM step and the two Dusk steps after it", () => {
   const quote = buildQuote(routes["duskevm-withdrawal"], "200", {
     balance: 312n * 10n ** 18n,
     cfg,
-    // DuskEVM testnet: 138,439 gas at 10.001 gwei for a withdrawal (Oct).
-    evmGas: { priceWei: 10_001_000_000n, withdraw: 138_439n },
+    evmGas: DUSK_EVM_GAS,
     gasPrice: 1n,
   });
   assert.deepEqual(rows(quote), {
-    fee: "~0.0014 DUSK",
+    fee: "up to 0.0274 DUSK",
     "fee-dusk": "up to 0.051 DUSK each",
     receive: "200 DUSK on Dusk",
     send: "200 DUSK on DuskEVM",
@@ -307,5 +372,5 @@ test("each quote gives its fees as one figure, for the review to show, with thei
   assert.equal(fees("sepolia-to-dusk", "1", { balance: DUSK, evm }).value, "~0.00055 ETH");
   assert.equal(fees("sepolia-to-dusk", "1", { balance: DUSK, evm: { ...evm, gas: null } }).value, "~0.0005 ETH and the network fee");
   // A withdrawal: DuskEVM's now, then the most the proof and the claim cost on Dusk.
-  assert.equal(fees("duskevm-withdrawal", "200", { balance: 312n * 10n ** 18n, evmGas: { priceWei: 10_001_000_000n, withdraw: 138_439n } }).value, "~0.0014 DUSK, then up to 0.102 DUSK on Dusk");
+  assert.equal(fees("duskevm-withdrawal", "200", { balance: 312n * 10n ** 18n, evmGas: DUSK_EVM_GAS }).value, "up to 0.0274 DUSK, then up to 0.102 DUSK on Dusk");
 });

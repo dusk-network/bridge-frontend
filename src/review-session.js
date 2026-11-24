@@ -15,6 +15,12 @@ export const SIGNER_MOVED = Object.freeze({
   evm: "Your EVM wallet switched to another account since this review opened. Close it and review again.",
 });
 
+/** Why an open review closed: a wallet switched account, so what it would send isn't what it showed. */
+export const REVIEW_CLOSED = Object.freeze({
+  dusk: "Dusk Wallet switched to another account, so the review closed. Review it again.",
+  evm: "Your EVM wallet switched to another account, so the review closed. Review it again.",
+});
+
 /** Whether `account` is the one `review` was opened for (`review.signer`). */
 export function sameSigner(review, account) {
   const signer = review?.signer;

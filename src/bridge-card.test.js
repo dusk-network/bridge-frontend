@@ -104,6 +104,12 @@ test("the button opens the review only once nothing is missing, and does what's 
   // A route's approval not read yet: nothing to review until it is, or a way to read it again.
   assert.deepEqual(pressed({ waiting: "reading" }), [null, false]);
   assert.deepEqual(pressed({ waiting: "failed" }), ["read-again", true]);
+  // A withdrawal's fee not worked out for its call yet: nothing to review until it is, or a way to work it out again.
+  assert.deepEqual(pressed({ waiting: "fee" }), [null, false]);
+  assert.deepEqual(pressed({ waiting: "fee-failed" }), ["read-again", true]);
+  // It's worked out for a recipient: one missing, wrong or being looked up comes first.
+  for (const patch of [{ destination: "" }, { destination: "", destinationError: "That isn't a Dusk account" }, { destination: "", looking: "alice.dusk" }, { connectsRecipient: true, destination: "" }])
+    assert.deepEqual(primaryButton({ ...ready, ...patch, waiting: "fee" }), primaryButton({ ...ready, ...patch }));
   // No wallet to pay and none typed: the way to one, where a narrow page has no header button.
   assert.deepEqual(pressed({ connectsRecipient: true, destination: "" }), ["connect-evm", true]);
   assert.deepEqual(pressed({}), ["review", true]);
