@@ -983,3 +983,36 @@ test("the card's button rides above a phone's keyboard only while a field takes 
   focus();
   assert.equal(inset(), "0px");
 });
+
+test("focus moving moves the card's button on the next frame, so a tap on it while typing lands where it was", async (t) => {
+  // A phone whose keyboard takes 190 px of a 640 px screen; frames run when the test says.
+  const viewport = { addEventListener() {}, height: 450, offsetTop: 0, scale: 1 };
+  const frames = [];
+  globalThis.visualViewport = viewport;
+  globalThis.innerHeight = 640;
+  globalThis.requestAnimationFrame = (callback) => frames.push(callback);
+  globalThis.cancelAnimationFrame = (id) => {
+    frames[id - 1] = () => {};
+  };
+  t.after(() => {
+    delete globalThis.visualViewport;
+    delete globalThis.innerHeight;
+    delete globalThis.requestAnimationFrame;
+    delete globalThis.cancelAnimationFrame;
+  });
+  const { focus, root } = await openPage(t, "#/move/dusk-to-dusk-evm", []);
+  const inset = () => root.style.props["--keyboard-inset"];
+  const nextFrame = () => {
+    for (const callback of frames.splice(0)) callback();
+  };
+  // Typing: the button rides above the keyboard from the next frame.
+  focus({ tagName: "INPUT", type: "text" });
+  assert.equal(inset(), "0px");
+  nextFrame();
+  assert.equal(inset(), "190px");
+  // A tap on it takes focus from the field: until the next frame, it stays where the tap landed.
+  focus({ tagName: "BUTTON" });
+  assert.equal(inset(), "190px");
+  nextFrame();
+  assert.equal(inset(), "0px");
+});

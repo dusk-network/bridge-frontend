@@ -2837,15 +2837,23 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   // That's a keyboard only while a field that takes typing has focus and the
   // page isn't zoomed: an in-app browser's own bars and sheets, and a pinch
   // zoom, shrink the visual viewport too, and change it as the page scrolls.
+  // Focus moving counts on the next frame: a tap on the button while typing
+  // takes focus from the field as it lands, and the button doesn't move from
+  // under it before the tap ends.
   const viewport = globalThis.visualViewport;
   if (viewport) {
     const keyboard = () => takesTyping(globalThis.document?.activeElement) && Math.abs((viewport.scale ?? 1) - 1) <= 0.01;
     const keyboardInset = () =>
       root.style.setProperty("--keyboard-inset", `${keyboard() ? Math.max(0, Math.round(globalThis.innerHeight - viewport.height - viewport.offsetTop)) : 0}px`);
+    let frame = 0;
+    const nextFrame = () => {
+      globalThis.cancelAnimationFrame?.(frame);
+      frame = globalThis.requestAnimationFrame ? globalThis.requestAnimationFrame(keyboardInset) : (keyboardInset(), 0);
+    };
     viewport.addEventListener("resize", keyboardInset);
     viewport.addEventListener("scroll", keyboardInset);
-    globalThis.document?.addEventListener("focusin", keyboardInset);
-    globalThis.document?.addEventListener("focusout", keyboardInset);
+    globalThis.document?.addEventListener("focusin", nextFrame);
+    globalThis.document?.addEventListener("focusout", nextFrame);
     keyboardInset();
   }
 
