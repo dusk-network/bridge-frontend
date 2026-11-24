@@ -34,9 +34,11 @@ export const APPROVAL_CANCELLED = "You cancelled the approval in your wallet. No
 /**
  * Approves exactly `amount` from `account`, the EVM account it was reviewed
  * for, or sends nothing. Its hash is the transaction mined: the one the wallet
- * sent, or the one it sent in its place when sped up.
+ * sent, or the one it sent in its place when sped up. `beforeSend`, as each
+ * request here takes it, runs right before the wallet is asked, after every
+ * wait on the way, and sends nothing where it throws.
  */
-export async function approveMigration(network, amount, { account: reviewed } = {}) {
+export async function approveMigration(network, amount, { account: reviewed, beforeSend = () => {} } = {}) {
   await ensureEvmChain(network);
   const { publicClient, walletClient } = getEvmClients(network);
   const value = parseMigrationAmount(amount);
@@ -47,7 +49,9 @@ export async function approveMigration(network, amount, { account: reviewed } = 
     functionName: "approve",
     args: [network.migrationContract, value],
   });
-  const hash = await walletClient.writeContract({ ...request, account: await reviewedEvmAccount(reviewed) });
+  const account = await reviewedEvmAccount(reviewed);
+  beforeSend();
+  const hash = await walletClient.writeContract({ ...request, account });
   const { receipt, replaced } = await mined(publicClient, hash);
   if (replaced === "cancelled") throw new Error(APPROVAL_CANCELLED);
   if (receipt.status !== "success" || (replaced && replaced !== "repriced"))
@@ -85,7 +89,7 @@ async function mined(publicClient, hash) {
  * It's revoked only once the chain says so: a revoke the wallet cancelled or
  * replaced after sending it leaves the approval standing.
  */
-export async function revokeMigration(network, { account: reviewed } = {}) {
+export async function revokeMigration(network, { account: reviewed, beforeSend = () => {} } = {}) {
   await ensureEvmChain(network);
   const { publicClient, walletClient } = getEvmClients(network);
   const approved = (blockNumber) =>
@@ -104,7 +108,9 @@ export async function revokeMigration(network, { account: reviewed } = {}) {
     functionName: "approve",
     args: [network.migrationContract, 0n],
   });
-  const hash = await walletClient.writeContract({ ...request, account: await reviewedEvmAccount(reviewed) });
+  const account = await reviewedEvmAccount(reviewed);
+  beforeSend();
+  const hash = await walletClient.writeContract({ ...request, account });
   const { receipt, replaced } = await mined(publicClient, hash);
   // As of the block it was mined in, whatever the wallet sent in its place.
   if (receipt.status !== "success" || (await approved(receipt.blockNumber)) !== 0n)
@@ -128,7 +134,7 @@ export async function minedAs(network, hash) {
  * reviewed for, or sends nothing. Its hash is the one the wallet sent: until
  * it's mined (`minedAs`), the wallet can speed it up under another.
  */
-export async function submitMigration(network, amount, duskAccount, { account: reviewed } = {}) {
+export async function submitMigration(network, amount, duskAccount, { account: reviewed, beforeSend = () => {} } = {}) {
   await ensureEvmChain(network);
   const { publicClient, walletClient } = getEvmClients(network);
   const value = parseMigrationAmount(amount);
@@ -140,5 +146,7 @@ export async function submitMigration(network, amount, duskAccount, { account: r
     functionName: "migrate",
     args: [value, recipient],
   });
-  return walletClient.writeContract({ ...request, account: await reviewedEvmAccount(reviewed) });
+  const account = await reviewedEvmAccount(reviewed);
+  beforeSend();
+  return walletClient.writeContract({ ...request, account });
 }

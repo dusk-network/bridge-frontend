@@ -36,8 +36,10 @@ export const duskEvmNetwork = () => ({
  * it was reviewed for, or not at all, asking the wallet for `fees`: the gas
  * limit and price caps its fee was quoted at (`duskEvmFeeMax`), so that the
  * fee shown is the most it can cost. Without all three, nothing goes out.
+ * `beforeSend` runs right before the wallet is asked, after every wait on the
+ * way, and sends nothing where it throws.
  */
-export async function submitDuskEvmWithdrawal({ account: reviewed, amount, duskAccount, fees }) {
+export async function submitDuskEvmWithdrawal({ account: reviewed, amount, beforeSend = () => {}, duskAccount, fees }) {
   const { gas, maxFeePerGas, maxPriorityFeePerGas } = fees ?? {};
   if ([gas, maxFeePerGas, maxPriorityFeePerGas].some((each) => each === null || each === undefined)) throw new Error(NO_FEE);
   const amountWei = withdrawalAmountWei(amount);
@@ -48,6 +50,7 @@ export async function submitDuskEvmWithdrawal({ account: reviewed, amount, duskA
   const account = await reviewedEvmAccount(reviewed);
   // DuskEVM's bridge's bridgeETHTo, paying the Dusk account in its extra data.
   const { data, to, value } = withdrawalCall(config.network, { amountWei, sender: account, to: recipient });
+  beforeSend();
   const hash = await walletClient.sendTransaction({ account, data, gas: BigInt(gas), maxFeePerGas: BigInt(maxFeePerGas), maxPriorityFeePerGas: BigInt(maxPriorityFeePerGas), to, value });
   return { amountWei, duskAccount: recipient, hash };
 }

@@ -1285,32 +1285,41 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   }
 
   /**
-   * Whether the open review would no longer send what it shows, once a wallet
-   * switched: it would be signed by another account, or pay another one than
-   * the connected account it took for its recipient (and a withdrawal, at
-   * another call's gas and caps).
+   * The wallet ("dusk" or "evm") whose switch means the open review would no
+   * longer send what it shows, or "" while it would: it would be signed by
+   * another account, or pay another one than the connected account it took
+   * for its recipient (and a withdrawal, at another call's gas and caps). One
+   * marked so while it was confirmed stays so.
    */
   function reviewOutdated(review) {
-    if (!review) return false;
-    if (!sameSigner(review, signerNow(review.signer?.wallet))) return true;
+    if (!review) return "";
+    if (!sameSigner(review, signerNow(review.signer?.wallet))) return review.signer.wallet;
     const route = routeOf(review.routeId);
-    return review.kind === "send" && Boolean(route && state.form) && destinationFor(route) !== review.paysTo;
+    if (review.kind === "send" && route && state.form && destinationFor(route) !== review.paysTo) return route.to.kind === "dusk" ? "dusk" : "evm";
+    return review.movedBy ?? "";
   }
 
   /**
    * A wallet switched: an open review that would now send something else
-   * closes, and the page says why. One whose request is with the wallet
-   * already stays, and can't be confirmed again.
+   * closes, and the page says why. One being confirmed is marked so: nothing
+   * more of it goes to a wallet (`unchanged`), and it closes once the step
+   * under way ends.
    */
   function closeOutdatedReview(wallet) {
     const review = reviews.current;
     if (state.sheet !== "review" || !reviewOutdated(review)) return;
     if (review.busy) {
       review.stale = true;
+      review.movedBy = wallet;
       review.error = SIGNER_MOVED[wallet];
       renderSheet();
       return;
     }
+    closeReview(wallet);
+  }
+
+  /** Closes the open review, as a switch in `wallet` changed what it would send, saying so. */
+  function closeReview(wallet) {
     closeByPerson();
     const why = REVIEW_CLOSED[wallet];
     if (state.form && isCardPage()) state.form.error = why;
@@ -1318,6 +1327,26 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       state.pageError = { about: null, text: why };
       announce(why);
     }
+  }
+
+  /**
+   * What a review's request runs right before it goes to the wallet, after
+   * every wait on the way since Confirm: once a switch means the review would
+   * send something else than it shows, nothing goes.
+   */
+  const unchanged = (review) => () => {
+    const moved = reviewOutdated(review);
+    if (moved) throw Object.assign(new Error(REVIEW_CLOSED[moved]), { code: "REVIEW_OUTDATED", wallet: moved });
+  };
+
+  /** A step that ended without sending, once a switch outdated its review meanwhile: the review closes, saying why. */
+  function endIfOutdated(review) {
+    const moved = reviewOutdated(review);
+    if (!moved || reviews.current !== review) return false;
+    review.busy = false;
+    closeReview(moved);
+    renderMain();
+    return true;
   }
 
   /** Whether a review's request goes to the EVM wallet: a transfer it sends, or a revoke. */
@@ -1822,6 +1851,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         hash = await sendToDusk(cfg, {
           account: review.signer?.account,
           amount: review.amountLux,
+          beforeSend: unchanged(review),
           reads: services.hyperlane,
           recipient: review.destination,
           reviewedFee: review.deliveryFee ?? null,
@@ -1878,7 +1908,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
           reviews.stepShown();
           return;
         }
-        review.approvalHash = (await sendDuskContractCall(review.request, { account: review.signer?.account })).hash;
+        review.approvalHash = (await sendDuskContractCall(review.request, { account: review.signer?.account, beforeSend: unchanged(review) })).hash;
       }
       review.busyLabel = "Confirming…";
       renderSheet();
@@ -1889,6 +1919,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         if (error?.code === "FAILED_ON_DUSK") review.approvalHash = null;
         throw error;
       }
+      if (endIfOutdated(review)) return;
       Object.assign(review, { busy: false, busyLabel: "", current: review.current + 1, request: null, sub: "Approved" });
       announce("Approved. Step 2 is ready.");
       void loadReads();
@@ -1922,7 +1953,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       return;
     }
     const scanFrom = await headBlock(route.to.id);
-    const { hash } = await sendDuskContractCall(review.request, { account: review.signer?.account });
+    const { hash } = await sendDuskContractCall(review.request, { account: review.signer?.account, beforeSend: unchanged(review) });
     sent({
       amountLux: review.amountLux.toString(),
       approvalFeeLux: review.approvalHash ? review.approvalFeeLux : undefined,
@@ -2034,6 +2065,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     try {
       if (evmStep(review) && switchTo(route)) {
         await ensureEvmChain(signingChain(route));
+        if (endIfOutdated(review)) return;
         review.busy = false;
         reviews.stepShown();
         renderSheet();
@@ -2068,7 +2100,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
           reviews.stepShown();
           return;
         }
-        const { hash } = await sendDuskContractCall(review.request, { account: review.signer?.account });
+        const { hash } = await sendDuskContractCall(review.request, { account: review.signer?.account, beforeSend: unchanged(review) });
         review.busy = false;
         closeSheet();
         claimWatch.sent(claimKey(review.routeId, review.claimFor), hash);
@@ -2083,7 +2115,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       }
       if (route.mode === "hyperlane") return await confirmHyperlane(review, route);
       if (review.kind === "prove" || review.kind === "finalize") {
-        const { hash } = await sendDuskContractCall(review.request, { account: review.signer?.account });
+        const { hash } = await sendDuskContractCall(review.request, { account: review.signer?.account, beforeSend: unchanged(review) });
         const entry = state.activity.find((item) => item.id === review.entryId);
         // Recorded for the account the review was for, which signed it.
         setActivity(updateActivity(review.entryId, sentActionPatch(review, hash, proofSubmitterFor)));
@@ -2098,7 +2130,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       // A revoke goes out from the account it was reviewed for; with nothing
       // approved any more, the wallet is asked for nothing.
       if (review.kind === "revoke") {
-        await revokeMigration(cfg.evmNetworks[route.from.id], { account: review.signer?.account });
+        await revokeMigration(cfg.evmNetworks[route.from.id], { account: review.signer?.account, beforeSend: unchanged(review) });
         review.busy = false;
         closeSheet();
         if (state.form) state.form.approvalNote = "The approval is revoked.";
@@ -2116,7 +2148,8 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         const amount = formatDuskPlain(review.amountLux);
         if (step.title.startsWith("Approve")) {
           // Kept with the transfer: its gas is part of what it cost.
-          review.approvalHash = await approveMigration(network, amount, { account: review.signer?.account });
+          review.approvalHash = await approveMigration(network, amount, { account: review.signer?.account, beforeSend: unchanged(review) });
+          if (endIfOutdated(review)) return;
           review.current += 1;
           review.sub = "Approved";
           review.busy = false;
@@ -2127,7 +2160,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
           reviews.stepShown();
           return;
         }
-        const hash = await submitMigration(network, amount, review.destination, { account: review.signer?.account });
+        const hash = await submitMigration(network, amount, review.destination, { account: review.signer?.account, beforeSend: unchanged(review) });
         sent({
           amountLux: review.amountLux.toString(),
           approvalHash: review.approvalHash,
@@ -2141,7 +2174,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         return;
       }
       if (route.mode === "duskevm-withdrawal") {
-        const result = await submitDuskEvmWithdrawal({ account: review.signer?.account, amount: formatDuskPlain(review.amountLux), duskAccount: review.destination, fees: review.evmFees });
+        const result = await submitDuskEvmWithdrawal({ account: review.signer?.account, amount: formatDuskPlain(review.amountLux), beforeSend: unchanged(review), duskAccount: review.destination, fees: review.evmFees });
         return sent({
           amountLux: review.amountLux.toString(),
           destination: result.duskAccount,
@@ -2155,7 +2188,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       const scanFrom = await headBlock(route.mode === "duskevm-deposit" ? "dusk-evm" : route.to.id);
       // The reviewed request, as the account it was reviewed for.
       const send = route.mode === "duskevm-deposit" ? sendDuskContractCall : sendDuskTransfer;
-      const { hash } = await send(review.request, { account: review.signer?.account });
+      const { hash } = await send(review.request, { account: review.signer?.account, beforeSend: unchanged(review) });
       return sent({
         amountLux: review.amountLux.toString(),
         destination: review.destination,
@@ -2167,6 +2200,15 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       });
     } catch (error) {
       if (reviews.current === review) {
+        // Stopped before the wallet was asked, or refused as it went, once a
+        // switch changed what it would send: it closes, saying why.
+        const moved = error?.code === "REVIEW_OUTDATED" ? error.wallet : reviewOutdated(review);
+        if (moved) {
+          review.busy = false;
+          closeReview(moved);
+          renderMain();
+          return;
+        }
         // Why, on the review and in the live region: a cancel is heard as a cancel.
         notSent(review, error, { announce, wallet: evmStep(review) && route.signer === "evm" ? "evm" : "dusk" });
         if (review.entryId) {
@@ -2176,6 +2218,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         }
         renderSheet();
       }
+    } finally {
+      // A step that ended without sending, shown again as a fee changed: closed too, once a switch outdated it.
+      if (reviews.current === review && !review.busy) endIfOutdated(review);
     }
   }
 

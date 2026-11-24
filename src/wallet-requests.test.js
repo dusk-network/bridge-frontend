@@ -257,12 +257,43 @@ globalThis.fetch = async (_url, { body }) => {
 };
 
 const sends = {
-  approve: (account) => approveMigration(config.evmNetworks.ethereum, "1", { account }),
-  migrate: (account) => submitMigration(config.evmNetworks.ethereum, "1", DUSK, { account }),
-  revoke: (account) => revokeMigration(config.evmNetworks.ethereum, { account }),
-  withdraw: (account) => submitDuskEvmWithdrawal({ account, amount: "1", duskAccount: DUSK, fees: WITHDRAW_FEES }),
-  "transfer back to Dusk": (account) => sendToDusk(config, { account, amount: 1n, reads: sepoliaSide(1n), recipient: DUSK, token: config.hyperlane.tokens[1] }),
+  approve: (account, more) => approveMigration(config.evmNetworks.ethereum, "1", { account, ...more }),
+  migrate: (account, more) => submitMigration(config.evmNetworks.ethereum, "1", DUSK, { account, ...more }),
+  revoke: (account, more) => revokeMigration(config.evmNetworks.ethereum, { account, ...more }),
+  withdraw: (account, more) => submitDuskEvmWithdrawal({ account, amount: "1", duskAccount: DUSK, fees: WITHDRAW_FEES, ...more }),
+  "transfer back to Dusk": (account, more) => sendToDusk(config, { account, amount: 1n, reads: sepoliaSide(1n), recipient: DUSK, token: config.hyperlane.tokens[1], ...more }),
 };
+
+test("each send runs its last check after every wait on the way, right before the wallet is asked, and sends nothing where it throws", async () => {
+  const stop = Object.assign(new Error("It would send something else now."), { code: "REVIEW_OUTDATED" });
+  // An EVM wallet: after the chain switch and the account it's sent from.
+  for (const [name, send] of Object.entries(sends)) {
+    const asked = [];
+    const wallet = await useEvmWallet({ onAccounts: () => asked.push("accounts"), onSwitch: () => asked.push("switch") });
+    const check = () => {
+      asked.push("check");
+      throw stop;
+    };
+    await assert.rejects(send(REVIEWED, { beforeSend: check }), stop, name);
+    assert.deepEqual(wallet.sent, [], name);
+    assert.equal(asked.at(-1), "check", name);
+    assert.ok(asked.indexOf("switch") >= 0 && asked.indexOf("switch") < asked.indexOf("check"), `${name}: ${asked}`);
+  }
+  delete globalThis.ethereum;
+  // Dusk Wallet: after its session's check.
+  for (const send of [sendDuskTransfer, sendDuskContractCall]) {
+    const asked = [];
+    const wallet = { ...fakeWallet(), refresh: async () => asked.push("refresh") };
+    useDuskWallet(wallet);
+    const request = send === sendDuskTransfer ? await serviceTransferRequest({ amountLux: 2_000_000_000n, destination: TYPED }) : await depositRequest({ amountLux: 2_000_000_000n, node, recipient: TYPED });
+    const check = () => {
+      asked.push("check");
+      throw stop;
+    };
+    await assert.rejects(send(request, { account: wallet.state.selectedProfile.account, beforeSend: check }), stop, send.name);
+    assert.deepEqual([wallet.sent, asked], [[], ["refresh", "check"]], send.name);
+  }
+});
 
 test("an EVM withdrawal, approval, revoke or migration goes out from the account it was reviewed for, or not at all", async () => {
   const switches = {

@@ -516,10 +516,16 @@ test("a withdrawal whose fee couldn't be worked out for its call isn't reviewed,
   }
 });
 
-/** An EVM wallet on DuskEVM testnet at `account`, which keeps what it's asked to send; `switchTo` moves it to another account. */
+/**
+ * An EVM wallet on DuskEVM testnet at `account`, which keeps what it's asked
+ * to send; `switchTo` moves it to another account, and `hold` keeps a method
+ * waiting until `release`.
+ */
 function evmWallet(t, account = EVM) {
   const sent = [];
   const told = {};
+  const held = [];
+  let holding = "";
   let now = account;
   globalThis.ethereum = {
     on: (event, listener) => {
@@ -527,6 +533,7 @@ function evmWallet(t, account = EVM) {
     },
     removeListener() {},
     request: async ({ method, params }) => {
+      if (method === holding) await new Promise((resolve) => held.push(resolve));
       if (method === "eth_accounts" || method === "eth_requestAccounts") return [now];
       if (method === "eth_chainId") return "0x2e9";
       if (method === "eth_sendTransaction") {
@@ -538,11 +545,58 @@ function evmWallet(t, account = EVM) {
   };
   t.after(() => delete globalThis.ethereum);
   return {
+    hold: (method) => {
+      holding = method;
+    },
+    release: () => {
+      holding = "";
+      for (const go of held.splice(0)) go();
+    },
     sent,
     switchTo: (next) => {
       now = next;
       told.accountsChanged?.([next]);
     },
+  };
+}
+
+/**
+ * Dusk Wallet at `account`, which keeps what it's asked to send; `switchTo`
+ * moves it to another profile, and `hold` keeps its session check, as a send
+ * starts, waiting until `release`.
+ */
+function duskSender(account) {
+  const sent = [];
+  const held = [];
+  let holding = false;
+  let listener = () => {};
+  const send = async (request) => {
+    sent.push(request);
+    return { hash: "cd".repeat(32) };
+  };
+  const wallet = {
+    ...duskWallet(account),
+    refresh: async () => {
+      if (holding) await new Promise((resolve) => held.push(resolve));
+    },
+    sendContractCall: send,
+    sendTransfer: send,
+    subscribe: (each) => ((listener = each), () => {}),
+  };
+  return {
+    hold: () => {
+      holding = true;
+    },
+    release: () => {
+      holding = false;
+      for (const go of held.splice(0)) go();
+    },
+    sent,
+    switchTo: (next) => {
+      wallet.state = { ...wallet.state, selectedProfile: next ? { account: next } : null };
+      listener(wallet.state);
+    },
+    wallet,
   };
 }
 
@@ -618,4 +672,47 @@ test("an amount Max filled in is worked out again once its call's estimate chang
     evm.sent.map(({ gas, value }) => [gas, value]),
     [[`0x${exact.gasLimit.toString(16)}`, `0x${most.toString(16)}`]],
   );
+});
+
+test("a confirmed send that waits on a wallet stops before the wallet is asked once a switch changes what it would send, and nothing goes", async (t) => {
+  // A withdrawal paying the connected Dusk profile: its EVM wallet still checking its chain as Dusk Wallet switches.
+  {
+    const evm = evmWallet(t);
+    const dusk = duskSender(ACCOUNT);
+    const { root, slots } = await openPage(t, "#/move/dusk-evm-to-dusk", [], { clock: true, network: { ...services, evmReads: withdrawalReads() }, wallet: dusk.wallet });
+    await typeAmount(root, "1");
+    t.mock.timers.tick(500);
+    await settle();
+    await root.press({ action: "review" });
+    t.mock.timers.tick(600);
+    evm.hold("wallet_switchEthereumChain");
+    await root.press({ action: "confirm" });
+    dusk.switchTo(OTHER);
+    await settle();
+    evm.release();
+    await settle();
+    assert.deepEqual(evm.sent, []);
+    assert.equal(slots.sheet.open, false);
+    t.mock.timers.reset();
+  }
+  // A deposit paying the connected EVM account: Dusk Wallet still checking its session as the EVM wallet switches.
+  {
+    const evm = evmWallet(t);
+    const dusk = duskSender(ACCOUNT);
+    const { root, slots } = await openPage(t, "#/move/dusk-to-dusk-evm", [], { clock: true, wallet: dusk.wallet });
+    await typeAmount(root, "1");
+    t.mock.timers.tick(500);
+    await settle();
+    await root.press({ action: "review" });
+    assert.equal(slots.sheet.open, true);
+    t.mock.timers.tick(600);
+    dusk.hold();
+    await root.press({ action: "confirm" });
+    evm.switchTo("0x00000000000000000000000000000000000000e1");
+    await settle();
+    dusk.release();
+    await settle();
+    assert.deepEqual(dusk.sent, []);
+    assert.equal(slots.sheet.open, false);
+  }
 });
