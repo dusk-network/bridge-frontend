@@ -27,7 +27,7 @@ export const STATUS_WORDS = Object.freeze({
 const WEI_PER_LUX = 1_000_000_000n;
 
 /** Why a transfer to the bridge account pays nothing out. */
-const NO_PAYOUT = Object.freeze({
+export const NO_PAYOUT = Object.freeze({
   elsewhere: "This transfer didn't go to the bridge account.",
   failed: "The transfer failed on Dusk.",
   "no-address": "The memo isn't an EVM address, so the bridge can't pay it out.",
@@ -428,8 +428,10 @@ export function createTracking(deps) {
     } catch (error) {
       const refused = error instanceof WithdrawalError ? error.code : null;
       if (refused === "not-found") return pending(`Waiting for ${name("dusk-evm")}.`, { stage: "submitted" });
+      // Reverted: nothing left the account.
       if (refused === "failed")
         return failed("The withdrawal failed on DuskEVM. Your DUSK is still there.", {
+          sourceFailed: true,
           stage: "failed",
         });
       // Another message to Dusk, or no message at all: nothing to prove or claim.

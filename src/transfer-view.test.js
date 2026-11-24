@@ -6,16 +6,20 @@ import {
   WALLET_CANCELLED,
   actionErrorOf,
   explorerTxUrl,
+  failedAtSource,
   friendlyWalletError,
   privacyLine,
   short,
   transferSubline,
   transferView,
 } from "./transfer-view.js";
+import { NOT_A_TRANSFER } from "./hyperlane-tracking.js";
 import { receiptModel } from "./page-models.js";
 import { DURATION, ESTIMATE, amountsIn, exactly, partsOf, textOf } from "./pages.fixtures.js";
 import { proofSubmitterFor } from "./services.js";
+import { NO_PAYOUT } from "./tracking.js";
 import { receiptPage, transferRow } from "./views.js";
+import { NOT_A_DUSK_WITHDRAWAL } from "./withdrawals.js";
 
 const cfg = {
   dusk: { explorerUrl: "https://explorer.testnet.dusk.network/" },
@@ -368,4 +372,36 @@ test("a finished transfer out lists what arrived, as the receipt says it, not wh
   assert.equal(view({ ...sent, destinationAt: 1, status: "completed" }).amountText, "2 DUSK");
   // What it pays nothing for stays what was sent.
   assert.equal(view({ ...sent, amountLux: "1000000000", destinationAt: 1, status: "completed" }).amountText, "1 DUSK");
+});
+
+test("a withdrawal that failed on DuskEVM draws nothing as on its way or anyone's turn, with or without when it was sent", () => {
+  const note = "The withdrawal failed on DuskEVM. Your DUSK is still there.";
+  const failed = { amountLux: "200000000000", hash: L2_HASH, note, sourceFailed: true, stage: "failed", status: "failed" };
+  const sentAt = Date.UTC(2026, 9, 23, 14, 20);
+  // Reverted: its own step failed, even where a block took it; nothing after it waits.
+  for (const entry of [failed, { ...failed, sourceAt: sentAt }]) {
+    const view = transferView(entry, { cfg, now: Date.UTC(2026, 9, 28), route: withdrawal, locale: GB, timeZone: AMS, timing });
+    assert.equal(view.statusWord, "Failed");
+    assert.deepEqual(states(view.steps), ["failed", "todo", "todo"]);
+    assert.deepEqual(view.steps.map(({ detail }) => detail), ["", "", ""]);
+    assert.deepEqual(states(view.tracker), ["failed", "todo", "todo"]);
+    assert.equal(view.action, null);
+    assert.equal(view.countdown, null);
+    // Its receipt says why it failed, under the pill.
+    assert.equal(receiptModel(entry, { cfg, route: withdrawal, timing, url: "https://bridge.example/#/transfer/x" }).caption, note);
+  }
+});
+
+test("a transfer failed on its own chain only where its record says so, never for what the record lacks", () => {
+  const failedOn = (entry) => failedAtSource({ status: "failed", ...entry });
+  // Marked by tracking: a source that failed on its chain, on every route (2026-11-05 on; Hyperlane from its start).
+  for (const note of [NO_PAYOUT.failed, "The migration failed on BNB Smart Chain.", "The Dusk transaction failed, so the deposit didn't enter the bridge.", "It was cancelled in the wallet, so nothing moved.", "The withdrawal failed on DuskEVM. Your DUSK is still there."])
+    assert.equal(failedOn({ note, sourceFailed: true }), true, note);
+  // Unmarked, by the note tracking wrote when it failed there: records kept before the mark,
+  // a transfer the archive says failed on Dusk, a deposit's call that failed, and a reverted withdrawal.
+  for (const note of ["The transfer failed on Dusk.", "The transfer failed on Sepolia.", "The migration failed on BNB Smart Chain.", "The migration failed on Ethereum.", "The Dusk transaction failed, so the deposit didn't enter the bridge.", "The withdrawal failed on DuskEVM. Your DUSK is still there."])
+    assert.equal(failedOn({ note }), true, note);
+  // Went through, and wasn't paid out or wasn't a transfer: never, with its block's time or without it.
+  for (const note of [NO_PAYOUT["no-address"], NO_PAYOUT["under-fee"], NO_PAYOUT.elsewhere, "The deposit failed on DuskEVM.", "The DuskEVM deposit transaction reverted", "The DuskEVM cross-domain relay failed", "The Dusk L1 bridge transaction failed", "This transaction isn't a migration.", "This transaction isn't a DuskEVM deposit.", NOT_A_DUSK_WITHDRAWAL, NOT_A_TRANSFER, ""])
+    for (const kept of [{}, { sourceAt: Date.UTC(2026, 10, 20) }]) assert.equal(failedOn({ note, ...kept }), false, note);
 });

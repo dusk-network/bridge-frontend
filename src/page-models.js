@@ -14,8 +14,9 @@ import { gasCoin, networkName, routeTitle, routeUnits, tokenName } from "./names
 import { transferHref } from "./permalink.js";
 import { buildQuote, routeDuskFees, withdrawalStepMax } from "./quote.js";
 import { routeTime, routeTimeText } from "./route-times.js";
-import { explorerTxUrl, heldForAnother, heldInEscrow, html, short, transferSubline, transferView } from "./transfer-view.js";
-import { copyButton } from "./views.js";
+import { NO_PAYOUT } from "./tracking.js";
+import { explorerTxUrl, failedAtSource, heldForAnother, heldInEscrow, html, short, transferSubline, transferView } from "./transfer-view.js";
+import { copyButton, wholeNumbers } from "./views.js";
 import { revokeLines } from "./wallet-lines.js";
 
 export const DUSK_WALLET_URL = "https://docs.dusk.network/use/wallets/#dusk-wallet";
@@ -30,6 +31,9 @@ export const evmWalletName = (evm) => evm?.walletName || "your EVM wallet";
 // ---------------------------------------------------------------------------
 
 const capital = (line) => `${line.charAt(0).toUpperCase()}${line.slice(1)}`;
+
+/** What a review's check or note fits an amount in, whole (`wholeNumbers`). */
+const CHECKED = ".ck li, .note";
 
 /**
  * A route under the card, time then what it costs: one line, or two for a
@@ -148,8 +152,8 @@ function coveredLine(allowanceWei, amountLux, unit) {
   if (allowanceWei >= NO_LIMIT) return "An earlier approval with no limit covers this. It stays approved.";
   const left = allowanceWei - amountLux * WEI_PER_LUX;
   const stays = left > 0n ? approved(left, unit) : "";
-  return `An earlier approval of <b class="num">${html(approved(allowanceWei, unit))}</b> covers this. ${
-    stays ? `<b class="num">${html(capital(stays))}</b> stays approved.` : "Nothing stays approved."
+  return `An earlier approval of <b class="num">${wholeNumbers(approved(allowanceWei, unit), CHECKED)}</b> covers this. ${
+    stays ? `<b class="num">${wholeNumbers(capital(stays), CHECKED)}</b> stays approved.` : "Nothing stays approved."
   }`;
 }
 
@@ -171,7 +175,7 @@ export function revokeReview(route, { cfg, evm, feeWei = null, reads, walletName
       ? []
       : [
           {
-            html: `Not enough ${html(coin)} for the network fee: you have <b class="num">${html(formatShort(migration.gasCoinWei, 18).text)} ${html(coin)}</b>`,
+            html: `Not enough ${html(coin)} for the network fee: you have <b class="num">${wholeNumbers(`${formatShort(migration.gasCoinWei, 18).text} ${coin}`, CHECKED)}</b>`,
             ok: feeWei ? migration.gasCoinWei >= feeWei : migration.gasCoinWei > 0n,
           },
         ];
@@ -226,7 +230,7 @@ export function reviewChecks(route, { cfg, destination, duskAccount, evm, quote,
   const checks = [];
   const from = networkName(cfg, route.from.id);
   const lux = quote.amountLux ?? 0n;
-  const has = (amount) => `you have <b class="num">${html(amount)}</b>`;
+  const has = (amount) => `you have <b class="num">${wholeNumbers(amount, CHECKED)}</b>`;
   if (route.mode === "duskevm-deposit" || route.mode === "service-transfer") {
     const balance = reads.duskBalance;
     if (balance !== null && balance !== undefined)
@@ -269,7 +273,7 @@ function hyperlaneChecks(route, { cfg, quote, reads }) {
   const { token } = route;
   const units = quote.amountLux ?? 0n;
   const read = reads.hyperlane ?? {};
-  const has = (amount) => `you have <b class="num">${html(amount)}</b>`;
+  const has = (amount) => `you have <b class="num">${wholeNumbers(amount, CHECKED)}</b>`;
   if (route.signer === "dusk") {
     const balance = reads.duskBalance;
     const fees = (quote.bridgeFeeLux ?? 0n) + (quote.gasMaxLux ?? 0n);
@@ -283,7 +287,7 @@ function hyperlaneChecks(route, { cfg, quote, reads }) {
       );
     // An approval left open covers the amount: always said, as there's no approval step.
     if (token.symbol !== "DUSK" && quote.steps === 1 && read.allowance)
-      checks.push({ html: `An earlier approval of <b class="num">${html(formatToken(read.allowance, token))}</b> covers this, so you aren't asked to approve`, note: true, ok: true });
+      checks.push({ html: `An earlier approval of <b class="num">${wholeNumbers(formatToken(read.allowance, token), CHECKED)}</b> covers this, so you aren't asked to approve`, note: true, ok: true });
     return checks;
   }
   const coin = gasCoin(cfg, route.from.id);
@@ -433,14 +437,6 @@ export function actionLead(kind, entry, { account = "", amountLux = null, claim 
   };
 }
 
-/**
- * Whether a failed transfer failed on its own chain, so that nothing moved. One
- * the bridge didn't pay out left the account all the same. Records kept before
- * this was noted say so in their note.
- */
-const failedAtSource = (entry) =>
-  entry.sourceFailed === true || /^The (transfer failed on|migration failed on|Dusk transaction failed)/u.test(entry.note ?? "");
-
 const known = (value) => value !== undefined && value !== null;
 
 /**
@@ -509,14 +505,21 @@ function ledgerRows(entry, { approvalSpentBy = false, cfg, evm = null, from, loc
   // it cost is the approval this browser sent for it, until a migration
   // spends that approval and counts it (`approvalSpentBy`), once.
   const cancelled = migration && Boolean(entry.replaced) && known(entry.approvalFeeWei) && approvalSpentBy === false;
+  // Went through and then failed: nothing was paid out, whatever older
+  // records kept, and the bridge took no more than it was sent, nothing
+  // where the transfer never reached it.
+  const unpaid = status === "failed" && !failedAtSource(entry) && known(entry.amountLux);
+  const serviceFee = unpaid && route.mode === "service-transfer" && cfg.service ? BigInt(cfg.service.feeLux) : null;
+  const sentLux = known(entry.amountLux) ? BigInt(entry.amountLux) : 0n;
   const ledger = transferLedger({
+    bridgeFee: serviceFee === null ? undefined : entry.note === NO_PAYOUT.elsewhere ? 0n : serviceFee < sentLux ? serviceFee : sentLux,
     evm: migration && !entry.replaced ? evm : null,
     failed: status === "failed" && failedAtSource(entry),
     gasWei: cancelled ? BigInt(entry.approvalFeeWei) : undefined,
     locale,
     network: cfg.network,
     networkFee: [entry.feeLux, entry.proveFeeLux, entry.claimFeeLux],
-    received: entry.receivedLux,
+    received: unpaid ? "0" : entry.receivedLux,
     route: route.id,
     sent: entry.amountLux,
   });
@@ -534,7 +537,8 @@ function ledgerRows(entry, { approvalSpentBy = false, cfg, evm = null, from, loc
   const fee = (line) => (["bridgeFee", "gas", "networkFee"].includes(line.key) ? { fee: paid(line.amount, line.coin, line.decimals) } : {});
   // Which transactions a migration's fee counts.
   const counts = !migration ? "" : cancelled ? "approval" : gasCounts(ledger.gas, evm);
-  return ledger.lines.map((line) =>
+  // A bridge fee of nothing isn't one.
+  return ledger.lines.filter((line) => !(line.key === "bridgeFee" && line.amount === 0n)).map((line) =>
     line.key === "gas"
       ? { ...fee(line), detail: counts, exact: `${line.exact} ${line.coin}`, label: label(line), value: `${line.text} ${line.coin}` }
       : { ...fee(line), label: label(line), value: `${line.exact} ${line.coin}` },

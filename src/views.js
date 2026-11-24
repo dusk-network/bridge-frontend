@@ -22,6 +22,21 @@ export const copyButton = (value, label) =>
 /** Where a short amount leaves digits out, all of them, on hover. */
 const exactTitle = (exact, text) => (exact && exact !== text ? ` title="${html(exact)}"` : "");
 
+/** A number as a word: digits, with any language's separators and a sign or bound before it. */
+const NUMBER = /^[(<>≤≥~−+-]*\d[^\p{L} ]*$/u;
+
+/**
+ * `text`, its numbers each kept whole on one line ("99,999,999.123456789",
+ * "12 345,6789"), and drawn smaller where one is wider than `box`, the element
+ * whose width it has (fit.js). Words go by plain spaces: a language's own
+ * group separators aren't one. HTML.
+ */
+export const wholeNumbers = (text, box = "") =>
+  String(text ?? "")
+    .split(" ")
+    .map((word) => (NUMBER.test(word) ? `<span class="nb"${box ? ` data-fit="${box}"` : ""}>${html(word)}</span>` : html(word)))
+    .join(" ");
+
 /** A wait's words, with a small ring that turns beside them from the start (still with reduced motion). */
 export const waiting = (text) => `<span class="waiting"><span class="spin" aria-hidden="true"></span><span>${html(text)}</span></span>`;
 
@@ -51,6 +66,13 @@ export const messageLine = (text, { live = true } = {}) =>
   [CONNECT_CANCELLED, LATER_STEP_CANCELLED, WALLET_CANCELLED].includes(text)
     ? `<p class="message"${live ? ' role="status"' : ""}>${html(text)}</p>`
     : `<p class="message error"${live ? ' role="alert"' : ""}>${html(text)}</p>`;
+
+/**
+ * On a page other than the card, why a wallet's connect or disconnect, or a
+ * claim, didn't go: the card's own message, which the page's live region
+ * reads once, not again each time the page is drawn.
+ */
+const pageMessage = (text) => (text ? `<div id="page-error">${messageLine(text, { live: false })}</div>` : "");
 
 /** What's public, its networks in bold: "Public on Dusk and DuskEVM, and linked:" then the parties. */
 export function publicLine(text) {
@@ -143,7 +165,7 @@ export function quoteRows(quote) {
   return quote.rows
     .map(
       (row) =>
-        `<div class="kv${row.strong ? " total" : ""}"><dt class="k">${html(row.label)}</dt><dd class="v">${row.html ?? `<span class="stack"><span class="num">${html(row.value)}</span>${row.detail ? `<span class="small">${html(row.detail)}</span>` : ""}</span>`}</dd></div>`,
+        `<div class="kv${row.strong ? " total" : ""}"><dt class="k">${html(row.label)}</dt><dd class="v">${row.html ?? `<span class="stack"><span class="num">${wholeNumbers(row.value, ".kv")}</span>${row.detail ? `<span class="small">${html(row.detail)}</span>` : ""}</span>`}</dd></div>`,
     )
     .join("");
 }
@@ -220,17 +242,17 @@ function escrowBox(escrow) {
         .map((each) =>
           each.sent
             ? `<span class="small t2">${html(each.sent)}</span>`
-            : `<button type="button" class="btn sec sm" data-action="escrow-claim" data-route="${html(each.route)}"${each.account ? ` data-account="${html(each.account)}"` : ""}>Claim ${html(each.amount)}${each.account ? " for it" : ""}</button>`,
+            : `<button type="button" class="btn sec sm" data-action="escrow-claim" data-route="${html(each.route)}"${each.account ? ` data-account="${html(each.account)}"` : ""}><span class="lbl">${wholeNumbers(`Claim ${each.amount}${each.account ? " for it" : ""}`, ".btn-row")}</span></button>`,
         )
         .join("");
-  return `<div class="card notice-box" role="note"><div class="note">${icon("info")}<span>${lead} <span class="num">${html(listed)}</span>${why}</span></div><div class="btn-row">${buttons}</div></div>`;
+  return `<div class="card notice-box" role="note"><div class="note">${icon("info")}<span>${lead} <span class="num">${wholeNumbers(listed, ".note")}</span>${why}</span></div><div class="btn-row">${buttons}</div></div>`;
 }
 
 /** The card's one button: a link where it leads to Dusk Wallet's page. */
 function primaryControl(button) {
   if (button.action === "get-dusk")
     return `<a class="btn pri full" href="${html(button.href)}" target="_blank" rel="noreferrer">${html(button.label)} ${icon("ext")}<span class="sr-only"> (opens in a new tab)</span></a>`;
-  return `<button type="button" class="btn pri full" data-action="${html(button.action ?? "none")}" ${button.enabled ? "" : "disabled"}>${html(button.label)}</button>`;
+  return `<button type="button" class="btn pri full" data-action="${html(button.action ?? "none")}" ${button.enabled ? "" : "disabled"}><span class="lbl">${wholeNumbers(button.label, ".cta")}</span></button>`;
 }
 
 /**
@@ -251,7 +273,7 @@ const addDuskButton = (offer, look) =>
 function approvalBox(open, note = "") {
   if (!open) return note ? `<p class="message" id="approval-note" role="status" tabindex="-1">${html(note)}</p>` : "";
   const finish = open.finishLux > 0n ? '<button type="button" class="btn sec sm" data-action="approval-finish">Finish</button>' : "";
-  return `<div class="card notice-box" role="note"><div class="note">${icon("info")}<span><b>Open approval:</b> the Dusk migration contract may still take <b class="num">${html(open.text)}</b> from <code class="mono">${html(short(open.evm))}</code>.</span></div><div class="btn-row">${finish}<button type="button" class="btn sec sm" data-action="approval-revoke">Revoke</button></div></div>`;
+  return `<div class="card notice-box" role="note"><div class="note">${icon("info")}<span><b>Open approval:</b> the Dusk migration contract may still take <b class="num">${wholeNumbers(open.text, ".note")}</b> from <code class="mono">${html(short(open.evm))}</code>.</span></div><div class="btn-row">${finish}<button type="button" class="btn sec sm" data-action="approval-revoke">Revoke</button></div></div>`;
 }
 
 /**
@@ -282,7 +304,7 @@ export function cardRegions(vm) {
     cta: `${vm.error ? messageLine(vm.error) : ""}${primaryControl(vm.button)}`,
     escrow: escrowBox(vm.escrow),
     // The label once there's a balance to label.
-    "from-foot": `<span>${vm.from.balance ? html(vm.from.balanceLabel) : ""}</span><span class="bal">${vm.from.balance ? `<span class="num"${exactTitle(vm.from.balanceExact, vm.from.balance)}>${html(vm.from.balance)}</span>` : ""}${vm.canMax ? '<button type="button" class="mini" data-action="max">Max</button>' : ""}${vm.addDusk ? addDuskButton(vm.addDusk, "mini") : ""}</span>`,
+    "from-foot": `<span>${vm.from.balance ? html(vm.from.balanceLabel) : ""}</span><span class="bal">${vm.from.balance ? `<span class="num"${exactTitle(vm.from.balanceExact, vm.from.balance)}>${wholeNumbers(vm.from.balance, ".panel-f")}</span>` : ""}${vm.canMax ? '<button type="button" class="mini" data-action="max">Max</button>' : ""}${vm.addDusk ? addDuskButton(vm.addDusk, "mini") : ""}</span>`,
     receive: html(vm.receive || "0"),
     "recipient-note": recipientNote(vm.to),
     // Behind the route line: the fees' split and the steps, how the route is doing as usual, and what's public.
@@ -316,8 +338,8 @@ export function cardPage(vm) {
   const notice = vm.notice
     ? `<div class="card notice-box" role="note"><div class="note">${icon(vm.notice.icon ?? "info")}<span>${vm.notice.html}</span></div>${vm.notice.actions ?? ""}</div>`
     : "";
-  const from = `<div class="panel"><div class="panel-h"><span class="panel-l">From</span><div class="netsel">${netButton("from", vm.from.net, vm.menu === "from")}${vm.menu === "from" ? netMenu("from", vm.fromChoices) : ""}</div></div>
-      <div class="amt-row"><input id="amount" name="amount" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="0" value="${html(vm.amount)}" aria-label="Amount, in ${html(vm.unit)}" aria-describedby="amount-help amount-error"${vm.amountError ? ' aria-invalid="true"' : ""}>${tokenControl(vm)}</div>
+  const from = `<div class="panel from"><div class="panel-h"><span class="panel-l">From</span><div class="netsel">${netButton("from", vm.from.net, vm.menu === "from")}${vm.menu === "from" ? netMenu("from", vm.fromChoices) : ""}</div></div>
+      <div class="amt-row" data-fit-row><input id="amount" name="amount" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="0" value="${html(vm.amount)}" aria-label="Amount, in ${html(vm.unit)}" aria-describedby="amount-help amount-error"${vm.amountError ? ' aria-invalid="true"' : ""}>${tokenControl(vm)}</div>
       <div class="panel-f" id="amount-help" data-region="from-foot">${regions["from-foot"]}</div>
       <p class="field-error" id="amount-error" role="status">${html(vm.amountError ?? "")}</p>
     </div>`;
@@ -328,7 +350,7 @@ export function cardPage(vm) {
     ? `<div class="recip-edit"><label class="panel-l" for="recipient">${html(vm.to.label)}</label><textarea id="recipient" name="recipient" class="mono-input wrap-input" rows="2" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${html(vm.to.placeholder)}" aria-describedby="recipient-error recipient-note"${vm.to.error ? ' aria-invalid="true"' : ""}>${html(vm.to.input)}</textarea><p class="field-error" id="recipient-error" role="alert">${html(vm.to.error ?? "")}</p>${note}${vm.to.canReset ? '<button type="button" class="linkish" data-action="recipient-reset">Use mine</button>' : ""}</div>`
     : `<p class="recip">${vm.to.line} · <button type="button" class="linkish" data-action="recipient-edit">${vm.to.empty ? "Add" : "Change"}</button></p>${note}`;
   const to = `<div class="panel"><div class="panel-h"><span class="panel-l">To</span><div class="netsel">${netButton("to", vm.to.net, vm.menu === "to")}${vm.menu === "to" ? netMenu("to", vm.toChoices) : ""}</div></div>
-      <div class="amt-row"><span class="out${vm.receive ? "" : " empty"}" data-region="receive">${regions.receive}</span><span class="token">${chainMark(vm.to.net.id)}${html(vm.receiveUnit)}</span></div>
+      <div class="amt-row" data-fit-row><span class="out${vm.receive ? "" : " empty"}" data-region="receive">${regions.receive}</span><span class="token">${chainMark(vm.to.net.id)}${html(vm.receiveUnit)}</span></div>
       <div class="panel-f"><span>You receive</span></div>
       ${recipient}
     </div>`;
@@ -348,7 +370,7 @@ export function cardPage(vm) {
 // print and its tag. A cost ("Costs up to 0.051 DUSK") takes its own line,
 // then what it's for ("for a 1,008 DUSK withdrawal that pays …").
 function walletHead(head) {
-  const amount = head.amount ? `${head.lead ? `${html(head.lead)} ` : ""}<span class="num">${html(head.amount)}</span>` : "";
+  const amount = head.amount ? `${head.lead ? `${html(head.lead)} ` : ""}<span class="num">${wholeNumbers(head.amount, ".wlhd")}</span>` : "";
   const to = head.to
     ? `${html(head.prefix ?? "to")} <code class="mono" title="${html(head.toFull ?? head.to)}">${html(head.to)}</code>${head.where ? ` ${html(head.where)}` : ""}`
     : "";
@@ -365,7 +387,7 @@ export function walletLines(lines, cfgLinks) {
   // What everyone sees, under the window's head and before its fee, as the window says it.
   const visible = lines.find((line) => line.kind === "visible");
   const row = (line) => {
-    const text = `<span class="${line.mono ? "mono wrap" : "num"}"${line.full ? ` title="${html(line.full)}"` : ""}>${html(line.value)}</span>`;
+    const text = `<span class="${line.mono ? "mono wrap" : "num"}"${line.full ? ` title="${html(line.full)}"` : ""}>${line.mono ? html(line.value) : wholeNumbers(line.value, ".wl dd")}</span>`;
     // A contract by its network's name reads "DuskEVM bridge · 2257e5…a1b31d", the "·" kept with its ID.
     const value = line.address
       ? `${line.value ? `<span class="wl-name">${html(line.value)}</span>` : ""}${fullValue({ explorer: cfgLinks.explorer(line.network, line.address), label: line.label, value: line.address })}`
@@ -389,8 +411,12 @@ const otherAccount = (text) =>
 function actionLead(lead) {
   const unit = lead.unit ?? "DUSK";
   const line = lead.payee ? `To <code class="mono wrap">${html(lead.payee)}</code> on Dusk${lead.line ? ` · ${html(lead.line)}` : ""}` : html(lead.line);
-  return `<div class="flow group lead"><div><div class="k">${html(lead.label)}</div><div class="v num">${html(lead.amount)}${unit ? `<span class="u">${html(unit)}</span>` : ""}</div><div class="w">${lead.chain ? chainMark(lead.chain, "xs") : ""}<span>${line}</span></div></div></div>`;
+  return `<div class="flow group lead"><div><div class="k">${html(lead.label)}</div>${flowAmount(lead.amount, unit)}<div class="w">${lead.chain ? chainMark(lead.chain, "xs") : ""}<span>${line}</span></div></div></div>`;
 }
+
+/** An amount the review leads with: whole on its line, smaller where it's wider than its side (fit.js), its unit after it or under it. */
+const flowAmount = (amount, unit) =>
+  `<div class="v num"><span class="nb" data-fit=".v">${html(amount)}</span>${unit ? `<span class="u">${html(unit)}</span>` : ""}</div>`;
 
 /**
  * One side of what moves: its network, the .dusk name where there's one, then
@@ -407,7 +433,7 @@ const callRow = (row) =>
   `<div class="kv"><dt class="k">${html(row.label)}</dt><dd class="v">${
     row.mono
       ? `<code class="mono${row.wrap ? " wrap" : ""}"${row.full ? ` title="${html(row.full)}"` : ""}>${html(row.value)}</code>`
-      : `<span class="stack"><span class="num">${html(row.value)}</span>${row.detail ? `<span class="small">${html(row.detail)}</span>` : ""}</span>`
+      : `<span class="stack"><span class="num">${wholeNumbers(row.value, ".kv")}</span>${row.detail ? `<span class="small">${html(row.detail)}</span>` : ""}</span>`
   }</dd></div>`;
 
 /** A line the review always says, by itself: what's held, what stays approved, a fee past the amount. HTML. */
@@ -501,13 +527,13 @@ export function reviewSheet(vm) {
     : "";
   // Warnings that block nothing, in amber as the card says them: a bridge fee more than the amount, a busy network.
   const warnings = (vm.warnings ?? []).map((text) => `<p class="note warn">${icon("info")}<span>${html(text)}</span></p>`).join("");
-  const notes = [...vm.checks.filter((check) => check.ok && check.note).map((check) => check.html), ...(vm.notes ?? []).map(html)].map(noteLine).join("");
+  const notes = [...vm.checks.filter((check) => check.ok && check.note).map((check) => check.html), ...(vm.notes ?? []).map((note) => wholeNumbers(note, ".note"))].map(noteLine).join("");
   // Another account paid: said first, after what's public.
   const notYours = vm.lead ? vm.lead.notYours : vm.notYours;
   const decision = `${vm.lead ? actionLead(vm.lead) : `<div class="flow group">
-      <div><div class="k">You send</div><div class="v num">${html(vm.send.amount)}<span class="u">${html(vm.send.unit)}</span></div><div class="w">${flowSide(vm.send)}</div></div>
+      <div><div class="k">You send</div>${flowAmount(vm.send.amount, vm.send.unit)}<div class="w">${flowSide(vm.send)}</div></div>
       <div class="dn" aria-hidden="true">${icon("back", "down")}</div>
-      <div><div class="k">You receive</div><div class="v num">${html(vm.receive.amount)}<span class="u">${html(vm.receive.unit)}</span></div><div class="w">${flowSide(vm.receive)}</div></div>
+      <div><div class="k">You receive</div>${flowAmount(vm.receive.amount, vm.receive.unit)}<div class="w">${flowSide(vm.receive)}</div></div>
     </div>`}
     <p class="note">${icon("eye")}<span>${publicLine(vm.privacy)}</span></p>
     ${notYours ? otherAccount(notYours) : ""}
@@ -515,7 +541,7 @@ export function reviewSheet(vm) {
     ${notes}
     ${checks}
     <dl class="group kvs">${quoteRows({ rows: rows.shown })}</dl>
-    ${step && !step.ready ? `<p class="small t2">${waiting(step.wait ?? "Preparing…")}</p>` : ""}`;
+    ${step && !step.ready && !step.unprepared ? `<p class="small t2">${waiting(step.wait ?? "Preparing…")}</p>` : ""}`;
   // Beside it, at its own height: the decision stays in view while it's read.
   const reference = `${split}${preview}${callRows ? `<div class="wlh">${CALL_TITLE}</div>${callRows}` : ""}`;
   const body = vm.wide
@@ -526,7 +552,7 @@ export function reviewSheet(vm) {
   </div>`;
   return `<div class="sheet-head"><div><h2 id="sheet-title">Review</h2>${vm.sub ? `<p class="sub">${html(vm.sub)}</p>` : ""}</div><button type="button" class="icon-btn round" data-action="close-sheet" aria-label="Close the review">${icon("close")}</button></div>
   ${body}
-  <div class="sheet-foot">${vm.error ? messageLine(vm.error) : ""}<div class="btn-pair"><button type="button" class="btn sec" data-action="close-sheet">Cancel</button><button type="button" class="btn pri" data-action="confirm" ${vm.canConfirm ? "" : "disabled"}>${html(vm.confirmLabel)}${vm.stepOf ? `<span class="of"><span class="sr-only">, step </span>${vm.stepOf.at} of ${vm.stepOf.of}</span>` : ""}</button></div></div>`;
+  <div class="sheet-foot">${vm.error ? messageLine(vm.error) : ""}<div class="btn-pair"><button type="button" class="btn sec" data-action="close-sheet">Cancel</button><button type="button" class="btn pri" data-action="confirm" ${vm.canConfirm ? "" : "disabled"}><span class="lbl">${wholeNumbers(vm.confirmLabel, ".sheet-foot")}</span>${vm.stepOf ? `<span class="of"><span class="sr-only">, step </span>${vm.stepOf.at} of ${vm.stepOf.of}</span>` : ""}</button></div></div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -564,9 +590,9 @@ const backLink = `<a class="bk" href="#/transfers">${icon("back")}Activity</a>`;
 
 export function receiptPage(vm) {
   if (vm.loading)
-    return `<main class="col" id="main" tabindex="-1"><div class="topbar">${backLink}<h1 class="ti">Transfer</h1></div><p class="t2" role="status">${waiting(vm.loading)}</p></main>`;
+    return `<main class="col" id="main" tabindex="-1"><div class="topbar">${backLink}<h1 class="ti">Transfer</h1></div>${pageMessage(vm.pageError)}<p class="t2" role="status">${waiting(vm.loading)}</p></main>`;
   if (vm.missing)
-    return `<main class="col" id="main" tabindex="-1"><div class="topbar">${backLink}<h1 class="ti">Transfer</h1></div><div class="group pad"><p>${html(vm.missing)}</p><p class="small t2"><code class="mono wrap">${html(vm.hash)}</code></p></div><p class="links-row"><a class="lnk" href="#/lookup">Look up another ${icon("search")}</a></p></main>`;
+    return `<main class="col" id="main" tabindex="-1"><div class="topbar">${backLink}<h1 class="ti">Transfer</h1></div>${pageMessage(vm.pageError)}<div class="group pad"><p>${html(vm.missing)}</p><p class="small t2"><code class="mono wrap">${html(vm.hash)}</code></p></div><p class="links-row"><a class="lnk" href="#/lookup">Look up another ${icon("search")}</a></p></main>`;
   const view = vm.view;
   // When it can be claimed: "Claim from …" or "Claim from about …", counted
   // down. Late, the date is only the soonest and moves on each check: the
@@ -581,14 +607,14 @@ export function receiptPage(vm) {
       ? `<div class="action-box">${actionNeedsWallet(view.action.kind)}</div>`
       : view.action.blocked
         ? `<div class="action-box"><p class="note">${icon("info")}<span>${html(view.action.blocked)}</span></p></div>`
-        : `<div class="action-box">${view.action.failure ? messageLine(view.action.failure, { live: false }) : ""}<button type="button" class="btn ${view.action.quiet ? "sec" : "pri"}" data-action="${html(view.action.command ?? `withdrawal-${view.action.kind}`)}" data-id="${html(vm.id)}">${html(view.action.label)}</button><span class="small t2">${html(vm.actionFee ?? "")}</span></div>`
+        : `<div class="action-box">${view.action.failure ? messageLine(view.action.failure, { live: false }) : ""}<button type="button" class="btn ${view.action.quiet ? "sec" : "pri"}" data-action="${html(view.action.command ?? `withdrawal-${view.action.kind}`)}" data-id="${html(vm.id)}"><span class="lbl">${wholeNumbers(view.action.label, ".action-box")}</span></button><span class="small t2">${html(vm.actionFee ?? "")}</span></div>`
     : "";
-  const value = (row) => `<span class="num"${exactTitle(row.exact, row.value)}>${html(row.value)}</span>`;
+  const value = (row) => `<span class="num"${exactTitle(row.exact, row.value)}>${wholeNumbers(row.value, ".kv")}</span>`;
   const details = vm.details
     .map((row) => `<div class="kv"><dt class="k">${html(row.label)}</dt><dd class="v">${row.html ?? (row.detail ? `<span class="stack">${value(row)}<span class="small">${html(row.detail)}</span></span>` : value(row))}</dd></div>`)
     .join("");
   const notes = vm.notes.map((note) => `<p class="note">${icon(note.icon ?? "info")}<span>${note.html}</span></p>`).join("");
-  const fees = vm.fees?.text ? `<p class="small t2">Fees <span class="num"${exactTitle(vm.fees.exact, vm.fees.text)}>${html(vm.fees.text)}</span></p>` : "";
+  const fees = vm.fees?.text ? `<p class="small t2">Fees <span class="num"${exactTitle(vm.fees.exact, vm.fees.text)}>${wholeNumbers(vm.fees.text, "p")}</span></p>` : "";
   // The transfer and its steps on the left; its details in a panel beside
   // them, as the web wallet shows a transaction: open on a wide screen
   // (`vm.wide`), folded under the rest on a narrow one.
@@ -602,12 +628,12 @@ export function receiptPage(vm) {
       <div class="topbar">${backLink}</div>
       <div class="hero">
         <div class="okc ${view.status}" aria-hidden="true">${view.status === "completed" ? icon("check") : view.status === "failed" ? icon("close") : pairMark(view.pair[0], view.pair[1])}</div>
-        <h1 class="t">${html(view.title)}</h1>
+        <h1 class="t">${wholeNumbers(view.title, ".t")}</h1>
         ${vm.fromTo ? `<p class="l">${vm.fromTo}</p>` : ""}
         <div class="pl" role="status">${statusPill(view.status, view.statusWord)}${vm.caption ? `<span class="cap">${html(vm.caption)}</span>` : ""}</div>
       </div>
       ${countdown}
-      <section aria-labelledby="progress-h"><h2 class="sr-only" id="progress-h">Progress</h2><div class="group pad">${stepList(view.steps)}</div>${action}${vm.addDusk ? `<div class="action-box">${addDuskButton(vm.addDusk, "btn sec sm")}</div>` : ""}${vm.arrives && vm.notice ? arrivalNotice(vm.notice) : ""}</section>
+      <section aria-labelledby="progress-h"><h2 class="sr-only" id="progress-h">Progress</h2><div class="group pad">${stepList(view.steps)}</div>${pageMessage(vm.pageError)}${action}${vm.addDusk ? `<div class="action-box">${addDuskButton(vm.addDusk, "btn sec sm")}</div>` : ""}${vm.arrives && vm.notice ? arrivalNotice(vm.notice) : ""}</section>
       ${fees}
       ${notes}
       <div class="lk"><span>${icon("link")}Receipt link</span>${copyButton(vm.url, "receipt link")}</div>
@@ -646,7 +672,7 @@ export function transferRow(row, { canAct = true } = {}) {
   // Whom it pays and its transaction, so equal transfers are told apart.
   const to = row.to ? `To ${row.to.name ? html(row.to.name) : `<code class="mono">${html(row.to.address)}</code>`}` : "";
   const meta = [to, row.hash ? `<code class="mono">${html(row.hash)}</code>` : ""].filter(Boolean).join(" · ");
-  return `<li class="tr" data-status="${html(row.status)}"><a class="tr-link" href="${html(row.href)}" aria-label="${html(row.title)}, ${html(row.amountText)}, ${html(row.statusWord)}. Open the receipt"${exactTitle(row.amountExact, row.amountText)}></a>${pairMark(row.pair[0], row.pair[1])}<div class="tr-main"><div class="t1">${html(row.title)}</div><div class="t2">${html(row.subline)}</div>${meta ? `<div class="t3">${meta}</div>` : ""}${trackerBars(row.tracker)}</div><div class="rt"><span class="am num">${html(row.amountText)}</span>${right}</div></li>`;
+  return `<li class="tr" data-status="${html(row.status)}"><a class="tr-link" href="${html(row.href)}" aria-label="${html(row.title)}, ${html(row.amountText)}, ${html(row.statusWord)}. Open the receipt"${exactTitle(row.amountExact, row.amountText)}></a>${pairMark(row.pair[0], row.pair[1])}<div class="tr-main"><div class="t1">${html(row.title)}</div><div class="t2">${html(row.subline)}</div>${meta ? `<div class="t3">${meta}</div>` : ""}${trackerBars(row.tracker)}</div><div class="rt"><span class="am num">${wholeNumbers(row.amountText, ".rt")}</span>${right}</div></li>`;
 }
 
 /**
@@ -677,6 +703,7 @@ export function activityPanel(vm) {
   return `<div class="act">
     <div class="act-h"><p class="lede">${vm.lede}</p><a class="btn sec sm" href="#/lookup">${icon("search")}Look up</a></div>
     <p class="small t2 sync" role="status" aria-live="polite">${vm.syncing ? waiting(vm.syncText) : html(vm.syncText)}</p>
+    ${pageMessage(vm.pageError)}
     ${vm.watch ? watchBlock(vm.watch) : ""}
     ${body}
     ${vm.more ? `<p class="links-row"><button type="button" class="btn sec sm" data-action="discover-more">Older transfers</button></p>` : ""}
@@ -689,12 +716,13 @@ export function activityPanel(vm) {
 
 /** A link to a task this network's bridge doesn't have: that, and the way back. */
 export function unavailablePage(vm) {
-  return `<main class="col" id="main" tabindex="-1"><h1>${html(vm.title)}</h1><p class="links-row"><a class="lnk" href="#/">Back to the bridge</a></p></main>`;
+  return `<main class="col" id="main" tabindex="-1"><h1>${html(vm.title)}</h1>${pageMessage(vm.pageError)}<p class="links-row"><a class="lnk" href="#/">Back to the bridge</a></p></main>`;
 }
 
 export function lookupPage(vm) {
   return `<main class="col" id="main" tabindex="-1">
     <div class="topbar">${backLink}<h1 class="ti">Look up a transfer</h1></div>
+    ${pageMessage(vm.pageError)}
     <form class="group pad" data-form="lookup">
       <label for="lookup" class="l1">Transaction ID</label>
       <input id="lookup" name="lookup" class="mono-input" autocomplete="off" spellcheck="false" value="${html(vm.query)}" aria-describedby="lookup-error">

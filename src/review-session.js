@@ -60,14 +60,21 @@ export function createReviewSession({ now = () => Date.now() } = {}) {
     },
     /**
      * Prepares `review`'s request: `apply` gets the result, or `fail` the
-     * error, only while `review` is still the one on screen.
+     * error, only while `review` is still the one on screen. A step that
+     * couldn't be prepared is marked so (`unprepared`): it no longer says
+     * it's being prepared, until it's prepared again.
      */
     async fill(review, prepare, apply, fail) {
+      const step = () => review.steps?.[review.current ?? 0];
+      if (step()) step().unprepared = false;
       let result;
       try {
         result = await prepare();
       } catch (error) {
-        if (open === review) fail?.(error);
+        if (open === review) {
+          if (step()) step().unprepared = true;
+          fail?.(error);
+        }
         return false;
       }
       if (open !== review) return false;

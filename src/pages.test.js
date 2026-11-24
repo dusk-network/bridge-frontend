@@ -13,11 +13,11 @@ import { NETWORK_BUSY, actionLead, actionPrivacy, availableLine, balanceLine, bu
 import { DURATION, ESTIMATE, amountsIn, assertShownInFull, byLabel, copiesOf, decode, exactly, fieldOf, fieldsOf, linksOf, paidOf, partsOf, stepPartsOf, textOf } from "./pages.fixtures.js";
 import { buildQuote, withdrawalStepMax } from "./quote.js";
 import { PUBLIC_LINE } from "./transfer-view.js";
-import { cardPage, cardRegions, contractsSheet, footer, header, receiptPage, reviewSheet, walletLines, walletsSheet } from "./views.js";
+import { cardPage, cardRegions, contractsSheet, footer, header, receiptPage, reviewSheet, walletLines, walletsSheet, wholeNumbers } from "./views.js";
 import { formatDateTime } from "./format.js";
 import { approveLines, duskCallLines, duskTransferLines, migrateLines, walletFee, withdrawalAmount } from "./wallet-lines.js";
 import { driverJson, loadDataDriver } from "./data-driver.js";
-import { createTracking } from "./tracking.js";
+import { NO_PAYOUT, createTracking } from "./tracking.js";
 import { contractCreditLog, messagePassedLog, u256, withdrawalInput } from "./withdrawals.fixtures.js";
 
 /** The card's route line as it reads: its lines, one after the other. */
@@ -614,6 +614,104 @@ test("the review checks a balance to the Lux, as what it sends: 0.09 can't pay f
   assert.deepEqual(amountsIn(fromEvm[0].html), ["2.123456789 DUSK"]);
 });
 
+test("a transfer that failed on its own chain reads as failed on its receipt, on every route: nothing sent or received, and no step done", () => {
+  const url = "https://bridge.example.org/#/transfer/f";
+  const sourceAt = Date.UTC(2026, 10, 20, 9);
+  const moved = (details) => details.filter((row) => !row.html && /^You (sent|receive)/u.test(row.label)).map((row) => `${row.label} ${row.value}`);
+  for (const cfg of [testnet, mainnet])
+    for (const route of buildRoutes(cfg)) {
+      const hash = route.from.kind === "evm" ? `0x${"9e".repeat(32)}` : "9e".repeat(32);
+      // In a block, or not.
+      for (const at of [{ sourceAt }, {}]) {
+        const { details, view } = receiptModel({ amountLux: "1008000000000", hash, id: "f", routeId: route.id, sourceFailed: true, status: "failed", ...at }, { cfg, route, url });
+        assert.deepEqual(moved(details), [], route.id);
+        assert.equal(view.steps[0].state, "failed", route.id);
+        assert.deepEqual([...view.steps, ...(view.tracker ?? [])].filter(({ state }) => state === "done"), [], route.id);
+      }
+    }
+  // A withdrawal that reverted on DuskEVM, as tracking ends it, and as kept before that was noted: its note says so.
+  const withdrawal = T["duskevm-withdrawal"];
+  const note = "The withdrawal failed on DuskEVM. Your DUSK is still there.";
+  const reverted = { amountLux: "1008000000000", hash: `0x${"9e".repeat(32)}`, id: "w", note, routeId: withdrawal.id, sourceAt, stage: "failed", status: "failed" };
+  for (const entry of [{ ...reverted, sourceFailed: true }, reverted]) {
+    const { caption, details, view } = receiptModel(entry, { cfg: testnet, route: withdrawal, url });
+    assert.deepEqual(moved(details), []);
+    assert.deepEqual(view.steps.map(({ state }) => state), ["failed", "todo", "todo"]);
+    assert.equal(caption, note);
+  }
+  // One that went through and wasn't paid out left the account: that's said, nothing received, and its own step is done.
+  const service = T["service-transfer"];
+  const unpaid = receiptModel({ amountLux: "2053082083", feeLux: "1859281", hash: "9e".repeat(32), id: "s", note: "The memo isn't an EVM address, so the bridge won't pay it out.", routeId: service.id, sourceAt, status: "failed" }, { cfg: testnet, route: service, url });
+  assert.deepEqual(moved(unpaid.details), ["You sent 2.053082083 DUSK", "You received 0 ERC20 DUSK"]);
+  assert.equal(unpaid.view.steps[0].state, "done");
+});
+
+test("a transfer that went through and was then not paid out reads as sent and not paid out, on every route that can end so", () => {
+  const url = "https://bridge.example.org/#/transfer/p";
+  const sourceAt = Date.UTC(2026, 10, 20, 9);
+  // Each route whose own transaction can go through and pay nothing out, with what its tracking writes then.
+  const cases = [
+    [mainnet, routesOf(mainnet)["service-transfer"], [NO_PAYOUT["no-address"], NO_PAYOUT["under-fee"], NO_PAYOUT.elsewhere]],
+    [testnet, T["service-transfer"], [NO_PAYOUT["no-address"], NO_PAYOUT["under-fee"], NO_PAYOUT.elsewhere]],
+    // Failed on DuskEVM, in the evm-sdk's words, or tracking's where it gives none.
+    [testnet, T["duskevm-deposit"], ["The deposit failed on DuskEVM.", "The DuskEVM deposit transaction reverted", "The DuskEVM cross-domain relay failed", "The Dusk L1 bridge transaction failed"]],
+  ];
+  for (const [cfg, route, notes] of cases)
+    for (const note of notes)
+      // As tracking writes it now; without the block's time, which the node may not give; and as kept before nothing received was noted.
+      for (const kept of [{ receivedLux: "0", sourceAt }, { receivedLux: "0" }, { sourceAt }, {}]) {
+        const where = `${route.id}: ${note} ${JSON.stringify(kept)}`;
+        const entry = { amountLux: "2053082083", feeLux: "1859281", hash: "9e".repeat(32), id: "p", note, routeId: route.id, status: "failed", ...kept };
+        const { caption, details, view } = receiptModel(entry, { cfg, route, url });
+        // Sent, and nothing after it done, under way or anyone's turn.
+        assert.equal(view.steps[0].state, "done", where);
+        assert.deepEqual(view.steps.slice(1).filter(({ state }) => ["done", "now", "turn"].includes(state)), [], where);
+        const said = details.filter((row) => !row.html).map((row) => [row.label, row.value]);
+        assert.deepEqual(said.filter(([label]) => label === "You sent"), [["You sent", "2.053082083 DUSK"]], where);
+        // Nothing received.
+        assert.deepEqual(said.filter(([label, value]) => /^You receive/u.test(label) && !/^0 /u.test(value)), [], where);
+        assert.equal(caption, note, where);
+      }
+});
+
+test("a payout that failed says what happened: nothing received, and no bridge fee beyond what the bridge took", () => {
+  const url = "https://bridge.example.org/#/transfer/f";
+  const receipt = (cfg, route, entry) => receiptModel({ feeLux: "1859281", hash: "9e".repeat(32), id: "f", routeId: route.id, status: "failed", ...entry }, { cfg, route, url });
+  const rows = (...args) => receipt(...args).details.filter((row) => !row.html).map((row) => [row.label, row.value]);
+  for (const [cfg, route, token] of [[testnet, T["service-transfer"], "ERC20 DUSK"], [mainnet, routesOf(mainnet)["service-transfer"], "BEP20 DUSK"]]) {
+    // An invalid memo, kept before nothing received was noted: nothing received all the same.
+    assert.deepEqual(rows(cfg, route, { amountLux: "2053082083", note: NO_PAYOUT["no-address"] }), [
+      ["You sent", "2.053082083 DUSK"],
+      ["Bridge fee", "1 DUSK"],
+      ["Network fee", "0.001859281 DUSK"],
+      ["You received", `0 ${token}`],
+    ]);
+    // Less than the bridge fee: the bridge kept the 0.5 DUSK it was sent, no more, then and now.
+    for (const kept of [{ receivedLux: "0" }, {}]) {
+      const under = receipt(cfg, route, { amountLux: "500000000", note: NO_PAYOUT["under-fee"], ...kept });
+      assert.deepEqual(under.details.filter((row) => !row.html).map((row) => [row.label, row.value]), [
+        ["You sent", "0.5 DUSK"],
+        ["Bridge fee", "0.5 DUSK"],
+        ["Network fee", "0.001859281 DUSK"],
+        ["You received", `0 ${token}`],
+      ]);
+      assert.equal(under.fees.exact, "0.501859281 DUSK");
+    }
+    // Never sent to the bridge's account: the bridge took nothing.
+    assert.deepEqual(rows(cfg, route, { amountLux: "2053082083", note: NO_PAYOUT.elsewhere, receivedLux: "0" }), [
+      ["You sent", "2.053082083 DUSK"],
+      ["Network fee", "0.001859281 DUSK"],
+      ["You received", `0 ${token}`],
+    ]);
+  }
+  // A deposit that failed on DuskEVM: nothing arrived there.
+  assert.deepEqual(rows(testnet, T["duskevm-deposit"], { amountLux: "25000000000", note: "The DuskEVM deposit transaction reverted" }), [
+    ["You sent", "25 DUSK"],
+    ["Network fee", "0.001859281 DUSK"],
+    ["You received", "0 DUSK"],
+  ]);
+});
+
 test("a receipt says the transfer's amounts as every Dusk app does, to the Lux", () => {
   const url = "https://bridge.example.org/#/transfer/m";
   const rows = (entry, route) => receiptModel({ hash: `0x${"0d".repeat(32)}`, id: "m", routeId: route.id, ...entry }, { cfg: testnet, route, url }).details.filter((row) => !row.html).map((row) => [row.label, row.value]);
@@ -645,9 +743,10 @@ test("a receipt says the transfer's amounts as every Dusk app does, to the Lux",
   assert.equal(sentOf({ note: "The memo isn't an EVM address, so the bridge won't pay it out." }), true);
   assert.equal(sentOf({ sourceFailed: true }), false);
   assert.equal(sentOf({ note: "The transfer failed on Dusk." }), false);
+  // Less than the bridge fee: the bridge kept the 0.5 DUSK it was sent, no more.
   assert.deepEqual(rows({ amountLux: "500000000", feeLux: "1859281", receivedLux: "0", status: "failed" }, service), [
     ["You sent", "0.5 DUSK"],
-    ["Bridge fee", "1 DUSK"],
+    ["Bridge fee", "0.5 DUSK"],
     ["Network fee", "0.001859281 DUSK"],
     ["You received", "0 ERC20 DUSK"],
   ]);
@@ -1265,4 +1364,21 @@ test("the card's route line opens on the fees' split, each fee one figure, and t
     ["Network fee", "up to 0.005 DUSK"],
     ["Total", "up to 17.881 DUSK"],
   ]);
+});
+
+test("a label reads exactly as given once its numbers are kept whole, in any language's separators, a typed name escaped", () => {
+  const labels = [
+    "Review 99,999,999.123456789 BEP20 DUSK",
+    "Review 12.345,6789 DUSK",
+    "Review 25\u202f000,1234 DUSK",
+    "Review 12\u2019345.6789 DUSK",
+    "Claim 95.085867 EURd for it",
+    "Looking up <img src=x onerror=alert(1)>.dusk…",
+    "Send  25 DUSK",
+  ];
+  for (const label of labels) {
+    const html = wholeNumbers(label, ".cta");
+    assert.equal(decode(html.replace(/<[^>]*>/gu, "")), label);
+    assert.doesNotMatch(html, /<img/u);
+  }
 });

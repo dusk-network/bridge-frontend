@@ -3,9 +3,11 @@ import test from "node:test";
 
 import { DuskSdkError } from "@dusk/connect";
 
+import { rebuilding } from "./hyperlane-review.js";
 import { SIGNER_MOVED, createReviewSession, notSent, sameSigner, sentActionPatch } from "./review-session.js";
-import { NOT_SENT } from "./pages.fixtures.js";
-import { LATER_STEP_CANCELLED, WALLET_CANCELLED, friendlyWalletError } from "./transfer-view.js";
+import { NOT_SENT, partsOf, textOf } from "./pages.fixtures.js";
+import { LATER_STEP_CANCELLED, PUBLIC_LINE, WALLET_CANCELLED, friendlyWalletError } from "./transfer-view.js";
+import { reviewSheet } from "./views.js";
 
 test("a request prepared for a closed review never fills the next one, even on the same route", async () => {
   const reviews = createReviewSession();
@@ -140,4 +142,46 @@ test("Confirm takes no click in the moment a review comes up, nor its next step,
   reviews.end();
   reviews.start({ routeId: "dusk-evm-to-dusk" });
   assert.equal(reviews.confirmable, false);
+});
+
+test("a step that couldn't be prepared stops saying it's being prepared; built again, as when its fee moved, it says so until it's ready", async () => {
+  let now = 0;
+  const reviews = createReviewSession({ now: () => now });
+  const EVM = "0x75685f9D88749B583732B40d56fe007cD404b72D";
+  const review = reviews.start({
+    checks: [],
+    current: 0,
+    error: "",
+    feeRows: [],
+    privacy: PUBLIC_LINE,
+    receive: { account: EVM, amount: "25", chain: "ethereum", full: true, unit: "EURd", where: "Sepolia" },
+    send: { account: "21n5nc…fMMLNz", amount: "25", chain: "dusk", unit: "EURd", where: "Dusk" },
+    steps: [{ confirmLabel: "Send 25 EURd", kind: "send", ready: false, title: "Send from Dusk", wait: "Preparing…", walletName: "Dusk Wallet" }],
+    sub: "",
+  });
+  // The sheet as the page draws it from the review.
+  const sheet = () =>
+    reviewSheet({ ...review, canConfirm: false, confirmLabel: review.steps[review.current].confirmLabel, steps: review.steps.map((step, index) => ({ ...step, current: index === review.current })) });
+  const waits = () => partsOf(sheet(), "waiting").map(textOf);
+  now = 1_000;
+  assert.deepEqual(waits(), ["Preparing…"]);
+
+  // The node didn't answer: why shows, and no wait beside it; there's nothing to confirm.
+  assert.equal(await reviews.fill(review, () => Promise.reject(new Error("The node didn't answer")), () => {}, (error) => (review.error = error.message)), false);
+  assert.deepEqual(waits(), []);
+  assert.deepEqual(partsOf(sheet(), "message").map(textOf), ["The node didn't answer"]);
+  assert.equal(reviews.confirmable, false);
+
+  // Built again, as when its fee moved: its wait shows until the request is ready.
+  rebuilding(review);
+  let release;
+  const again = reviews.fill(review, () => new Promise((resolve) => (release = resolve)), (request) => {
+    review.request = request;
+    review.steps[0] = { ...review.steps[0], ready: true };
+  });
+  assert.deepEqual(waits(), [review.steps[0].wait]);
+  release({ fee: 1n });
+  assert.equal(await again, true);
+  assert.deepEqual(waits(), []);
+  assert.equal(reviews.confirmable, true);
 });
