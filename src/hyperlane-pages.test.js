@@ -6,7 +6,7 @@ import { loadConfig } from "./config.js";
 import { groupTransfers } from "./discovery.js";
 import { duskRecipientHash } from "./hyperlane.js";
 import { balanceLine, receiptModel, reviewChecks, routeDetailRows, routeLines, transfersModel } from "./page-models.js";
-import { amountsIn, assertShownInFull, decode, exactly, fieldOf, fieldsOf, paidOf, stepPartsOf, textOf } from "./pages.fixtures.js";
+import { amountsIn, assertShownInFull, decode, exactly, fieldOf, fieldsOf, paidOf, partsOf, stepPartsOf, textOf } from "./pages.fixtures.js";
 
 const DUSK_TX = (hash) => `https://explorer.testnet.dusk.network/transactions/transaction?id=${hash}`;
 // That the first transfer to an account waits for its claim: never released by itself.
@@ -14,7 +14,7 @@ const CLAIMED = /\bclaim/iu;
 const AUTOMATIC = /\bautomatic/iu;
 import { buildQuote } from "./quote.js";
 import { cardPage, cardRegions, receiptPage, transferRow } from "./views.js";
-import { tokenChoices } from "./bridge-card.js";
+import { assetChoices } from "./bridge-card.js";
 
 /** The card's route line as it reads: its lines, one after the other. */
 const routeLine = (route, cfg, options) => routeLines(route, cfg, options).join(" ");
@@ -74,10 +74,13 @@ const steps = (model) => model.view.steps.map(({ key, state }) => [key, state]);
 const opened = (page) => page.replace(/<details(?![^>]*\bopen\b)/gu, "<details open");
 // What each of a receipt's fields says, as amounts.
 const amountsOf = (page, labels) => labels.map((label) => amountsIn(fieldOf(page, label).text));
-// The tokens a card's menu offers: the route a press picks, beside the token it shows and what's said under it.
-const tokenOptions = (page) =>
-  [...page.matchAll(/<button\b[^>]*\bdata-action="pick-token" data-route="([^"]*)" aria-selected="(true|false)"[^>]*>[\s\S]*?<span class="nm">([^<]*)<\/span><span class="sb">([^<]*)<\/span>/gu)].map(
-    ([, route, selected, symbol, sub]) => ({ route: decode(route), selected: selected === "true", sub: decode(sub), symbol: decode(symbol) }),
+const pickerOptions = (page) =>
+  [...page.matchAll(/<button\b[^>]*\bdata-action="pick-(?:asset|net)" data-(?:asset|route)="([^"]*)" aria-selected="(true|false)"[^>]*>([\s\S]*?)<\/button>/gu)].map(
+    ([, value, selected, body]) => ({
+      value: decode(value),
+      selected: selected === "true",
+      text: [...partsOf(body, "nm"), ...partsOf(body, "sb")].map(textOf).join(" "),
+    }),
   );
 
 test("a transfer to Sepolia shows its message on its way, its fees in DUSK, and Sepolia's transaction once it arrives", () => {
@@ -204,7 +207,7 @@ test("a Hyperlane route's row and checks say its time, its fees' coin, and the f
   );
 });
 
-test("the card offers the pair's tokens, each by the route it picks, and what the routes hold for the account, each to claim for its own account", () => {
+test("the card offers assets to send and shows what the routes hold for the account", () => {
   const route = byId["dusk-to-sepolia-eurd"];
   const quote = buildQuote(route, "10", { balance: 20_000_000_000n, cfg, gasPrice: 1n, hyperlane: { allowance: 0n, fee: 16_876_000_000n, tokenBalance: 49_805_396_789n } });
   const vm = {
@@ -216,7 +219,7 @@ test("the card offers the pair's tokens, each by the route it picks, and what th
     error: "",
     escrow: { held: [{ amount: "10 USDd", route: "sepolia-to-dusk-usdd", sent: "" }, { amount: "2 DUSK", route: "sepolia-to-dusk", sent: "Claim sent, waiting for Dusk." }] },
     from: { balance: "49,805.3967 EURd", balanceLabel: "Balance", net: { id: "dusk", name: "Dusk" } },
-    fromChoices: [],
+    assets: assetChoices(buildRoutes(cfg), route, "from"),
     menu: null,
     needsCount: 0,
     notice: null,
@@ -229,16 +232,13 @@ test("the card offers the pair's tokens, each by the route it picks, and what th
     routeOpen: false,
     tab: "bridge",
     to: { editing: false, error: "", fix: "", input: "", label: "Recipient on Sepolia", line: "to your MetaMask", looking: "", net: { id: "ethereum", name: "Sepolia" }, placeholder: "0x…", resolved: null },
-    toChoices: [],
-    tokens: tokenChoices(buildRoutes(cfg), route),
     unit: "EURd",
   };
-  // The token sent, and the menu's tokens: each shown beside the route a press picks, the chosen one selected.
-  assert.match(textOf(/<button\b[^>]*\bclass="token tokbtn"[^>]*>[\s\S]*?<\/button>/u.exec(cardPage(vm))[0]), exactly("EURd"));
-  assert.deepEqual(tokenOptions(cardPage({ ...vm, menu: "token" })).map(({ route: id, selected, symbol }) => [id, symbol, selected]), [
-    ["dusk-to-sepolia", "DUSK", false],
-    ["dusk-to-sepolia-eurd", "EURd", true],
-    ["dusk-to-sepolia-usdd", "USDd", false],
+  assert.match(textOf(/<button\b[^>]*\bclass="tokbtn"[^>]*>[\s\S]*?<\/button>/u.exec(cardPage(vm))[0]), exactly("EURd on Dusk"));
+  assert.deepEqual(pickerOptions(cardPage({ ...vm, menu: { side: "from" } })).map(({ value, selected }) => [value, selected]), [
+    ["DUSK", false],
+    ["EURd", true],
+    ["USDd", false],
   ]);
   // What waits for the account, with Claim, or the claim sent in its place.
   const { escrow } = cardRegions(vm);
@@ -256,7 +256,7 @@ test("the card offers the pair's tokens, each by the route it picks, and what th
   assert.ok(stuck.includes(`data-copy="${link}"`) && !stuck.includes("escrow-claim"), stuck);
 });
 
-test("where Sepolia's own DUSK route runs beside Hyperlane's, the token list says what each DUSK arrives as, by the route it picks", () => {
+test("the DUSK network step tells Sepolia's ERC20 DUSK and Hyperlane DUSK routes apart", () => {
   globalThis.__DUSK_BRIDGE_CONFIG__ = { VITE_BRIDGE_PROFILE: "testnet", VITE_PAUSED_ROUTES: "none" };
   const running = loadConfig();
   delete globalThis.__DUSK_BRIDGE_CONFIG__;
@@ -271,8 +271,11 @@ test("where Sepolia's own DUSK route runs beside Hyperlane's, the token list say
     error: "",
     escrow: null,
     from: { balance: "", balanceLabel: "Public balance", net: { id: "dusk", name: "Dusk" } },
-    fromChoices: [],
-    menu: "token",
+    menu: { side: "to", asset: "DUSK" },
+    networks: assetChoices(all, route, "to").find(({ symbol }) => symbol === "DUSK").networks.map((choice) => ({
+      ...choice,
+      name: choice.network === "ethereum" ? "Sepolia" : "DuskEVM",
+    })),
     needsCount: 0,
     notice: null,
     privacy: "",
@@ -285,16 +288,11 @@ test("where Sepolia's own DUSK route runs beside Hyperlane's, the token list say
     steps: [],
     tab: "bridge",
     to: { editing: false, error: "", fix: "", input: "", label: "Recipient on Sepolia", line: "", looking: "", net: { id: "ethereum", name: "Sepolia" }, placeholder: "0x…", resolved: null },
-    toChoices: [],
-    tokens: tokenChoices(all, route),
     unit: "DUSK",
   });
-  // Each option: the route a press picks, the token it shows, and the token that arrives where two send DUSK.
-  const arrives = (sub) => sub.match(/\bas\s+(.+)$/u)?.[1] ?? "";
-  assert.deepEqual(tokenOptions(page).map(({ route: id, sub, symbol }) => [id, symbol, arrives(sub)]), [
-    ["dusk-to-ethereum", "DUSK", "ERC20 DUSK"],
-    ["dusk-to-sepolia", "DUSK", "DUSK"],
-    ["dusk-to-sepolia-eurd", "EURd", ""],
-    ["dusk-to-sepolia-usdd", "USDd", ""],
+  assert.deepEqual(pickerOptions(page), [
+    { value: "dusk-to-ethereum", selected: false, text: "Sepolia ERC20 DUSK" },
+    { value: "dusk-to-sepolia", selected: true, text: "Sepolia DUSK" },
+    { value: "dusk-to-dusk-evm", selected: false, text: "DuskEVM" },
   ]);
 });

@@ -11,7 +11,7 @@ import { toDuskName } from "@duskdomains/sdk/names";
 import { entryId, minedTransfer, readActivity, recordActivity, saveActivity, updateActivity, useActivityNetwork } from "./activity.js";
 import { NOTICE_WORDS, createArrivalNotice, createEndWatch } from "./arrival-notice.js";
 import { bridgeRoutes, getBridgeRoute } from "./bridge-routes.js";
-import { cardRoute, choosePair, entryRoutes, flipRoute, followsWallets, fromChoices, handedOverRecipient, primaryButton, routeBetween, toChoices, tokenChoices, tokenOf } from "./bridge-card.js";
+import { assetChoices, cardRoute, entryRoutes, flipRoute, followsWallets, handedOverRecipient, primaryButton, routeBetween } from "./bridge-card.js";
 import { claimReminder } from "./calendar.js";
 import { createClaimWatch } from "./claim-watch.js";
 import { showCopied } from "./copied.js";
@@ -613,21 +613,6 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
 
   const netOf = (id) => ({ id, name: networkName(cfg, id) });
 
-  /** The card's networks to choose from, each by its route's time, with DuskEVM shown as not live yet where it isn't. */
-  function networkChoices(side, route) {
-    const nameOf = (id) => networkName(cfg, id);
-    const paused = notRunning(cfg);
-    const choices = side === "from" ? fromChoices(routes, route.from.id, nameOf, paused) : toChoices(routes, route.from.id, route.to.id, nameOf, paused, tokenOf(route));
-    const listed = choices.map((choice) => ({
-      ...choice,
-      name: nameOf(choice.id),
-      // Its fees are on the card as soon as it's picked.
-      note: choice.route ? routeTimeText(routeTime(choice.route, cfg, timing())) : "",
-    }));
-    if (!cfg.duskEvm.enabled) listed.push({ disabled: "Not live yet", id: "dusk-evm", name: names["dusk-evm"] });
-    return listed;
-  }
-
   function cardVm() {
     const route = formRoute();
     const quote = quoteFor(route);
@@ -635,6 +620,14 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     const phoneOnly = isPhone() && !duskState().installed;
     // ERC20 or BEP20 DUSK on Ethereum and BNB Smart Chain, DUSK on Dusk and DuskEVM.
     const { receive: receiveUnit, send: unit } = routeUnits(route);
+    const menu = state.form.menu;
+    const assets = menu ? assetChoices(routes, route, menu.side) : [];
+    const networks = assets.find(({ symbol }) => symbol === menu?.asset)?.networks.map((choice) => {
+      const option = routeOf(choice.id);
+      const detail = option.paused ? notRunning(cfg) : menu.side === "to" ? routeTimeText(routeTime(option, cfg, timing())) : "";
+      const destination = menu.side === "from" && option.to.id !== route.to.id ? `To ${networkName(cfg, option.to.id)}` : "";
+      return { ...choice, name: networkName(cfg, choice.network), note: [choice.note, destination, detail].filter(Boolean).join(" · ") };
+    }) ?? [];
     // What the source holds: the public balance on Dusk, the wallet's on an EVM chain; a Hyperlane route's token.
     const holdings =
       route.mode === "hyperlane"
@@ -750,9 +743,10 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
         balanceLabel: route.signer === "dusk" && !(route.mode === "hyperlane" && !route.hyperlane.native) ? "Public balance" : "Balance",
         net: netOf(route.from.id),
       },
-      fromChoices: state.form.menu === "from" ? networkChoices("from", route) : [],
-      menu: state.form.menu,
+      assets,
+      menu,
       needsCount: transfersVm().needs,
+      networks,
       notice,
       // What becomes public, behind the route line.
       privacy: privacyLine(route, {
@@ -770,9 +764,6 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       status: statusLine(routeStatus.get(route), { amountLux: quote.amountLux }),
       tab: "bridge",
       to: toVm,
-      toChoices: state.form.menu === "to" ? networkChoices("to", route) : [],
-      // The tokens the pair moves, where it moves more than one.
-      tokens: tokenChoices(routes, route),
       unit,
     };
   }
@@ -2587,9 +2578,36 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     true,
   );
 
-  // Escape closes the network list.
+  function focusPicker(side) {
+    root.querySelector(`[data-action="open-menu"][data-side="${side}"]`)?.focus();
+  }
+
+  function focusPickerOption() {
+    const option = root.querySelector('.netmenu [aria-selected="true"]:not([aria-disabled="true"])')
+      ?? root.querySelector('.netmenu [role="option"]:not([aria-disabled="true"])')
+      ?? root.querySelector('.netmenu [data-action="picker-back"]');
+    option?.focus();
+  }
+
+  function closePicker() {
+    const side = state.form?.menu?.side;
+    if (!side) return;
+    state.form.menu = null;
+    renderMain();
+    focusPicker(side);
+  }
+
+  function backToAssets() {
+    const menu = state.form?.menu;
+    if (!menu?.asset) return;
+    const { side, asset } = menu;
+    state.form.menu = { side };
+    renderMain();
+    root.querySelector(`.netmenu [data-asset="${CSS.escape(asset)}"]`)?.focus();
+  }
+
   root.addEventListener("keydown", (event) => {
-    // The network list is a list: arrows move through what can be picked.
+    // Arrows move through the options that can be picked in either step.
     const list = event.target.closest?.(".netmenu");
     if (list && ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
       const options = [...list.querySelectorAll('[role="option"]:not([disabled]):not([aria-disabled="true"])')];
@@ -2600,10 +2618,9 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       return;
     }
     if (event.key === "Escape" && state.form?.menu) {
-      const side = state.form.menu;
-      state.form.menu = null;
-      renderMain();
-      root.querySelector(`[data-action="open-menu"][data-side="${side}"]`)?.focus();
+      event.preventDefault();
+      if (state.form.menu.asset) backToAssets();
+      else closePicker();
     }
   });
 
@@ -2619,7 +2636,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
   });
 
   root.addEventListener("click", (event) => {
-    // A click outside the network list closes it.
+    // A click outside the picker closes it.
     if (state.form?.menu && !event.target.closest(".netsel") && isCardPage()) {
       state.form.menu = null;
       renderMain();
@@ -2754,40 +2771,35 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
       },
       skip: () => slot("main").querySelector("#main")?.focus(),
       "switch-chain": switchChain,
-      // The card: its network lists, the flip, and the recipient and gas.
+      // The card: its asset picker, the flip, and the recipient and gas.
       "open-menu": () => {
         const side = target.dataset.side;
-        state.form.menu = state.form.menu === side ? null : side;
+        if (state.form.menu?.side === side) return closePicker();
+        state.form.menu = { side };
         renderMain();
-        root.querySelector('.netmenu .netopt[aria-selected="true"], .netmenu .netopt:not([aria-disabled="true"])')?.focus();
+        focusPickerOption();
       },
-      "close-menu": () => {
-        state.form.menu = null;
-        renderMain();
-      },
+      "close-menu": closePicker,
+      "picker-back": backToAssets,
       // The route's approval couldn't be read: read what the card needs again.
       "read-again": () => {
         void loadReads();
         renderMain();
       },
-      "pick-net": () => {
-        if (target.getAttribute("aria-disabled") === "true") return;
-        const route = formRoute();
-        const net = target.dataset.net;
-        // The token stays where the new pair moves it.
-        const token = tokenOf(route);
-        const next = target.dataset.side === "from" ? choosePair(routes, { from: net, to: route.to.id, token }) : routeBetween(routes, route.from.id, net, token);
-        if (next) setPair(next);
-        state.form.menu = null;
+      "pick-asset": () => {
+        const side = state.form?.menu?.side;
+        if (!side) return;
+        state.form.menu = { side, asset: target.dataset.asset };
         renderMain();
-        root.querySelector(`[data-action="open-menu"][data-side="${target.dataset.side}"]`)?.focus();
+        focusPickerOption();
       },
-      "pick-token": () => {
-        const next = routes.find((route) => route.id === target.dataset.route);
-        if (next) setPair(next);
-        state.form.menu = null;
+      "pick-net": () => {
+        const menu = state.form?.menu;
+        const next = routes.find(({ id }) => id === target.dataset.route);
+        if (!menu?.asset || !next || target.getAttribute("aria-disabled") === "true") return;
+        setPair(next);
         renderMain();
-        root.querySelector('[data-action="open-menu"][data-side="token"]')?.focus();
+        focusPicker(menu.side);
       },
       flip: () => {
         const back = flipRoute(routes, formRoute());

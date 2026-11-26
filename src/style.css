@@ -332,37 +332,31 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 /*
  * The swap button sits on the 6 px seam between the cards and reaches
  * (its size - 6) / 2 into each: 18 px, 19 px on a phone. Beside it, each
- * card keeps that and 8 px clear: To above its network, always there, and
+ * card keeps that and 8 px clear: To above its label, always there, and
  * From below its foot or the amount's error once either shows anything.
  * An empty foot keeps more than that already.
  */
 .panel.from { padding-bottom: 20px; }
 .panel.from:has(.panel-f .bal > *, .field-error:not(:empty)) { padding-bottom: calc((var(--flip) - 6px) / 2 + 8px); }
 .flip-row + .panel { padding-top: calc((var(--flip) - 6px) / 2 + 8px); }
-.panel-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 36px; }
 .panel-l { color: var(--text-2); font-size: 14px; }
 .netsel { position: relative; }
-.netbtn { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px 0 4px; border: 0; border-radius: 999px; background: var(--surface-2); color: var(--text); font-size: 14.5px; font-weight: 500; white-space: nowrap; }
-.netbtn:hover { background: var(--surface-3); }
-.netbtn .cm { width: 28px; height: 28px; background: var(--surface-3); }
-.netbtn .cm svg.glyph, .netbtn .cm .mk-svg { width: 15px; height: 15px; }
-.netbtn > svg.ic { width: 15px; height: 15px; color: var(--text-2); }
-.netbtn .evm-tag { right: -6px; bottom: -3px; box-shadow: 0 0 0 2px var(--surface-2); font-size: 7px; line-height: 11px; }
-.netbtn .cm.evm { margin-right: 6px; }
-.amt-row { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+.amt-row { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
 .amt-row input, .amt-row .out { flex: 1 1 auto; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--text); font-size: 36px; line-height: 1.2; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; outline: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .amt-row input::placeholder, .amt-row .out.empty { color: var(--text-3); }
 /* An amount that doesn't fit beside its token, even smaller (fit.js): on a line of its own, the token under it, at the end. */
 .amt-row.long { flex-wrap: wrap; }
 .amt-row.long > input, .amt-row.long > .out { flex-basis: 100%; }
-.amt-row.long > .token, .amt-row.long > .netsel { margin-left: auto; }
-.token { display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 14px 0 4px; border-radius: 999px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--hair-2); font-size: 15px; font-weight: 500; white-space: nowrap; flex: 0 0 auto; }
-.token .cm { width: 28px; height: 28px; }
-.token .cm svg.glyph, .token .cm .mk-svg { width: 15px; height: 15px; }
-.token .evm-tag { display: none; }
-.tokbtn { gap: 6px; padding-right: 10px; border: 0; color: var(--text); }
-.tokbtn:hover { background: var(--surface-2); }
+.amt-row.long > .netsel { margin-left: auto; }
+.tokbtn { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 5px 10px 5px 6px; border: 0; border-radius: 999px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--hair-2); color: var(--text); text-align: left; white-space: nowrap; }
+.tokbtn:hover, .tokbtn[aria-expanded="true"] { background: var(--surface-2); }
+.tokbtn .cm { width: 32px; height: 32px; }
+.tokbtn .cm svg.glyph, .tokbtn .cm .mk-svg { width: 16px; height: 16px; }
+.tokbtn .evm-tag { display: none; }
 .tokbtn > svg.ic { width: 15px; height: 15px; color: var(--text-2); }
+.tok-name, .tok-network { display: block; line-height: 1.25; }
+.tok-name { font-size: 15px; font-weight: 500; }
+.tok-network { margin-top: 2px; color: var(--text-2); font-size: 12px; }
 .netopt .tk { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 999px; background: var(--surface-3); font-size: 13px; font-weight: 600; }
 .panel-f { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 22px; margin-top: 8px; color: var(--text-2); font-size: 13px; }
 .panel-f .mini { height: 24px; padding: 0 10px; font-size: 12.5px; }
@@ -404,12 +398,13 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 .bcard .cta .hint { margin-top: 8px; text-align: center; }
 .under { width: 100%; max-width: 472px; color: var(--text-2); font-size: 13px; text-align: center; }
 
-/* The network list: under its button on a computer, a sheet from the
+/* The asset and network picker: under its button on a computer, a sheet from the
    bottom on a phone. */
-.netmenu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 20; width: 288px; padding: 6px; border-radius: 16px; background: var(--surface); box-shadow: 0 0 0 1px var(--hair-2), 0 18px 48px var(--shadow); }
-.netmenu-t { padding: 8px 10px 6px; color: var(--text-2); font-size: 12.5px; }
+.netmenu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 20; width: 288px; max-height: 70dvh; overflow: auto; padding: 6px; border-radius: 16px; background: var(--surface); box-shadow: 0 0 0 1px var(--hair-2), 0 18px 48px var(--shadow); }
+.netmenu-head { display: flex; align-items: center; gap: 4px; padding: 2px 4px 4px; }
+.netmenu-t { flex: 1; padding: 0 6px; color: var(--text-2); font-size: 13px; }
 .netopt { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; min-height: 50px; padding: 6px 10px; border: 0; border-radius: 12px; background: transparent; color: var(--text); text-align: left; }
-.netopt:hover:not([aria-disabled="true"]), .netopt[aria-checked="true"] { background: var(--surface-2); }
+.netopt:hover:not([aria-disabled="true"]), .netopt[aria-checked="true"], .netopt[aria-selected="true"] { background: var(--surface-2); }
 .netopt .cm { width: 32px; height: 32px; }
 .netopt .nm { display: block; font-size: 14.5px; font-weight: 500; }
 .netopt .sb { display: block; color: var(--text-2); font-size: 12.5px; }
@@ -734,7 +729,7 @@ form.group .l1 { display: block; color: var(--text); font-size: 14px; font-weigh
   .act .trs .pair .cm { width: 26px; height: 26px; }
   .act-h { flex-direction: column; }
   /* Everything a thumb presses is 44 px each way, as in the web wallet. */
-  .skip, .hdr-r .net, .hdr-r .wpill, .tab, .netbtn, .tokbtn, .btn.sm, .btn.xs { height: 44px; }
+  .skip, .hdr-r .net, .hdr-r .wpill, .tab, .btn.sm, .btn.xs { height: 44px; }
   .action-box .btn.sm, .notice-box .btn.sm { height: auto; min-height: 44px; }
   .panel-f .mini { min-width: 44px; height: 44px; }
   .brand { min-width: 44px; }

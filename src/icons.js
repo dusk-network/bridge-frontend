@@ -12,6 +12,7 @@ const PATHS = {
   "chev-r": ['<path d="M9.5 6l6 6-6 6"/>'],
   "arrow-r": ['<path d="M5 12h14"/>', '<path d="M13 6l6 6-6 6"/>'],
   "arrow-d": ['<path d="M12 5v14"/>', '<path d="M6 13l6 6 6-6"/>'],
+  "arrow-up-down": ['<path d="M8 5v14m-4-4 4 4 4-4"/>', '<path d="M16 19V5m-4 4 4-4 4 4"/>'],
   clock: ['<circle cx="12" cy="12" r="8.5"/>', '<path d="M12 7.5V12l3 2"/>'],
   sliders: ['<path d="M4 7h10"/>', '<path d="M18 7h2"/>', '<circle cx="16" cy="7" r="2"/>', '<path d="M4 17h2"/>', '<path d="M10 17h10"/>', '<circle cx="8" cy="17" r="2"/>'],
   close: ['<path d="M6 6l12 12"/>', '<path d="M18 6L6 18"/>'],
