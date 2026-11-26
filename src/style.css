@@ -319,7 +319,7 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 
 .swap { width: 100%; max-width: 72rem; margin: 0 auto; padding: 40px 16px 8px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
 .bcard { position: relative; width: 100%; max-width: 472px; padding: 8px 8px 10px; border-radius: 24px; background: var(--surface); box-shadow: 0 0 0 1px var(--hair); --flip: 42px; }
-.bcard-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 2px 8px; }
+.bcard-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 2px 8px; }
 .tabs { display: flex; gap: 2px; }
 .tab { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; border: 0; border-radius: 999px; background: transparent; color: var(--text-2); font-size: 15px; font-weight: 500; text-decoration: none; }
 .tab:hover { color: var(--text); }
@@ -426,9 +426,8 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 /* The Activity tab: the transfers in the card, a little wider on a computer. */
 .bcard.wide { max-width: 720px; }
 .act { padding: 2px 6px 6px; }
-.act-h { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.act-h .lede { margin: 6px 0 0; font-size: 13.5px; }
-.act .sync { margin: 8px 0 0; min-height: 1px; }
+.act .lede { margin: 6px 0 0; font-size: 13.5px; }
+.act .sync:not(:empty) { margin-top: 8px; }
 .act .sec-t { margin: 18px 0 0; padding: 7px 12px; border-radius: 10px; background: var(--surface-2); color: var(--text-2); font-size: 12.5px; font-weight: 400; }
 .act .trs .tr { grid-template-columns: 84px minmax(0, 1fr) auto; padding: 12px 8px; }
 /* The route's marks and DuskEVM's tag stay inside their cell, clear of the text. */
@@ -437,7 +436,10 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 .act .trs .pair .cm { width: 28px; height: 28px; }
 .act .trs .evm-tag { right: -3px; bottom: -3px; box-shadow: 0 0 0 1.5px var(--surface); }
 .act .empty { margin-top: 16px; padding: 16px; border-radius: 14px; background: var(--field); }
-.act .watch { margin-top: 14px; background: var(--field); }
+.act .watch { margin-top: 8px; background: var(--field); }
+.act .watching { margin-top: 12px; }
+.watch form .btn { margin-top: 10px; }
+.watch-wallets { padding-top: 12px; border-top: 1px solid var(--hair); }
 
 /* ------------------------------------------------------------------ */
 /* Sheets (native dialogs: focus stays inside, Escape closes)          */
@@ -655,11 +657,8 @@ details[open]::details-content { block-size: auto; opacity: 1; transition-durati
 .trk .turn span { color: var(--text); font-weight: 500; }
 .trk .failed i { background: var(--red); }
 .trk .failed span { color: var(--red); }
-.empty p + .btn-row { margin-top: 12px; }
 form.group .btn.full { margin-top: 12px; }
-form.group .l1 { display: block; color: var(--text); font-size: 14px; font-weight: 500; }
-.watch, .watching { margin-top: 16px; max-width: 40rem; }
-.watch .btn { margin-top: 10px; }
+form .l1 { display: block; color: var(--text); font-size: 14px; font-weight: 500; }
 
 /* ------------------------------------------------------------------ */
 /* Narrower windows, then phones                                       */
@@ -732,7 +731,6 @@ form.group .l1 { display: block; color: var(--text); font-size: 14px; font-weigh
   .netscrim { display: block; position: fixed; inset: 0; z-index: 40; background: var(--scrim); }
   .act .trs .tr { grid-template-columns: 76px minmax(0, 1fr); padding: 12px 4px; }
   .act .trs .pair .cm { width: 26px; height: 26px; }
-  .act-h { flex-direction: column; }
   /* Everything a thumb presses is 44 px each way, as in the web wallet. */
   .skip, .hdr-r .net, .hdr-r .wpill, .tab, .netbtn, .tokbtn, .btn.sm, .btn.xs { height: 44px; }
   .action-box .btn.sm, .notice-box .btn.sm { height: auto; min-height: 44px; }

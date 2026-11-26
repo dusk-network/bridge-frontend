@@ -805,7 +805,7 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
 
   function cardHtml(tab) {
     const form = ensureCard();
-    if (tab === "activity") return cardPage({ activity: activityHtml(), needsCount: transfersVm().needs, tab: "activity" });
+    if (tab === "activity") return activityHtml();
     if (!form) return unavailablePage({ pageError: pageErrorText(), title: unavailableTitle("") });
     return cardPage(cardVm());
   }
@@ -1094,27 +1094,26 @@ export function createAppController(root, { cfg = config, routes = bridgeRoutes,
     let syncText = "";
     if (discovery.running) syncText = "Reading the networks…";
     else if (discovery.errors.length) syncText = "Some networks didn't answer. It tries again on your next visit.";
-    const groups = vm.groups;
-    const empty = vm.count
-      ? ""
-      : who.length
-        ? discovery.running
-          ? "Looking for transfers…"
-          : "No transfers yet."
-        : "Connect a wallet or follow an account";
-    return activityPanel({
-      canAct: duskState().installed,
+    const compact = !vm.count && !who.length;
+    const empty = vm.count || compact ? "" : discovery.running ? "Looking for transfers…" : "No transfers yet.";
+    const duskInstalled = duskState().installed;
+    const walletActions = compact
+      ? `<div class="btn-row watch-wallets">${duskInstalled ? '<button type="button" class="btn sec sm" data-action="connect-dusk">Connect Dusk Wallet</button>' : ""}<button type="button" class="btn sec sm" data-action="connect-evm">Connect EVM wallet</button></div>`
+      : "";
+    const activity = activityPanel({
+      canAct: duskInstalled,
       empty,
-      emptyActions: who.length ? "" : `<div class="btn-row">${duskState().installed ? '<button type="button" class="btn sec sm" data-action="connect-dusk">Connect Dusk Wallet</button>' : ""}<button type="button" class="btn sec sm" data-action="connect-evm">Connect EVM wallet</button></div>`,
-      groups,
+      groups: vm.groups,
       lede: who.join(" · "),
       more: more && !discovery.running,
       pageError: pageErrorText(),
       syncing: discovery.running,
       syncText,
+      walletActions,
       // Without a connected Dusk account: follow one by its account or .dusk name.
       watch: duskAccount() ? null : { ...state.watch, following: watching ? watching.name || short(watching.account) : "" },
     });
+    return cardPage({ activity, compact, needsCount: vm.needs, tab: "activity" });
   }
 
   // -------------------------------------------------------------------------
