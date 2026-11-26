@@ -230,6 +230,17 @@ export const fetchFrom = async (address, { limit, to, get = fetch } = {}) => {
 /** The repository whose Deploy workflow attests each build's manifest. */
 export const REPOSITORY = new URL(pkg.homepage).pathname.slice(1);
 
+/**
+ * The repository's name before it was renamed bridge-frontend: what
+ * attestations made before then name, as GitHub's certificates keep the name
+ * a build was made under. Its builds' commits are still checked against
+ * UPSTREAM, the same repository by its current name.
+ */
+export const FORMER_REPOSITORY = "dusk-network/dusk-bridge";
+
+/** The names a manifest's attestation is looked for under, in order. */
+export const ATTESTING_REPOSITORIES = [REPOSITORY, FORMER_REPOSITORY];
+
 /** The sites the Deploy workflow deploys: testnet from main, mainnet from a release's tag. */
 export const TESTNET_SITE = "https://bridge.testnet.dusk.network/";
 export const MAINNET_SITE = "https://bridge.dusk.network/";
@@ -481,15 +492,25 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
     writeFileSync(file, served);
 
-    try {
-      execFileSync("gh", attestationArgs(file, manifest.commit, ref), { stdio: ["ignore", "ignore", "pipe"] });
-    } catch (error) {
-      process.stderr.write(error.stderr ?? `${error.message}\n`);
+    // Under the repository's name now, or the one it had when it was built.
+    const errors = [];
+    const attestedBy = ATTESTING_REPOSITORIES.find((repository) => {
+      try {
+        execFileSync("gh", attestationArgs(file, manifest.commit, ref, repository), { stdio: ["ignore", "ignore", "pipe"] });
+        return true;
+      } catch (error) {
+        errors.push(error.stderr ?? `${error.message}\n`);
+        return false;
+      }
+    });
+
+    if (!attestedBy) {
+      for (const error of errors) process.stderr.write(error);
       console.error(`${site}${MANIFEST} has no attestation of ${REPOSITORY}'s Deploy workflow for ${manifest.commit} from ${ref}.`);
       process.exit(1);
     }
 
-    console.log(`GitHub attests ${REPOSITORY}'s Deploy workflow built ${site}${MANIFEST} from ${manifest.commit}, on ${ref}.`);
+    console.log(`GitHub attests ${attestedBy}'s Deploy workflow built ${site}${MANIFEST} from ${manifest.commit}, on ${ref}.`);
   }
 
   const git = (...gitArgs) => execFileSync("git", gitArgs, { encoding: "utf8", stdio: "pipe" }).trim();
