@@ -185,43 +185,25 @@ function recipientNote(to) {
   return "";
 }
 
-const netButton = (side, net, open) =>
-  `<button type="button" class="netbtn" data-action="open-menu" data-side="${side}" aria-haspopup="listbox" aria-expanded="${open ? "true" : "false"}" aria-label="${side === "from" ? "From" : "To"}: ${html(net.name)}. Choose the network">${chainMark(net.id)}<span>${html(net.name)}</span>${icon("chev-d")}</button>`;
-
-/** The networks to choose from: under the button on a computer, a sheet from the bottom on a phone. */
-function netMenu(side, choices) {
-  const title = side === "from" ? "From" : "To";
-  // Why one can't be picked, where that isn't plain (`disabled` in words), or its route's time.
-  const sub = (choice) => (typeof choice.disabled === "string" ? choice.disabled : choice.note);
-  const options = choices
-    .map(
-      (choice) =>
-        `<button type="button" class="netopt" role="option" data-action="pick-net" data-side="${side}" data-net="${html(choice.id)}" aria-selected="${choice.selected ? "true" : "false"}"${choice.disabled ? ' aria-disabled="true"' : ""}>${chainMark(choice.id)}<span><span class="nm">${html(choice.name)}</span>${sub(choice) ? `<span class="sb">${html(sub(choice))}</span>` : ""}</span>${choice.selected ? icon("check") : ""}</button>`,
-    )
-    .join("");
-  return `<div class="netscrim" data-action="close-menu"></div><div class="netmenu" role="listbox" aria-label="${title}"><p class="netmenu-t">${title}</p>${options}</div>`;
+/** Pick an asset, then the network and representation for that side. */
+function assetMenu(vm, label) {
+  const asset = vm.menu.asset;
+  const options = asset
+    ? vm.networks.map(({ id, name, network, note, selected, disabled }) =>
+      `<button type="button" class="netopt" role="option" data-action="pick-net" data-route="${html(id)}" aria-selected="${selected}"${disabled ? ' aria-disabled="true"' : ""}>${chainMark(network)}<span><span class="nm">${html(name)}</span>${note ? `<span class="sb">${html(note)}</span>` : ""}</span>${selected ? icon("check") : ""}</button>`)
+    : vm.assets.map(({ symbol, name, selected }) =>
+      `<button type="button" class="netopt" role="option" data-action="pick-asset" data-asset="${html(symbol)}" aria-selected="${selected}">${symbol === "DUSK" ? chainMark("dusk") : `<span class="tk" aria-hidden="true">${html(symbol.charAt(0))}</span>`}<span><span class="nm">${html(symbol)}</span>${name.toUpperCase() === symbol.toUpperCase() ? "" : `<span class="sb">${html(name)}</span>`}</span>${selected ? icon("check") : ""}</button>`);
+  const back = asset ? `<button type="button" class="icon-btn" data-action="picker-back" aria-label="Back to assets">${icon("back")}</button>` : "";
+  const title = asset ? "Select Network" : `Select ${label === "From" ? "source" : "destination"} asset`;
+  return `<div class="netscrim" data-action="close-menu"></div><div class="netmenu"><div class="netmenu-head">${back}<p class="netmenu-t">${title}</p><button type="button" class="icon-btn" data-action="close-menu" aria-label="Close asset picker">${icon("close")}</button></div><div role="listbox" aria-label="${label} ${asset ? "network" : "asset"}">${options.join("")}</div></div>`;
 }
 
-/**
- * The tokens a pair moves, to choose one: under the token on a computer, a
- * sheet from the bottom on a phone. Two that send the same say what arrives.
- */
-function tokenMenu(choices) {
-  const options = choices
-    .map(
-      (choice) =>
-        `<button type="button" class="netopt" role="option" data-action="pick-token" data-route="${html(choice.id)}" aria-selected="${choice.selected ? "true" : "false"}"><span class="tk" aria-hidden="true">${html(choice.symbol.charAt(0))}</span><span><span class="nm">${html(choice.symbol)}</span>${choice.name || choice.note ? `<span class="sb">${html([choice.name, choice.note].filter(Boolean).join(" · "))}</span>` : ""}</span>${choice.selected ? icon("check") : ""}</button>`,
-    )
-    .join("");
-  return `<div class="netscrim" data-action="close-menu"></div><div class="netmenu" role="listbox" aria-label="Token"><p class="netmenu-t">Token</p>${options}</div>`;
-}
-
-/** What's sent, by its token: a choice where the pair moves more than one. */
-function tokenControl(vm) {
-  const mark = `${chainMark(vm.from.net.id)}${html(vm.unit)}`;
-  if (!vm.tokens?.length) return `<span class="token">${mark}</span>`;
-  const open = vm.menu === "token";
-  return `<div class="netsel"><button type="button" class="token tokbtn" data-action="open-menu" data-side="token" aria-haspopup="listbox" aria-expanded="${open ? "true" : "false"}" aria-label="Token: ${html(vm.unit)}. Choose the token">${mark}${icon("chev-d")}</button>${open ? tokenMenu(vm.tokens) : ""}</div>`;
+function assetControl(side, vm) {
+  const { net } = vm[side];
+  const unit = side === "from" ? vm.unit : vm.receiveUnit;
+  const label = side === "from" ? "From" : "To";
+  const open = vm.menu?.side === side;
+  return `<div class="netsel"><button type="button" class="tokbtn" data-action="open-menu" data-side="${side}" aria-haspopup="listbox" aria-expanded="${open}" aria-label="${label}: ${html(unit)} on ${html(net.name)}. Choose asset and network">${chainMark(net.id)}<span><span class="tok-name">${html(unit)}</span><span class="tok-network">on ${html(net.name)}</span></span>${icon("chev-d")}</button>${open ? assetMenu(vm, label) : ""}</div>`;
 }
 
 /**
@@ -343,19 +325,19 @@ export function cardPage(vm) {
   const notice = vm.notice
     ? `<div class="card notice-box" role="note"><div class="note">${icon(vm.notice.icon ?? "info")}<span>${vm.notice.html}</span></div>${vm.notice.actions ?? ""}</div>`
     : "";
-  const from = `<div class="panel from"><div class="panel-h"><span class="panel-l">From</span><div class="netsel">${netButton("from", vm.from.net, vm.menu === "from")}${vm.menu === "from" ? netMenu("from", vm.fromChoices) : ""}</div></div>
-      <div class="amt-row" data-fit-row><input id="amount" name="amount" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="0" value="${html(vm.amount)}" aria-label="Amount, in ${html(vm.unit)}" aria-describedby="amount-help amount-error"${vm.amountError ? ' aria-invalid="true"' : ""}>${tokenControl(vm)}</div>
+  const from = `<div class="panel from"><div class="panel-l">From</div>
+      <div class="amt-row" data-fit-row><input id="amount" name="amount" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="0" value="${html(vm.amount)}" aria-label="Amount, in ${html(vm.unit)}" aria-describedby="amount-help amount-error"${vm.amountError ? ' aria-invalid="true"' : ""}>${assetControl("from", vm)}</div>
       <div class="panel-f" id="amount-help" data-region="from-foot">${regions["from-foot"]}</div>
       <p class="field-error" id="amount-error" role="status">${html(vm.amountError ?? "")}</p>
     </div>`;
-  const flip = `<div class="flip-row"><button type="button" class="flip" data-action="flip" aria-label="Swap From and To"${vm.canFlip ? "" : ' disabled title="No route back"'}>${icon("arrow-d")}</button></div>`;
+  const flip = `<div class="flip-row"><button type="button" class="flip" data-action="flip" aria-label="Swap From and To"${vm.canFlip ? "" : ' disabled title="No route back"'}>${icon(vm.canFlip ? "arrow-up-down" : "arrow-d")}</button></div>`;
   // Under the field: what a typed name points to, the lookup, or the capitals' fix.
   const note = `<p class="small t2 rnote" id="recipient-note" data-region="recipient-note" aria-live="polite">${regions["recipient-note"]}</p>`;
   const recipient = vm.to.editing
     ? `<div class="recip-edit"><label class="panel-l" for="recipient">${html(vm.to.label)}</label><textarea id="recipient" name="recipient" class="mono-input wrap-input" rows="2" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${html(vm.to.placeholder)}" aria-describedby="recipient-error recipient-note"${vm.to.error ? ' aria-invalid="true"' : ""}>${html(vm.to.input)}</textarea><p class="field-error" id="recipient-error" role="alert">${html(vm.to.error ?? "")}</p>${note}${vm.to.canReset ? '<button type="button" class="linkish" data-action="recipient-reset">Use mine</button>' : ""}</div>`
     : `<p class="recip">${vm.to.line} · <button type="button" class="linkish" data-action="recipient-edit">${vm.to.empty ? "Add" : "Change"}</button></p>${note}`;
-  const to = `<div class="panel"><div class="panel-h"><span class="panel-l">To</span><div class="netsel">${netButton("to", vm.to.net, vm.menu === "to")}${vm.menu === "to" ? netMenu("to", vm.toChoices) : ""}</div></div>
-      <div class="amt-row" data-fit-row><span class="out${vm.receive ? "" : " empty"}" data-region="receive">${regions.receive}</span><span class="token">${chainMark(vm.to.net.id)}${html(vm.receiveUnit)}</span></div>
+  const to = `<div class="panel"><div class="panel-l">To</div>
+      <div class="amt-row" data-fit-row><span class="out${vm.receive ? "" : " empty"}" data-region="receive">${regions.receive}</span>${assetControl("to", vm)}</div>
       <div class="panel-f"><span>You receive</span></div>
       ${recipient}
     </div>`;

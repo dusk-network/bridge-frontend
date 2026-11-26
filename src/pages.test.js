@@ -58,7 +58,6 @@ function cardVmFor(patch = {}) {
     canMax: true,
     error: "",
     from: { balance: "174.0037 DUSK", balanceLabel: "Public balance", net: { id: "dusk", name: "Dusk" } },
-    fromChoices: [],
     hint: "",
     menu: null,
     needsCount: 1,
@@ -73,7 +72,6 @@ function cardVmFor(patch = {}) {
     steps: "One, in Dusk Wallet",
     tab: "bridge",
     to: { editing: false, error: "", fix: "", input: "", label: "Recipient on DuskEVM", line: 'to your MetaMask <b class="mono">0xd63b…8df4</b>', looking: "", net: { id: "dusk-evm", name: "DuskEVM" }, placeholder: "0x…", resolved: null },
-    toChoices: [],
     unit: "DUSK",
     ...patch,
   };
