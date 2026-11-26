@@ -8,6 +8,7 @@ import test from "node:test";
 
 import { MANIFEST, hashFiles, modeOf, uncommittedOf, viteEnv } from "./build.js";
 import {
+  ATTESTING_REPOSITORIES,
   MAINNET_SITE,
   REPOSITORY,
   TESTNET_SITE,
@@ -249,15 +250,16 @@ test("every file is checked out as it was committed, whatever the machine's line
 });
 
 test("GitHub is asked whether the Deploy workflow attested a site's manifest, as served, built from the commit it names on GitHub's own runners, from the ref it deploys the site from", () => {
-  assert.equal(REPOSITORY, "dusk-network/dusk-bridge");
+  assert.equal(REPOSITORY, "dusk-network/bridge-frontend");
+  assert.deepEqual(ATTESTING_REPOSITORIES, ["dusk-network/bridge-frontend", "dusk-network/dusk-bridge"]);
   assert.deepEqual(attestationArgs("/tmp/build-manifest.json", COMMIT, "refs/heads/main"), [
     "attestation",
     "verify",
     "/tmp/build-manifest.json",
     "--repo",
-    "dusk-network/dusk-bridge",
+    "dusk-network/bridge-frontend",
     "--signer-workflow",
-    "dusk-network/dusk-bridge/.github/workflows/deploy.yml",
+    "dusk-network/bridge-frontend/.github/workflows/deploy.yml",
     "--source-digest",
     COMMIT,
     "--source-ref",
@@ -411,7 +413,7 @@ test("a commit is built only from where its site is deployed from, as upstream h
     assert.match(check(feature, "https://staging.example/", "0.1.0", "pr"), /isn't in pr's history/u);
     assert.match(check(local, "https://staging.example/", "0.1.0", "no-such-ref"), /no-such-ref can't be read/u);
     assert.throws(() => trustedSourceOf(TESTNET_SITE, "0.1.0", "pr"), /checked against .* alone: --trusted-ref is for other sites/u);
-    assert.equal(UPSTREAM, "https://github.com/dusk-network/dusk-bridge.git");
+    assert.equal(UPSTREAM, "https://github.com/dusk-network/bridge-frontend.git");
   } finally {
     rmSync(root, { force: true, recursive: true });
   }
