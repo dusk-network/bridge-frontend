@@ -332,10 +332,12 @@ export function entryLine(entry) {
 
 export function cardPage(vm) {
   const top = `<div class="bcard-top"><nav class="tabs" aria-label="Bridge and activity"><a class="tab" href="#/" ${vm.tab === "bridge" ? 'aria-current="page"' : ""}>Bridge</a><a class="tab" href="#/transfers" ${vm.tab === "activity" ? 'aria-current="page"' : ""}>Activity${vm.needsCount ? `<span class="cnt" aria-label="${vm.needsCount} need you">${vm.needsCount}</span>` : ""}</a></nav>${
-    vm.tab === "bridge" ? `<button type="button" class="icon-btn tip" data-action="settings" aria-label="Recipient" data-tip="Recipient">${icon("sliders")}</button>` : ""
+    vm.tab === "activity"
+      ? `<a class="btn sec xs" href="#/lookup" aria-label="Look up a transfer">${icon("search")}Look up</a>`
+      : `<button type="button" class="icon-btn tip" data-action="settings" aria-label="Recipient" data-tip="Recipient">${icon("sliders")}</button>`
   }</div>`;
   // Each screen has its heading; the tabs show which one it is.
-  if (vm.tab === "activity") return `<main class="swap" id="main" tabindex="-1"><h1 class="sr-only">Activity</h1><section class="bcard wide" aria-label="Activity">${top}${vm.activity}</section></main>`;
+  if (vm.tab === "activity") return `<main class="swap" id="main" tabindex="-1"><h1 class="sr-only">Activity</h1><section class="bcard${vm.compact ? "" : " wide"}" aria-label="Activity">${top}${vm.activity}</section></main>`;
   const regions = cardRegions(vm);
   const notice = vm.notice
     ? `<div class="card notice-box" role="note"><div class="note">${icon(vm.notice.icon ?? "info")}<span>${vm.notice.html}</span></div>${vm.notice.actions ?? ""}</div>`
@@ -682,16 +684,16 @@ export function transferRow(row, { canAct = true } = {}) {
  * Without a connected Dusk account, as on a phone: follow one by its account
  * or .dusk name, read-only, or stop following it.
  */
-function watchBlock(watch) {
+function watchBlock(watch, walletActions) {
   // Whom it follows is the list's lede.
   if (watch.following)
     return `<p class="small t2 watching"><button type="button" class="linkish" data-action="unwatch" aria-label="Stop following ${html(watch.following)}">Stop following</button></p>`;
-  return `<form class="group pad watch" data-form="watch">
+  return `<div class="group pad watch"><form data-form="watch">
       <label for="watch" class="l1">Follow a Dusk account</label>
-      <textarea id="watch" name="watch" class="mono-input wrap-input" rows="2" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Account or .dusk name" aria-describedby="watch-error">${html(watch.input ?? "")}</textarea>
+      <textarea id="watch" name="watch" class="mono-input wrap-input" rows="1" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Account or .dusk name" aria-describedby="watch-error">${html(watch.input ?? "")}</textarea>
       <p class="field-error" id="watch-error" role="alert">${html(watch.error ?? "")}</p>
       <button type="submit" class="btn sec sm" ${watch.busy ? "disabled" : ""}>${watch.busy ? "Looking…" : "Show transfers"}</button>
-    </form>`;
+    </form>${walletActions}</div>`;
 }
 
 /** The card's Activity tab: whose transfers these are, then the list, newest first in each group. */
@@ -701,13 +703,13 @@ export function activityPanel(vm) {
       ? `<h2 class="sec-t">${html(title)}</h2><ul class="list trs">${rows.map((row) => transferRow(row, { canAct: vm.canAct !== false })).join("")}</ul>`
       : "";
   const body = vm.empty
-    ? `<div class="empty"><p>${html(vm.empty)}</p>${vm.emptyActions ?? ""}</div>`
+    ? `<div class="empty"><p>${html(vm.empty)}</p></div>`
     : `${group("Needs you", vm.groups.needs)}${group("In progress", vm.groups.progress)}${group("Sent to someone else", vm.groups.other ?? [])}${group("Completed", vm.groups.done)}${group("Failed", vm.groups.failed)}`;
   return `<div class="act">
-    <div class="act-h"><p class="lede">${vm.lede}</p><a class="btn sec sm" href="#/lookup">${icon("search")}Look up</a></div>
+    ${vm.lede ? `<p class="lede">${vm.lede}</p>` : ""}
     <p class="small t2 sync" role="status" aria-live="polite">${vm.syncing ? waiting(vm.syncText) : html(vm.syncText)}</p>
     ${pageMessage(vm.pageError)}
-    ${vm.watch ? watchBlock(vm.watch) : ""}
+    ${vm.watch ? watchBlock(vm.watch, vm.walletActions ?? "") : ""}
     ${body}
     ${vm.more ? `<p class="links-row"><button type="button" class="btn sec sm" data-action="discover-more">Older transfers</button></p>` : ""}
   </div>`;

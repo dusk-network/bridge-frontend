@@ -12,7 +12,7 @@ const { buildRoutes } = await import("./bridge-routes.js");
 const { loadConfig } = await import("./config.js");
 const { useDuskWallet } = await import("./dusk-wallet.js");
 const { duskRecipientHash } = await import("./hyperlane.js");
-const { partsOf, textOf } = await import("./pages.fixtures.js");
+const { linksOf, partsOf, textOf } = await import("./pages.fixtures.js");
 const { duskEvmFeeMax } = await import("./quote.js");
 const cfg = loadConfig();
 delete globalThis.__DUSK_BRIDGE_CONFIG__;
@@ -203,6 +203,20 @@ async function said(t, slots) {
   await settle();
   return { heard: slots.live.textContent, shown };
 }
+
+test("Activity groups the follow form and wallet connections with no account or transfers", async (t) => {
+  const { slots } = await openPage(t, "#/transfers", [], { account: null });
+  const page = slots.main.innerHTML;
+  const [top] = partsOf(page, "bcard-top");
+  const [watch] = partsOf(page, "watch");
+
+  assert.ok(linksOf(top).includes("#/lookup"));
+  assert.match(page, /class="bcard" aria-label="Activity"/u);
+  assert.match(watch, /data-form="watch"/u);
+  assert.match(watch, /data-action="connect-dusk"/u);
+  assert.match(watch, /data-action="connect-evm"/u);
+  assert.deepEqual(partsOf(page, "empty"), []);
+});
 
 test("away from the card, a disconnect Dusk Wallet refused shows on the page, in the words read out", async (t) => {
   const { root, slots } = await openPage(t, "#/transfers", [HELD]);
