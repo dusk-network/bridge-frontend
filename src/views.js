@@ -152,6 +152,7 @@ export function footer(vm) {
     `<button type="button" class="linkish" data-action="open-about" aria-haspopup="dialog" aria-label="About this page">About</button>`,
     vm.links.docs ? `<a href="${html(vm.links.docs)}" target="_blank" rel="noreferrer">How the bridge works</a>` : "",
     vm.links.status ? `<a href="${html(vm.links.status)}" target="_blank" rel="noreferrer">Status</a>` : "",
+    `<a class="lnk" href="https://github.com/dusk-network/bridge-frontend" target="_blank" rel="noreferrer">GitHub ${icon("ext")}<span class="sr-only"> repository (opens in a new tab)</span></a>`,
     ...termsLinks(vm.links),
   ].filter(Boolean);
   const site = vm.officialSite ? `<span>Official site: ${html(vm.officialSite.replace(/^https?:\/\//u, "").replace(/\/$/u, ""))}</span>` : "";
