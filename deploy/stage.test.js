@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { afterEach, test } from "node:test";
 
-import { PAGE_POLICY, stage } from "./stage.js";
+import { LISTED_NETWORK, PAGE_POLICY, stage } from "./stage.js";
 
 /** A page's own policy, as vite.config.js writes it in its head. */
 const page = (connect) =>
@@ -63,7 +63,7 @@ test("the build takes the site's place, the one there gone, with the headers bes
 test("the header is the policy the build's pages carry, every page's sources, with frame-ancestors, which a page's own can't say", () => {
   const site = folder({});
 
-  stage(build({ "receipt/index.html": page("https://rpc.testnet.evm.dusk.network") }), site, headers());
+  stage(build({ "receipt/index.html": page("https://rpc.testnet.evm.dusk.network") }), site, headers(), LISTED_NETWORK);
 
   assert.equal(
     readFileSync(join(site, "_headers"), "utf8"),
@@ -104,5 +104,26 @@ test("headers with nowhere for the policy, but in what they say of it, are refus
   const site = folder({ "index.html": "kept" });
 
   assert.throws(() => stage(build(), site, headers(`# No ${PAGE_POLICY} here.\n/*\n  X-Frame-Options: DENY\n`)), /has no PAGE_POLICY to put the policy in/u);
+  assert.deepEqual(filesIn(site), ["index.html"]);
+});
+
+test("every network's page but mainnet's, as one named none, is kept out of search results", () => {
+  for (const network of ["testnet", undefined]) {
+    const site = folder({});
+
+    stage(build(), site, headers(), network);
+    assert.match(readFileSync(join(site, "_headers"), "utf8"), /^\/\*\n {2}X-Robots-Tag: noindex\n {2}X-Frame-Options: DENY\n/mu);
+  }
+
+  const site = folder({});
+
+  stage(build(), site, headers(), "mainnet");
+  assert.doesNotMatch(readFileSync(join(site, "_headers"), "utf8"), /X-Robots-Tag/u);
+});
+
+test("headers with no rule for every page are refused off mainnet, as the page couldn't say noindex", () => {
+  const site = folder({ "index.html": "kept" });
+
+  assert.throws(() => stage(build(), site, headers(`/assets/*\n  Content-Security-Policy: ${PAGE_POLICY}\n`), "testnet"), /has no rule for every page, \/\*, to say noindex/u);
   assert.deepEqual(filesIn(site), ["index.html"]);
 });

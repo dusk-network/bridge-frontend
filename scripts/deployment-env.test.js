@@ -159,7 +159,7 @@ test("the README's preview of testnet's site builds it with testnet's settings, 
   assert.deepEqual(preview.trim().split("\n"), [
     "npm ci --ignore-scripts --prefix deploy",
     `node scripts/deployment-env.js ${TESTNET_SITE} > .env.testnet.local`,
-    "npm run build -- --mode testnet && node deploy/stage.js",
+    "npm run build -- --mode testnet && NETWORK=testnet node deploy/stage.js",
     "deploy/node_modules/.bin/wrangler dev --env testnet",
   ]);
 });

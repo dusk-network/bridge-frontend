@@ -2,10 +2,12 @@
  * Places the bridge's build where Cloudflare serves it (wrangler.jsonc):
  * dist/ as deploy/site/, in place of what was there, with deploy/headers as
  * deploy/site/_headers, which carries the policy the build's page carries as
- * its Content-Security-Policy. The Deploy workflow runs it after the build,
- * as does anyone serving the build with Wrangler:
+ * its Content-Security-Policy. Every network's page but mainnet's also says
+ * noindex, so search engines list mainnet's alone. The Deploy workflow runs it
+ * after the build with the network it deploys to, as does anyone serving the
+ * build with Wrangler:
  *
- *   npm run build && node deploy/stage.js
+ *   npm run build && NETWORK=testnet node deploy/stage.js
  */
 
 import { cpSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -14,6 +16,11 @@ import { fileURLToPath } from "node:url";
 
 /** What deploy/headers says in place of the page's policy. */
 export const PAGE_POLICY = "PAGE_POLICY";
+
+/** The one network whose page search engines may list. */
+export const LISTED_NETWORK = "mainnet";
+
+const EVERY_PAGE = /^\/\*$/mu;
 
 /** A page's own policy, as vite.config.js writes it in its head. */
 const META = /<meta http-equiv="content-security-policy" content="([^"]*)"\s*\/?>/iu;
@@ -75,13 +82,15 @@ export function pagePolicy(build) {
  * policy the build's page carries. Refuses a build with no manifest, one of
  * uncommitted changes, which no commit builds, one with a file of
  * Cloudflare's own, which would set how the site is served, and one whose
- * page carries no policy.
+ * page carries no policy. On any network but mainnet, or none named, every
+ * page also says noindex.
  *
  * @param {string} build
  * @param {string} site
- * @param {string} headers Cloudflare's headers, with PAGE_POLICY in them
+ * @param {string} headers Cloudflare's headers, with PAGE_POLICY in them and a rule for every page, /*
+ * @param {string} [network] the network the site is, as wrangler.jsonc names it
  */
-export const stage = (build, site, headers) => {
+export const stage = (build, site, headers, network) => {
   let manifest;
 
   try {
@@ -110,9 +119,15 @@ export const stage = (build, site, headers) => {
 
   const rules = lines.map((line) => (line.startsWith("#") ? line : line.replaceAll(PAGE_POLICY, policy))).join("\n");
 
+  if (network !== LISTED_NETWORK && !EVERY_PAGE.test(rules)) {
+    throw new Error(`${headers} has no rule for every page, /*, to say noindex`);
+  }
+
+  const served = network === LISTED_NETWORK ? rules : rules.replace(EVERY_PAGE, "/*\n  X-Robots-Tag: noindex");
+
   rmSync(site, { force: true, recursive: true });
   cpSync(build, site, { recursive: true });
-  writeFileSync(join(site, "_headers"), rules);
+  writeFileSync(join(site, "_headers"), served);
 
   return site;
 };
@@ -124,9 +139,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       fileURLToPath(new URL("../dist", import.meta.url)),
       fileURLToPath(new URL("site", import.meta.url)),
       fileURLToPath(new URL("headers", import.meta.url)),
+      process.env.NETWORK,
     );
 
-    console.log(`Placed dist/ at ${relative(process.cwd(), to)}/, with its policy in _headers`);
+    console.log(`Placed dist/ at ${relative(process.cwd(), to)}/, with its policy in _headers${process.env.NETWORK === LISTED_NETWORK ? "" : ", its page noindex"}`);
   } catch (error) {
     console.error(error.message);
     process.exit(1);

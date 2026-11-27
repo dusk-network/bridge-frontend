@@ -114,7 +114,8 @@ jobs:
         if: github.event.repository.private != false
         run: echo "::notice title=Not attested::$GITHUB_REPOSITORY is private, so this build's manifest isn't attested, and scripts/verify-build.js --attested can't check the site. Without --attested, it still rebuilds the site and compares. Once the repository is public, each deploy attests its build."
 
-      # Cloudflare serves deploy/site/: the build, beside the headers for it.
+      # Cloudflare serves deploy/site/: the build, beside the headers for it,
+      # which keep any network's page but mainnet's out of search results.
       - name: Placing the build where Cloudflare serves it
         run: node deploy/stage.js
 
