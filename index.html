@@ -5,8 +5,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="Move DUSK between Dusk, DuskEVM, Ethereum and BNB Smart Chain."
+      content="Bring ERC20 and BEP20 DUSK to Dusk, and send DUSK to BNB Smart Chain."
     />
+    <!-- Mainnet's address, which both networks point search engines and link
+      previews to. Off mainnet, deploy/stage.js keeps the page out of search
+      results. -->
+    <link rel="canonical" href="https://bridge.dusk.network/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Dusk" />
+    <meta property="og:title" content="Dusk Bridge" />
+    <meta
+      property="og:description"
+      content="Bring ERC20 and BEP20 DUSK to Dusk, and send DUSK to BNB Smart Chain."
+    />
+    <meta property="og:url" content="https://bridge.dusk.network/" />
+    <meta property="og:image" content="https://bridge.dusk.network/social.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="Dusk Bridge: bring ERC20 and BEP20 DUSK to Dusk, and send DUSK to BNB Smart Chain. bridge.dusk.network"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
     <link
       rel="icon"
       href="/dusk-glyph.svg"
@@ -14,6 +34,21 @@
     <title>Dusk Bridge</title>
   </head>
   <body>
+    <noscript>
+      <h1>Dusk Bridge</h1>
+      <p>
+        The official bridge for DUSK. Bring ERC20 DUSK from Ethereum and BEP20
+        DUSK from BNB Smart Chain to Dusk, and send DUSK from Dusk to BNB Smart
+        Chain. It needs JavaScript.
+      </p>
+      <p>
+        Official addresses: mainnet
+        <a href="https://bridge.dusk.network/">bridge.dusk.network</a>, testnet
+        <a href="https://bridge.testnet.dusk.network/">bridge.testnet.dusk.network</a>.
+        All of Dusk's apps:
+        <a href="https://docs.dusk.network/learn/stay-safe/#official-apps">docs.dusk.network/learn/stay-safe</a>.
+      </p>
+    </noscript>
     <div id="app"></div>
     <script type="module" src="/src/main.js"></script>
   </body>

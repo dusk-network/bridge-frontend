@@ -559,7 +559,8 @@ carries its Content-Security-Policy (`scripts/csp.js`, from what
 `src/config.js` makes of those settings): its own scripts alone, with
 WebAssembly, and requests only to its Dusk node, its EVM chains' RPCs,
 DuskEVM's where its routes run, Dusk Domains' site and WalletConnect.
-Cloudflare sends it as a header too, with frame-ancestors. `deploy/worker.js`
+Cloudflare sends it as a header too, with frame-ancestors, and testnet's page
+says `X-Robots-Tag: noindex`, so search engines list mainnet's alone. `deploy/worker.js`
 answers what no file does: the page's routes are in its fragment, so anything
 else is a 404. The workflow runs the commit's tests and production audit
 (`npm run check`) itself before it attests or deploys anything.
@@ -605,6 +606,6 @@ Wrangler from its own lockfile:
 ```sh
 npm ci --ignore-scripts --prefix deploy
 node scripts/deployment-env.js https://bridge.testnet.dusk.network/ > .env.testnet.local
-npm run build -- --mode testnet && node deploy/stage.js
+npm run build -- --mode testnet && NETWORK=testnet node deploy/stage.js
 deploy/node_modules/.bin/wrangler dev --env testnet
 ```
